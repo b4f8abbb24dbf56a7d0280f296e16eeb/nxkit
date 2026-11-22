@@ -1,6 +1,6 @@
 //! Command pools and command buffers, and the recorded commands of render passes, binds, dynamic state, draws and
 //! dispatches. A recording call of a command buffer that the front end does not know records nothing (the front end
-//! reports it); only the calls that return a `VkResult` fail on it.
+//! reports it). Only the calls that return a `VkResult` fail on it.
 
 use nxkit_vk::cmd::StencilValue;
 use nxkit_vk::info;

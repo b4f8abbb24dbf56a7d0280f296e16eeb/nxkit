@@ -69,8 +69,8 @@ fn write_vertices(g: &GuestMemory) {
     g.write(SHIFTS, &s).unwrap();
 }
 
-/// The `dm_vlayout` block: stream 0 per vertex (stride 20), stream 1 per instance (stride 16, divisor 1); input 0
-/// float4 (NVN format 0x2E), input 1 float4 from stream 1, input 3 RGBA8 unorm (0x25) at offset 16.
+/// The `dm_vlayout` block has stream 0 per vertex (stride 20) and stream 1 per instance (stride 16, divisor 1). It has
+/// input 0 float4 (NVN format 0x2E), input 1 float4 from stream 1, input 3 RGBA8 unorm (0x25) at offset 16.
 fn write_block(g: &GuestMemory) {
     let mut b = vec![0u8; 320];
     let mut stream = |i: usize, addr: u64, stride: u32, divisor: u32| {

@@ -74,9 +74,10 @@ pub(super) fn ubo_diag(sh: &EncodeCtx<'_>, n: u32, d: &crate::detail::DrawDetail
     }
 }
 
-/// `DIAG ubodump` for a draw of a listed fragment program: once per frame for each program and storage buffer slot
-/// (and stage; with the knob `ubodumpall` every draw, by program set, without the words, 600 lines), the words 16 to 31 and the count of non-finite words of the storage buffers of the draw, from the
-/// snapshot of the walk (what the shader reads) and from guest memory now. At most 64 lines per frame.
+/// `DIAG ubodump` for a draw of a listed fragment program: once per frame for each program, storage buffer slot and
+/// stage. It prints the words 16 to 31 and the count of non-finite words of the storage buffers of the draw. It reads
+/// them from the snapshot of the walk (what the shader reads) and from guest memory now. With the knob `ubodumpall`, it
+/// prints every draw, by program set, without the words (600 lines). At most 64 lines per frame.
 pub(super) fn ubo_dump_draw(sh: &EncodeCtx<'_>, n: u32, d: &crate::detail::DrawDetail) {
     use std::sync::atomic::AtomicU64;
     static BUDGET: AtomicU64 = AtomicU64::new(0);

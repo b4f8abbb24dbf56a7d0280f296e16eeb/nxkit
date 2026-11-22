@@ -31,7 +31,7 @@ impl Pages {
         let Ok(layout) = std::alloc::Layout::array::<AtomicU32>(n.max(1)) else {
             return;
         };
-        // SAFETY: the layout is not empty; zeroed memory is a valid table of free pages. The table is never freed.
+        // SAFETY: the layout is not empty. Zeroed memory is a valid table of free pages. The table is never freed.
         let table = unsafe { std::alloc::alloc_zeroed(layout) }.cast::<AtomicU32>();
         if table.is_null() {
             return;
@@ -107,7 +107,8 @@ impl Pages {
         Ok(())
     }
 
-    /// Turns the emulation on or off (on by default once the alias exists); off, every access to a page in flight waits.
+    /// Turns the emulation on or off (on by default once the alias exists). When it is off, every access to a page in
+    /// flight waits.
     pub fn set_emulation(&self, on: bool) {
         SHARED.emulate.store(on, Ordering::Release);
     }
@@ -117,14 +118,14 @@ impl Pages {
         SHARED.alias.load(Ordering::Acquire) != 0 && SHARED.emulate.load(Ordering::Acquire)
     }
 
-    /// The bytes of the guest page `page` through the alias, whatever its protection; None without an alias.
+    /// The bytes of the guest page `page` through the alias, whatever its protection. None without an alias.
     pub(super) fn alias_page(&self, pg: u32) -> Option<&'static [u8]> {
         let alias = SHARED.alias.load(Ordering::Acquire);
         if alias == 0 {
             return None;
         }
         let p = page();
-        // SAFETY: the alias maps the whole guest range with read access and `pg` is a page inside the table; the bytes
+        // SAFETY: the alias maps the whole guest range with read access and `pg` is a page inside the table. The bytes
         // may change under a reader (the CPU stores through it), which the staging accepts.
         Some(unsafe {
             std::slice::from_raw_parts((alias + u64::from(pg) * p) as *const u8, p as usize)
@@ -170,9 +171,10 @@ impl Pages {
         SHARED.mirror.store(host_base, Ordering::Release);
     }
 
-    /// Step 5, off by default: `eager` copies back, after a frame completes and on a thread of its own, the pages that game
-    /// threads faulted on lately for a copy from the mirror (it needs the alias); `hot` keeps the pages that the CPU
-    /// dirties in many flushes in a row writable and diffs them at each flush instead of faulting on them.
+    /// Step 5, off by default. `eager` copies back the pages that game threads faulted on lately for a copy from the
+    /// mirror (it needs the alias). It does this after a frame completes, on a thread of its own. `hot` keeps writable
+    /// the pages that the CPU dirties in many flushes in a row. It diffs them at each flush instead of faulting on
+    /// them.
     pub fn set_adaptive(&self, eager: bool, hot: bool) {
         SHARED.eager_on.store(eager, Ordering::Release);
         SHARED.hot_on.store(hot, Ordering::Release);
@@ -181,7 +183,7 @@ impl Pages {
     /// Results one frame late (needs the alias and the emulation): a game thread's access to the blocks that a frame in
     /// flight writes is served from guest memory, which holds the last completed frame's bytes there, without a wait.
     /// A page qualifies after a game thread has waited for it once. A store goes to guest memory too and wins over the
-    /// copy-back of the frame in flight; the next flush stages it into the mirror.
+    /// copy-back of the frame in flight. The next flush stages it into the mirror.
     pub fn set_late(&self, on: bool) {
         SHARED.late.store(on, Ordering::Release);
     }
@@ -246,7 +248,7 @@ impl Pages {
     }
 
     /// Drops the queued eager copies and waits for the one that runs. The host calls it before it unmaps the guest range
-    /// (the copy writes through the alias); `attach` does it too.
+    /// (the copy writes through the alias). `attach` does it too.
     pub fn quiesce(&self) {
         eager_quiesce();
     }
@@ -288,7 +290,7 @@ impl Pages {
     }
 
     /// The first accesses of game threads to pages of a frame in flight since the last call, as `(frame, host address,
-    /// write)` (at most 1024; the second number is how many there were).
+    /// write)` (at most 1024, and the second number is how many there were).
     pub fn take_in_flight(&self) -> (Vec<(u32, u64, bool)>, u32) {
         let base = SHARED.base.load(Ordering::Acquire);
         let n = SHARED.flight_n.swap(0, Ordering::AcqRel);
@@ -308,7 +310,7 @@ impl Pages {
     }
 
     /// The host addresses of the first writes of the CPU to member pages after the flush of `frame` and before its commit,
-    /// as logged (at most `P1_CAP`; the second number is how many there were). The log of the frame is emptied.
+    /// as logged (at most `P1_CAP`, and the second number is how many there were). The log of the frame is emptied.
     pub fn take_between(&self, frame: u64) -> (Vec<u64>, u32) {
         let base = SHARED.base.load(Ordering::Acquire);
         let r = frame as usize % P1_RING;

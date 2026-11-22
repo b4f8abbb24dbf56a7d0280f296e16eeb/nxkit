@@ -2,11 +2,11 @@
 //!
 //! A block is two stages on a 16x16 window `X[row][col]` of luma: `H_g = W1_g . X` (g = 0, 1), then
 //! `Y_j = H_0 . W2_0j + H_1 . W2_1j` (j = 0, 1). `W1_g` is 16x16 stored as four 8x8 tiles in the order `[kb][rb]`,
-//! `W2_gj` is 16x8 stored as two 8x8 tiles `[s]` (row `8 s + i`); all tiles hold f16 row-major. Block 0 reads the
-//! luma window straight from the picture with two strided-conv equivalents (a `3x1` then a grouped `1x3` convolution
-//! over the 6x6 space-to-depth of the padded luma); blocks 1 to 5 read the previous block's 16x16 outputs as 256
-//! channels and are folded into one dense 1x1 convolution each: `W[(m, j, n)][(row, col)] = sum_g W1_g[m][row] *
-//! W2_gj[col][n]`, summed in f32 and rounded to f16 once.
+//! `W2_gj` is 16x8 stored as two 8x8 tiles `[s]` (row `8 s + i`). All tiles hold f16 row-major. Block 0 reads the luma
+//! window straight from the picture with two strided-conv equivalents (a `3x1` then a grouped `1x3` convolution over
+//! the 6x6 space-to-depth of the padded luma). Blocks 1 to 5 read the previous block's 16x16 outputs as 256 channels
+//! and are folded into one dense 1x1 convolution each: `W[(m, j, n)][(row, col)] = sum_g W1_g[m][row] * W2_gj[col][n]`,
+//! summed in f32 and rounded to f16 once.
 
 use crate::half;
 

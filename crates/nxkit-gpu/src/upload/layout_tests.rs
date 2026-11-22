@@ -99,7 +99,7 @@ fn a_sparse_texture_is_read_with_its_tiled_levels_padded_to_whole_tiles() {
     let pools = whole(&guest);
     let va = |off: u64| GpuAddr::new(nxkit_metal::GUEST_VA_BASE + off).unwrap();
     // RGBA8: a 64 KiB tile is 128x128 texels (8 GOBs of 16-GOB blocks). 192 texels are 12 GOBs, padded to 16 in the
-    // tiled level 0; level 1 (96 texels) is the mip tail and keeps its 6 GOBs.
+    // tiled level 0. Level 1 (96 texels) is the mip tail and keeps its 6 GOBs.
     let sparse = nxkit_nvn::layout::TextureDesc {
         target: Target::D2,
         format: 0x25,

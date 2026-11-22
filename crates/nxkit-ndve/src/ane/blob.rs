@@ -5,7 +5,7 @@
 //! followed by the data, padded with zeros to a multiple of 64 bytes. A `blobFileValue` of the model points at the
 //! entry header.
 
-/// Bytes of the file header and of an entry header; also the alignment of an entry.
+/// Bytes of the file header and of an entry header. This is also the alignment of an entry.
 pub const ALIGN: usize = 64;
 const MAGIC: u32 = 0xdead_beef;
 const KIND_F16: u32 = 1;
@@ -44,7 +44,7 @@ impl BlobWriter {
         }
     }
 
-    /// Append `data` (f16, little endian) as the entry of constant `name`; returns the offset of the entry header.
+    /// Append `data` (f16, little endian) as the entry of constant `name`. Returns the offset of the entry header.
     pub fn add(&mut self, name: &str, data: &[u8]) -> usize {
         let at = self.bytes.len();
         debug_assert_eq!(at % ALIGN, 0);

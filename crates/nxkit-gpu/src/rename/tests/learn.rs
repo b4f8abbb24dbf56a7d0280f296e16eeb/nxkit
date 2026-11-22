@@ -30,7 +30,7 @@ fn a_word_that_the_cpu_left_alone_is_dirty() {
 
 #[test]
 fn only_the_words_that_the_gpu_wrote_must_be_reset() {
-    // Word 1 is CPU data that does not change; the GPU did not write it.
+    // Word 1 is CPU data that does not change. The GPU did not write it.
     let pre = words(&[0, 5, 0]);
     let post = words(&[3, 5, 4]);
     let next = words(&[0, 5, 0]);
@@ -166,7 +166,7 @@ fn a_range_is_renamed_unless_something_else_touches_it() {
         (0x3000, 0x40),
         (0x3020, 0x40),
     ];
-    // The binding of the first reaches out of its range; the second has a copy over it; the last two overlap.
+    // The binding of the first reaches out of its range. The second has a copy over it. The last two overlap.
     let bound = [
         (0x0ff0, 0x40),
         (0x2000, 0x40),
@@ -227,7 +227,7 @@ fn a_word_goes_back_only_where_the_cpu_left_it() {
 #[test]
 fn two_frames_without_a_wait_between_them_add_up() {
     let f = |v: f32| v.to_bits();
-    // The write-back of the frame before wrote 25.0; this frame added 24.0 onto 0.0.
+    // The write-back of the frame before wrote 25.0. This frame added 24.0 onto 0.0.
     let new = decide_word(f(25.0), f(0.0), f(24.0), Some(f(25.0)), true).unwrap();
     assert_eq!(f32::from_bits(new), 49.0);
 }

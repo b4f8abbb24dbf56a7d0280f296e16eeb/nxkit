@@ -88,7 +88,7 @@ fn kind_of(d: &ProtocolObject<dyn MLComputeDeviceProtocol>) -> ComputeDevice {
 impl Model {
     /// Asks Core ML where it would run each operation of the program (`MLComputePlan`) and counts them per device.
     /// It reads the compiled model again and may take a moment, so call it once after loading, on a background
-    /// thread. It needs an ML Program; another model kind gives an error.
+    /// thread. It needs an ML Program. Another model kind gives an error.
     pub fn compute_plan(&self) -> Result<PlanReport> {
         let (tx, rx) = mpsc::channel::<std::result::Result<SendPlan, String>>();
         let tx = Mutex::new(Some(tx));

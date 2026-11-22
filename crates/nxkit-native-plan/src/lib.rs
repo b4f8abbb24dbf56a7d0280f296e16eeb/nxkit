@@ -1,10 +1,10 @@
 //! The native passes as data, shared by every network that `nxkit-gpu` runs natively (`nxkit-ndve`, `nxkit-ndsr`).
-//! `nxkit-gpu` turns a [`Plan`] into Metal work; this crate never touches Metal and knows no network. The game's own
+//! `nxkit-gpu` turns a [`Plan`] into Metal work. This crate never touches Metal and knows no network. The game's own
 //! resources are named by [`GameResource`], whose ids each replacement defines and maps to the bindings of the game's
-//! dispatches; the plan's own buffers are named by their index in [`Plan::buffers`].
+//! dispatches. The plan's own buffers are named by their index in [`Plan::buffers`].
 
 /// A resource of the game that the replaced dispatches read or wrote. The ids of the variants are the network's own
-/// numbering (a network crate gives them names as constants); the replacement in `nxkit-gpu` says where each one is
+/// numbering (a network crate gives them names as constants). The replacement in `nxkit-gpu` says where each one is
 /// bound in the run, and `nxkit-gpu` resolves it from there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameResource {
@@ -16,7 +16,7 @@ pub enum GameResource {
     Push(u8),
     /// The image that is the result of the whole replaced run.
     Output,
-    /// A picture the game's chain writes besides the output that the game may read later; the plan writes it if it
+    /// A picture the game's chain writes besides the output that the game may read later. The plan writes it if it
     /// can, or `nxkit-gpu` keeps the game's own.
     Intermediate {
         /// The network's number of the picture.
@@ -77,7 +77,7 @@ pub struct Step {
 pub struct Plan {
     /// The buffers the plan owns: packed weights, activations, skips.
     pub buffers: Vec<Buffer>,
-    /// The dispatches, in order. Each step reads what the steps before it wrote; `nxkit-gpu` puts a barrier between
+    /// The dispatches, in order. Each step reads what the steps before it wrote. `nxkit-gpu` puts a barrier between
     /// steps that the bindings show depend on each other.
     pub steps: Vec<Step>,
 }

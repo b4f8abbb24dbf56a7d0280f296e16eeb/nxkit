@@ -78,7 +78,7 @@ pub fn gpu_settings(
         temporal_upscale: settings.temporal_upscale.as_ref().map(temporal_upscale),
         compile_bases: run.gpu_bases,
         specialize: run.gpu_specialize,
-        // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
+        // The encoder makes the pipelines of the recorded list before it returns. A long wait shows a loading screen.
         prewarm_screen: nxkit_gpu::ScreenHook(Some(Arc::new(crate::sys::loading::LoadingScreen))),
         // The `frame` and `gateseq` traces of `nxkit-rt` time the batches of the encoder.
         batch_hooks: nxkit_rt::nvn::batch_hooks(),
@@ -298,7 +298,7 @@ pub fn install_vulkan(
         },
     )
     .map_err(|e| HostError::App(format!("the Vulkan backend: {e:?}")))?;
-    // `vkGet*ProcAddr` hands out the big-stack stub of a function that has one; the loader wraps the imports itself.
+    // `vkGet*ProcAddr` hands out the big-stack stub of a function that has one. The loader wraps the imports itself.
     let mut stubs = std::collections::HashMap::new();
     for e in nxkit_rt::entries_for(nxkit_rt::Graphics::Vulkan) {
         if e.big_stack && e.name.starts_with("vk") {

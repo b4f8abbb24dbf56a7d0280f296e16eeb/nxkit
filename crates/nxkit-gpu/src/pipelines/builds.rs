@@ -3,7 +3,7 @@
 //! A draw whose pipeline the cache lacks is left out (`Skip::Pending`) and its pipeline is queued once per key. The
 //! threads take the job that a draw asked for in the latest frame first, the oldest of those first: the pipelines of
 //! the frame on screen go before those of a scene long gone, and a job is never lost. A request for a key that waits
-//! only marks it as wanted again; the encoder checks that before it builds a job, so a draw that waits costs a lock.
+//! only marks it as wanted again. The encoder checks that before it builds a job, so a draw that waits costs a lock.
 
 use std::cmp::Reverse;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -75,7 +75,7 @@ pub(super) struct Builds {
     queue: Mutex<Queue>,
     /// Signalled when a job is queued or the builds close.
     ready: Condvar,
-    /// The keys whose pipeline Metal refused; their draws are skipped as `Skip::Pipeline`.
+    /// The keys whose pipeline Metal refused. Their draws are skipped as `Skip::Pipeline`.
     pub(super) failed: Mutex<FastSet<u64>>,
 }
 
@@ -87,7 +87,7 @@ struct Queue {
     running: FastSet<u64>,
     /// The number of jobs queued so far, which orders jobs of one frame.
     queued: u64,
-    /// The threads started; none before the first job.
+    /// The threads started. None starts before the first job.
     threads: usize,
     /// Set when the [`Pipelines`] are dropped: the threads end.
     closed: bool,
@@ -146,7 +146,7 @@ pub(super) fn async_on() -> bool {
 }
 
 impl Builds {
-    /// True when `key` is queued or compiling; a queued job is marked as wanted by the current frame.
+    /// True when `key` is queued or compiling. A queued job is marked as wanted by the current frame.
     pub(super) fn touch(&self, key: u64) -> bool {
         let mut q = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(w) = q.waiting.get_mut(&key) {
@@ -156,7 +156,7 @@ impl Builds {
         q.running.contains(&key)
     }
 
-    /// Queues `job` once per key. The threads start with the first job; when none can start, the job runs here.
+    /// Queues `job` once per key. The threads start with the first job. When none can start, the job runs here.
     pub(super) fn start(
         self: &Arc<Self>,
         cache: &Arc<PipelineCache>,
@@ -201,7 +201,7 @@ impl Builds {
         self.ready.notify_one();
     }
 
-    /// Ends the threads; the jobs still queued are dropped.
+    /// Ends the threads. The jobs still queued are dropped.
     pub(super) fn close(&self) {
         let mut q = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         q.closed = true;

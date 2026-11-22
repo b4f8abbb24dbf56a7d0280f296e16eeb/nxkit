@@ -50,7 +50,7 @@ pub type Mat = [[f32; 16]; 16];
 ///
 /// The sum of 16 products and `C` is exact in a 128-bit integer of units 2^-48 (a product of two halves is a
 /// multiple of 2^-48 below 2^32). The model rounds that sum to a double and the double to a half, as Python's `fsum`
-/// and `struct` do; an exact zero is +0. Non-finite operands fall back to a plain double sum.
+/// and `struct` do. An exact zero is +0. Non-finite operands fall back to a plain double sum.
 pub fn hmma(a: &Mat, b: &Mat, c: Option<&Mat>) -> Mat {
     let fixed = |x: f32| (f64::from(x) * 16_777_216.0) as i64; // units 2^-24, exact for a half
     let fa: Vec<[i64; 16]> = a.iter().map(|r| r.map(fixed)).collect();
@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn hmma_rounds_the_whole_sum_once() {
-        // 2048 + 1 + 1 in one sum is 2050 (exact); rounding after each term would stay at 2048 (ties to even).
+        // 2048 + 1 + 1 in one sum is 2050 (exact). Rounding after each term would stay at 2048 (ties to even).
         let mut a = [[0.0; 16]; 16];
         let mut b = [[0.0; 16]; 16];
         a[0][0] = 2048.0;

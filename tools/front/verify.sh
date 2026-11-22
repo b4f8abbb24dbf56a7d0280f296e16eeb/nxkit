@@ -1,7 +1,7 @@
 #!/bin/sh
 # Decision equality on the corpus and on the prototype's mutation runs.
 # usage: tools/verify.sh <work dir> [jobs]
-# Needs <work dir>/corpus.txt (the paths of parse_results.json, one per line; the script writes it when missing).
+# Needs <work dir>/corpus.txt (the paths of parse_results.json, one per line). The script writes it when it is missing.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 work=$1; jobs=${2:-4}

@@ -378,8 +378,8 @@ pub(crate) fn osmin() -> Result<String, String> {
 }
 
 /// `prebuilt.tsv`, `archive.tsv` and the script `bases.mtl4-json` of a streamed archive, from the whole plan as
-/// `pso_offline.py` (and the non-streamed [`stage_pso`]) writes them; the streamed groups must have compiled exactly the
-/// plan's bases.
+/// `pso_offline.py` (and the non-streamed [`stage_pso`]) writes them. The streamed groups must have compiled exactly
+/// the plan's bases.
 pub(crate) fn write_archive_stamps(
     b: &Build,
     lib: &Path,

@@ -20,7 +20,7 @@ run_fmt() {
 run_clippy() {
   step "clippy (deny warnings)"
   # needless_range_loop: Rust 1.100 also flags loops whose index names a slot of several arrays (pixels, pads, fingers,
-  # output slots); an iterator does not make those clearer.
+  # output slots). An iterator does not make those clearer.
   cargo clippy --workspace --all-targets --locked --offline -- -D warnings -A clippy::needless_range_loop
 }
 

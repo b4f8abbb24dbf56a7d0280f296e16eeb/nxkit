@@ -154,7 +154,7 @@ impl Programs {
 }
 
 /// Whether the `geometry` of a geometry shader's reflection allows a shader that only picks the layer: at most 3
-/// vertices out of one invocation. The translator does not say what the shader does; a geometry shader that emits other
+/// vertices out of one invocation. The translator does not say what the shader does. A geometry shader that emits other
 /// triangles is not drawn either way (the encoder has no geometry stage).
 fn slice_geometry(json: &Json) -> bool {
     let g = json.get("geometry");

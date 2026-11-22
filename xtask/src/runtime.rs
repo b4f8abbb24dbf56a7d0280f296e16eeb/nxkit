@@ -8,7 +8,7 @@
 //!   (`HOME`, `TZ`) are read where they are used. The places in [`SETTINGS_EXEMPT`] are allowed.
 //! - `statics` (W26): the process-wide statics (a `static` whose type names `OnceLock`, `OnceCell`, `LazyLock`,
 //!   `Mutex`, `RwLock`, `Condvar`, `Slot` or an `Atomic*`) of each runtime crate are counted and compared with
-//!   `xtask/statics.txt`. More fails; fewer fails until the file is lowered, so the number only goes down.
+//!   `xtask/statics.txt`. More fails. Fewer fails until the file is lowered, so the number only goes down.
 //!
 //! Test code is left out, as in `modules`.
 

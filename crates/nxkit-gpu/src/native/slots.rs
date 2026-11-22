@@ -94,9 +94,9 @@ impl Table {
         }
     }
 
-    /// The picture's input is to be written with conversion constants `epoch`: gives the slot to write, a free one or
-    /// else the oldest result that nobody reads (its picture is `Skipped(Busy)` from now on). `None` when every slot
-    /// is running or being read; the picture is `Skipped(Busy)`.
+    /// The picture's input is to be written with conversion constants `epoch`. Gives the slot to write, a free one or
+    /// else the oldest result that nobody reads (its picture is `Skipped(Busy)` from now on). `None` when every slot is
+    /// running or being read. Then the picture is `Skipped(Busy)`.
     pub(super) fn start(&mut self, pic: Pic, epoch: u32) -> Option<usize> {
         self.find(pic)?;
         let slot = self.free.pop().or_else(|| {

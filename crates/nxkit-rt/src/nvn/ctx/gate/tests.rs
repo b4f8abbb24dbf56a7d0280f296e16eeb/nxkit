@@ -153,7 +153,7 @@ fn a_flush_forces_first_the_wait_that_no_held_work_can_satisfy() {
     const F: u64 = 0x2000;
     let mem = Mem::default().event(E, 0).event(F, 0);
     let mut g = Gate::new(true);
-    // QA waits for the GPU signal of QB; QB waits for a CPU signal of F that comes after the present.
+    // QA waits for the GPU signal of QB. QB waits for a CPU signal of F that comes after the present.
     let on_f = MarkOp::WaitEvent {
         event: F,
         mode: EVENT_WAIT_EQUAL,

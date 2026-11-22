@@ -144,7 +144,7 @@ mod tests {
             },
         );
         let img = reference(&fin, &delta, &|_, _| [0.0; 3], &e);
-        // Pixel (0, 0) lands in the last row; 0.7507 -> 191.
+        // Pixel (0, 0) lands in the last row, and 0.7507 -> 191.
         let o = 4 * (1439 * 2560);
         assert_eq!(&img[o..o + 4], &[191, 191, 191, 255]);
         // Elsewhere 0.5 is 512/1023 in RGB10, 127.6 of 255 -> 128.

@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn a_level_table_pads_the_levels_and_sets_the_layer_stride() {
-        // 96 texels of 4 bytes are 6 GOBs; a sparse layout pads level 0 to 8 (one 64 KiB tile is 8 GOBs of 16-GOB
+        // 96 texels of 4 bytes are 6 GOBs. A sparse layout pads level 0 to 8 (one 64 KiB tile is 8 GOBs of 16-GOB
         // blocks) and keeps level 1 (3 GOBs) as it is.
         let mut s = surface(96, 256, 1, 2, 2, 16, 1);
         let plain = s.level(0).unwrap();

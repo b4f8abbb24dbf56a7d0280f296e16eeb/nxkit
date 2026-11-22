@@ -3,7 +3,7 @@
 use super::*;
 
 /// Judges one frame from the bytes at its flush (`pre`), after the GPU finished it (`post`) and at the next flush
-/// (`next`). The words are 32 bit; a shorter tail is one word.
+/// (`next`). The words are 32 bit. A shorter tail is one word.
 pub(crate) fn judge(pre: &[u8], post: &[u8], next: &[u8]) -> Verdict {
     let mut written = false;
     for ((p, q), n) in pre.chunks(4).zip(post.chunks(4)).zip(next.chunks(4)) {
@@ -167,7 +167,7 @@ pub(super) fn combine(c: &mut Cand, ki: &KeyInfo) {
             note_n(Reason::OverlapKeyDisagree, 1);
             Conflict
         }
-        // Reading needs nothing; a range that nothing else needs stays as it is.
+        // Reading needs nothing. A range that nothing else needs stays as it is.
         (Snapshot, x) | (x, Snapshot) | (Never, x) | (x, Never) => x,
         (x, _) => x,
     };

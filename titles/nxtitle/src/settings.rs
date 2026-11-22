@@ -61,13 +61,13 @@ pub struct Settings {
     pub pso_mtl4: bool,
     /// `enc_thread`: Metal encoding on its own thread.
     pub enc_thread: bool,
-    /// `overlap`: the CPU runs one frame ahead of the GPU; `nvnSyncWait` for the newest frame waits for the one
+    /// `overlap`: the CPU runs one frame ahead of the GPU. `nvnSyncWait` for the newest frame waits for the one
     /// before it (`docs/plans/fence-overlap.md`).
     pub overlap: bool,
     /// `pace_profile`: how the frame step decides the hold. `hold` (the default): a frame shown longer than its hold
     /// counts as late. `work`: only a frame's work judges it, hitches do not count and a trial waits at most 2 s, for a
     /// game whose frames wait for things a longer hold does not shorten (movies, its own loops). `steady`: `work`, and the
-    /// step never leaves the target (no longer hold, no thermal or slow cap); a long frame shows late once.
+    /// step never leaves the target (no longer hold, no thermal or slow cap). A long frame shows late once.
     pub pace_profile: &'static str,
     /// `screen_aspect`: stubs that follow a screen taller than 16:9.
     pub screen_aspect: bool,

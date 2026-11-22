@@ -26,7 +26,7 @@ pub(crate) const SLOT_BASE: u32 = 0x1000;
 /// The `sreg` of a sampler word in the driver bank c2 (`nxb_xlate::msl::abi::SREG_C2`).
 const SREG_C2: i64 = 255;
 
-/// The bits of the texture index in a handle; the sampler index is in the bits above.
+/// The bits of the texture index in a handle. The sampler index is in the bits above.
 const TEXTURE_BITS: u32 = 0x000F_FFFF;
 
 /// Where the two words of a bindless handle are: (uniform slot, byte offset) of the texture index and of the sampler

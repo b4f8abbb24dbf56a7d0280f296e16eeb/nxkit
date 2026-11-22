@@ -1,11 +1,11 @@
 //! The replay of a submit into one Metal 4 command buffer (the reference layer's `rs_t` and `replay_ops`).
 //!
-//! Each primary command buffer starts with fresh state, as Vulkan's command buffers do; its secondaries replay in
+//! Each primary command buffer starts with fresh state, as Vulkan's command buffers do. Its secondaries replay in
 //! place. The commands run in order through three kinds of segments:
 //!
 //! - a render segment ([`draw`]) from `vkCmdBeginRenderPass`, or from the draw that resumes a pass after a cut, to the
-//!   end of the pass or the next cut ([`crate::passplan`]);
-//! - a compute segment ([`transfer`]) for a run of copies, fills, updates and dispatches outside a render pass;
+//!   end of the pass or the next cut ([`crate::passplan`]).
+//! - a compute segment ([`transfer`]) for a run of copies, fills, updates and dispatches outside a render pass.
 //! - one render pass per subresource for `vkCmdClearColorImage` and `vkCmdClearDepthStencilImage`.
 //!
 //! Metal 4 tracks no hazards, so each Metal pass starts with a barrier after the earlier work of the queue, and each
@@ -98,7 +98,7 @@ pub(crate) struct Pass {
     pub(crate) resolves: Vec<Option<Texture>>,
     /// The render target size: the framebuffer's, at most each attachment's.
     pub(crate) size: (u32, u32),
-    /// A cut ended the Metal pass; the next draw resumes it.
+    /// A cut ended the Metal pass. The next draw resumes it.
     pub(crate) cut: bool,
     /// An attachment is missing: the pass draws nothing.
     pub(crate) broken: bool,
@@ -172,7 +172,7 @@ pub(crate) struct State {
     pub(crate) vertex_buffers: [Option<BufferRef>; 16],
     /// The index buffer.
     pub(crate) index: Option<(BufferRef, IndexType)>,
-    /// The dynamic viewport. It persists across render passes, as in Vulkan; the render target stands in until the game
+    /// The dynamic viewport. It persists across render passes, as in Vulkan. The render target stands in until the game
     /// sets one (Super Mario Galaxy sets a 1280x720 viewport once and draws through several passes).
     pub(crate) viewport: Option<Viewport>,
     /// The dynamic scissor.
@@ -290,7 +290,7 @@ impl State {
                     }
                 }
             }
-            // Metal draws lines one pixel wide; the depth bounds test is reported where a pipeline turns it on. Events
+            // Metal draws lines one pixel wide. The depth bounds test is reported where a pipeline turns it on. Events
             // and queries are the front end's and the completion's (`crate::queries`).
             Cmd::SetLineWidth(_)
             | Cmd::SetDepthBounds(_)

@@ -1,9 +1,8 @@
 //! A minimal protobuf writer: just what the Core ML `Model` and MIL messages need.
 //!
 //! The field numbers used by [`super::mil`] and [`super::package`] come from the public Core ML format definition
-//! (`Model.proto`, `MIL.proto`, `FeatureTypes.proto` of coremltools, BSD-3-Clause; see `THIRD_PARTY.md`).
-//! Messages are written in field order and maps in the order the caller adds the entries, so equal input gives equal
-//! bytes.
+//! (`Model.proto`, `MIL.proto`, `FeatureTypes.proto` of coremltools, BSD-3-Clause, see `THIRD_PARTY.md`). Messages are
+//! written in field order and maps in the order the caller adds the entries, so equal input gives equal bytes.
 
 /// A message under construction.
 #[derive(Clone, Debug, Default)]

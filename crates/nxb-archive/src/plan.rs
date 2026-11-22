@@ -90,7 +90,7 @@ fn tags(b: &[u8], mut p: usize, end: usize) -> Option<HashMap<[u8; 4], &[u8]>> {
     None
 }
 
-/// `functions`: {entry name: declares function constants} from a `.metallib`'s first MiB; `None` when unreadable.
+/// `functions`: {entry name: declares function constants} from a `.metallib`'s first MiB, or `None` when unreadable.
 pub fn functions(path: &Path) -> Option<Vec<(String, bool)>> {
     let mut b = Vec::new();
     fs::File::open(path)
@@ -152,7 +152,7 @@ pub struct Plan {
 /// with its `_b` library and its `entry`. A vertex shader with stage inputs and no `pull` field needs the vertex layout
 /// of the draw, which a base cannot have, and is left out (`left[2]`). With `zero` (the device's depth mode is 0 to 1,
 /// `nvnDeviceSetDepthMode`) the vertex function is the reflection's `entry_z` (`main0_z`, which keeps the clip depth),
-/// as the host draws it then (`nxkit-gpu` `pipelines::render::vertex_entry`); a pulling `_bp` library has none and
+/// as the host draws it then (`nxkit-gpu` `pipelines::render::vertex_entry`). A pulling `_bp` library has none and
 /// keeps its entry. The stamp records the mode.
 pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool) -> Plan {
     plan_with(lib_dir, chain, pairs, zero, false)
@@ -219,7 +219,7 @@ pub fn plan_with(
             _ => false,
         };
         // The states of `with_inputs` are the ones the host draws with stage inputs, from the `_b` library, which it does
-        // unless pulling is on (`NXKIT_PULL=1`); a pull shader's `_bp` base has no vertex layout and is a plain base.
+        // unless pulling is on (`NXKIT_PULL=1`). A pull shader's `_bp` base has no vertex layout and is a plain base.
         let pull = if with_inputs { None } else { pull_entry(&vj) };
         if has_inputs && pull.is_none() && !with_inputs {
             out.left[2] += 1;

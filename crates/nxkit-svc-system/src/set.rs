@@ -29,7 +29,7 @@ const LANGUAGES: [&str; 18] = [
 ];
 
 /// The console language for a list of preferred language tags (BCP 47, such as macOS's `de-DE` or `zh-Hans-CN`), best
-/// first: the first tag with a console language wins, else `en-US`. An exact console tag is taken as it is; otherwise
+/// first: the first tag with a console language wins, else `en-US`. An exact console tag is taken as it is. Otherwise,
 /// the language decides, with the region or script where the console tells them apart.
 pub fn console_language<'a>(preferred: impl IntoIterator<Item = &'a str>) -> &'static str {
     for tag in preferred {

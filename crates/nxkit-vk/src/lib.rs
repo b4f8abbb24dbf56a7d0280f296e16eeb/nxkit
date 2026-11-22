@@ -5,15 +5,16 @@
 //! Metal code and no C ABI. It ports the behaviour of the reference layer (`hle_vk.m`):
 //!
 //! - [`device`]: the one device that the game sees (a Tegra X1, Vulkan 1.1, one queue family, three memory types on
-//!   one 3 GB heap), its features, limits, formats and extensions, as plain data; [`write()`](mod@write) puts it into the game's
-//!   structs.
+//!   one 3 GB heap), its features, limits, formats and extensions, as plain data. [`write()`](mod@write) puts it
+//!   into the game's structs.
 //! - [`format`](mod@format): `VkFormat` as a pixel format, a vertex format, a texel or block size, aspects and conversions of this
 //!   crate.
 //! - [`handle`]: the handles that the game gets. Dispatchable ones are slots of guest memory that the ABI layer gives
 //!   ([`handle::SlotAlloc`]).
 //! - [`mem`] and [`info`]: guest memory and the decoders of the structs that the game passes, by field offsets of the
 //!   official headers (the `layout` module), testable over a memory of their own.
-//! - [`desc`]: the backend-neutral descriptions of objects; [`cmd`]: the recorded commands.
+//! - [`desc`]: the backend-neutral descriptions of objects.
+//! - [`cmd`]: the recorded commands.
 //! - [`backend::Backend`]: the seam to `nxkit-vk-gpu`, and [`recording::Recording`], a backend for tests.
 //! - [`front::Vk`]: the front end that the ABI layer calls, with one front lock.
 //! - [`procaddr`]: `vkGet*ProcAddr` name lookup.

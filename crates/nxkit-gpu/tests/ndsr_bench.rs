@@ -1,6 +1,7 @@
 //! GPU time of the 15 NDSR kernels on the full-size picture 1536x864 -> 1920x1080 (the real texture sampler, no game
 //! data). A diagnostic, not a gate: `cargo test --release -p nxkit-gpu --test ndsr_bench -- --ignored --nocapture`.
-//! Each kernel is timed alone in its own command buffer (the command buffer's GPU start to end); the median of 15.
+//! Each kernel is timed alone in its own command buffer (the command buffer's GPU start to end). The result is the
+//! median of 15.
 #![cfg(target_os = "macos")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -41,9 +42,9 @@ fn key(name: &str) -> u64 {
 fn time_every_kernel() {
     let ctx = Context::system_default().expect("Metal 4 device");
     // NDSR_BENCH_SRC: comma-separated files holding complete MSL sources, timed side by side (round-robin per
-    // iteration, so that load from other work hits all alike); default is msl::SOURCE. NDSR_BENCH_DEFS is put before
-    // every source, e.g. "#define NDSR_SOFT_SAMPLER" (what ndsr_kernel.rs runs). NDSR_BENCH_ONLY keeps the kernels
-    // whose name contains it.
+    // iteration, so that load from other work hits all alike). The default is msl::SOURCE. NDSR_BENCH_DEFS is put
+    // before every source, for example "#define NDSR_SOFT_SAMPLER" (what ndsr_kernel.rs runs). NDSR_BENCH_ONLY keeps
+    // the kernels whose name contains it.
     let defs = std::env::var("NDSR_BENCH_DEFS").unwrap_or_default();
     let sources: Vec<String> = match std::env::var("NDSR_BENCH_SRC") {
         Ok(list) => list

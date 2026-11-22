@@ -2,7 +2,7 @@
 //!
 //! A texture record is made by `nvnTextureInitialize`. It is shared when a live record has the same address and
 //! description. `nvnTextureFinalize` drops the record at once, or keeps it as an orphan while a texture pool slot still
-//! names it; the orphan goes when its last slot is registered with another texture, or it is a normal live record again
+//! names it. The orphan goes when its last slot is registered with another texture, or it is a normal live record again
 //! when the game initializes the same texture once more. This module holds the front end methods of that life
 //! ([`FrontEnd::create_texture_shared`], [`FrontEnd::finalize_texture`], [`FrontEnd::register_texture`]) and counts
 //! what they do.
@@ -211,7 +211,7 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
     }
 
     /// Like [`FrontEnd::create_texture`]. A live texture with the same address and description is shared and comes back
-    /// with `true` (see [`ResourceTable::create_shared`]); the backend already knows it. An orphan that is shared
+    /// with `true` (see [`ResourceTable::create_shared`]). The backend already knows it. An orphan that is shared
     /// is a live record again: it leaves the orphan set, so the register of another texture in its last slot does not
     /// drop it.
     pub fn create_texture_shared(
@@ -251,7 +251,7 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
     /// On the hardware a texture pool slot is a copy of the texture header in memory, so it stays usable after the
     /// texture object is finalized: games keep sampling such slots. The record therefore lives on while a slot holds
     /// it and goes when the last slot is registered with another texture.
-    /// The result is false while the record lives on; [`FrontEnd::take_dropped`] gives it when it goes.
+    /// The result is false while the record lives on. [`FrontEnd::take_dropped`] gives it when it goes.
     pub fn finalize_texture(&mut self, id: TexId) -> Result<bool> {
         // Another texture object still names the record.
         if !self.table.release_ref(id)? {

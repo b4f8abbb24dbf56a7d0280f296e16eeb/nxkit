@@ -16,9 +16,9 @@ impl Gpu {
     ///
     /// `frame` and `plan` come from `nxkit-nvn` (`Frame` and `analyse`). `detail` carries what the commands of the
     /// frame bound, `view` gives the texture records and resolves texture handles. `pools` is the pool snapshot of
-    /// the flush; the batch keeps it until the GPU is done. `scale` is the factor for textures that are rendered
-    /// into (2.0 for 1080p to 4K, 1.0 for none). The call returns when the command buffers are committed. The GPU
-    /// runs on. Call [`Gpu::wait`] before the CPU reads a texture that the report lists in `copied_back`.
+    /// the flush. The batch keeps it until the GPU is done. `scale` is the factor for textures that are rendered into
+    /// (2.0 for 1080p to 4K, 1.0 for none). The call returns when the command buffers are committed. The GPU runs on.
+    /// Call [`Gpu::wait`] before the CPU reads a texture that the report lists in `copied_back`.
     pub fn encode_frame(
         &mut self,
         frame: &Frame,
@@ -87,7 +87,7 @@ impl Gpu {
         let builds_before = self.pipelines.counts().0;
 
         // The batch comes first, so that the uniform snapshots go to its scratch memory on a helper thread while this
-        // one resolves the textures; the chunks need both.
+        // one resolves the textures. The chunks need both.
         let mut ends = if plan.passes.is_empty() {
             Vec::new()
         } else {

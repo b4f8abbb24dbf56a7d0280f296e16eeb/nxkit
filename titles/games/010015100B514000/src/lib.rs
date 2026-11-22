@@ -43,7 +43,7 @@ const GAME_TSV: Evidence = Evidence::Recorded {
 /// `game_profile.h` has the defaults for every other key (`fps_target 0`, `fps_max 60`, `fps_hold 1`, no
 /// snapshots, `sys_resource 0x2000000`). The memory layout is the README's 5 GB guest layout: 256 MB in front, a
 /// 2.875 GB alias region, a 256 MB stack region and a 1.625 GB heap region. The game maps 1.75 GB of virtual address
-/// memory (`System/HeapSize/*.HeapDef.byml`) on demand into the alias region and asks for a 1.47 GB heap; with a
+/// memory (`System/HeapSize/*.HeapDef.byml`) on demand into the alias region and asks for a 1.47 GB heap. With a
 /// smaller alias region large resources were skipped and a null dereference followed. The display version is the
 /// one of the build row of v327680.
 const SETTINGS: Fact<Settings> = Fact::new(

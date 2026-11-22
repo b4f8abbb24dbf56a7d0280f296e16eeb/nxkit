@@ -2,7 +2,7 @@
 //! that own them (`obswire`).
 //!
 //! An `obs` gate saves the guest's registers in the frame of the svc gate (`gate.rs`) and calls [`ObsTable::run`]
-//! with its argument. The handler of the id gets x0 to x28 and the parameter of the argument; what it writes there
+//! with its argument. The handler of the id gets x0 to x28 and the parameter of the argument. What it writes there
 //! takes effect when the gate returns, as for a svc (x18 excepted). An id without a handler passes, and its first
 //! pass is logged once.
 

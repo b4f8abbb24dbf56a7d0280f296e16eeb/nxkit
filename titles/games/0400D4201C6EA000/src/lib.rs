@@ -14,7 +14,7 @@
 //! regions).
 //!
 //! The game loads NRO modules at run time through `nn::ro`. nxkit takes the calls over (`nxkit-svc-system`,
-//! `sdk/ro.rs`); a run of this game has not checked it.
+//! `sdk/ro.rs`). A run of this game has not checked it.
 //!
 //! The form of the shared font is left to the core default (the TTF itself): on SDK 20 the engine serves the BFTTF form
 //! when `main` imports `ScalableFontEngineHelper::Decode`, and nobody checked the imports of this game.

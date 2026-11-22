@@ -93,7 +93,7 @@ impl File {
     /// half-written state is never committed.
     ///
     /// The write goes to `offset` in every open mode: `OpenMode_AllowAppend` lets a write grow the file, it does not
-    /// move the write to the end. UE4's `SaveGameToSlot` opens with Write and AllowAppend and writes at 0; a write at
+    /// move the write to the end. UE4's `SaveGameToSlot` opens with Write and AllowAppend and writes at 0. A write at
     /// the end appended each save to the old one, and the next load read the first, stale or empty, copy.
     pub(crate) fn write(&self, offset: i64, addr: u64, size: u64) -> u32 {
         let Backing::Host { file, txn } = &self.backing else {

@@ -172,7 +172,7 @@ fn base_of(img: &[u8], text_end: usize, r: u32, t: usize) -> Option<i64> {
 
 /// The object registered under the name whose reference ends at word `j` (`ue_cvar.registered_at`). The first call after
 /// it, with the name still in x1, decides: a `bl` with x0 an address made by adrp + add is the variable's constructor
-/// (UE 4.18), and x0 is the object; a `blr` is IConsoleManager's register call (UE 4.2x and 5), and the object is the
+/// (UE 4.18), and x0 is the object. A `blr` is IConsoleManager's register call (UE 4.2x and 5), and the object is the
 /// address that the value pointer it returns is then stored into, `str x0, [xN, #0x10]`. UE 4.18 also inlines that
 /// constructor into a long static initializer and addresses every object from one page base made far before the name
 /// (OCTOPATH TRAVELER: `str xV, [x22, #k]` the vtable, then, after the call that returns the value pointer,

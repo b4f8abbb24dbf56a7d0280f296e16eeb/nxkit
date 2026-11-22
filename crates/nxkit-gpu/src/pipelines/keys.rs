@@ -17,10 +17,10 @@ use super::Targets;
 /// Raise it when the key of a pipeline changes for the same recorded description:
 ///
 /// - the set or the order of what [`render_key`], [`mesh_key`], [`compute_key`] or [`point_size_key`] hash changes,
-///   or a key function is added or removed;
+///   or a key function is added or removed.
 /// - a type that they hash changes its `Hash`: `Targets`, `ColorTarget`, `BlendState` or `VertexDescriptor` (or what is
 ///   inside them) gains or loses a field, or an enum (a format, a blend factor, a topology class) changes the order
-///   or the number of its variants;
+///   or the number of its variants.
 /// - the meaning of a field of `pipelines.seen` changes (what the line of an entry holds, not only its layout: the
 ///   version line of the file covers the layout).
 ///

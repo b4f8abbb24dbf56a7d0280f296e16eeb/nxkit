@@ -100,7 +100,7 @@ impl Backend for VkGpu {
                 .get(&desc.memory)
                 .cloned()
                 .ok_or_else(|| err("the buffer of the texel buffer view has no storage"))?;
-            // Storage texel buffers are written by shaders; a uniform one only read. Both are made writable, as the
+            // Shaders write storage texel buffers and only read a uniform one. Both are made writable, as the
             // usage of the buffer is not in the description and the texture costs the same.
             let texture = Texture::buffer_over_guest(
                 &self.ctx,

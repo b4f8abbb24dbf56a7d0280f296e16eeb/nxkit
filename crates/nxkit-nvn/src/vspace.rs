@@ -11,7 +11,7 @@
 //! from the physical pages, and an unmapped page reads as 0.
 //!
 //! [`VirtualSpace`] is the model that the ABI changes. [`VirtualSpace::snapshot`] is the immutable copy that a flush
-//! hands to the backend; it costs an `Arc` clone, and a change after a snapshot copies the map of the pools and the
+//! hands to the backend. It costs an `Arc` clone, and a change after a snapshot copies the map of the pools and the
 //! table of the pool it changes (copy on write). [`VirtualSpace::aliases`] answers the reverse question: which virtual
 //! pages a CPU write to a physical page reaches, so that the textures there load again.
 
@@ -123,7 +123,7 @@ impl PageTables {
     }
 
     /// Reads `out.len()` bytes of the virtual pool memory at `start` through the page table. `read(gpu, buf)` reads
-    /// physical memory at a guest GPU address and says whether it could; it gets one call for each run of pages that
+    /// physical memory at a guest GPU address and says whether it could. It gets one call for each run of pages that
     /// are contiguous in physical memory. An unmapped page and a failed read give zeros. The range must lie in one
     /// virtual pool.
     pub fn gather(

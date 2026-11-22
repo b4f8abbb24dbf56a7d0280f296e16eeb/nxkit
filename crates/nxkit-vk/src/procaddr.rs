@@ -1,6 +1,6 @@
 //! `vkGetInstanceProcAddr` and `vkGetDeviceProcAddr`: name lookup with the retry of the reference layer.
 //!
-//! The ABI layer keeps the table of its `extern "C"` functions; [`resolve`] looks a name up in it. A name ending in
+//! The ABI layer keeps the table of its `extern "C"` functions. [`resolve`] looks a name up in it. A name ending in
 //! `KHR` that the table lacks is tried again without the suffix, for an extension that Vulkan 1.1 promoted to core
 //! (`vkBindBufferMemory2KHR` is `vkBindBufferMemory2`). Every name is logged once with what it resolved to.
 

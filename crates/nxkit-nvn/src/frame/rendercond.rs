@@ -19,7 +19,7 @@
 //!   it is unknown.
 //! - The other counters are unknown. An unknown condition renders, as the host did before.
 //!
-//! The known values stay in the table for [`KEEP_FLUSHES`] flushes; by then the backend wrote them to guest memory.
+//! The known values stay in the table for [`KEEP_FLUSHES`] flushes. By then the backend wrote them to guest memory.
 //! The GPU counters stay until a known value replaces them.
 //!
 //! The diagnostic switches of [`force`] change a decision at run time. They are off by default. [`gate`] records what
@@ -93,7 +93,7 @@ impl Read {
     }
 }
 
-/// `NXKIT_RENDERCOND_STALE`: `0` reads no counter of an earlier report, `addr` only the one at the same address; by
+/// `NXKIT_RENDERCOND_STALE`: `0` reads no counter of an earlier report, `addr` only the one at the same address. By
 /// default the one at the same address, else the one at the same place of an earlier frame. The switch
 /// [`force::NOSTALE`] gives 0.
 fn stale_mode() -> u8 {
@@ -371,8 +371,8 @@ impl RenderConds {
 
     fn report(&mut self, addr: u64, r: Report) {
         if self.reports.len() >= MAX_REPORTS {
-            // The known values and the older half of the emulated counters go; the unknown ones stay. A table that is
-            // still more than half full starts again, so the scan never runs for every report.
+            // The known values and the older half of the emulated counters go, but the unknown ones stay. A table that
+            // is still more than half full starts again, so the scan never runs for every report.
             let keep = self
                 .counters
                 .newest_seq()

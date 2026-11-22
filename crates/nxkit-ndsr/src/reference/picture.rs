@@ -2,7 +2,7 @@
 
 /// What the model asks of the game's texture and sampler (section 7: the sampler is the game's, R). Values are RGBA.
 pub trait Texture {
-    /// The texel at integer coordinates; outside the picture the address mode decides (clamp to edge by default).
+    /// The texel at integer coordinates. Outside the picture the address mode decides (clamp to edge by default).
     fn texel(&self, x: i64, y: i64) -> [f32; 4];
     /// The filtered sample at normalized coordinates, lod 0, as exact doubles (the caller rounds to f16 or f32).
     fn sample(&self, u: f32, v: f32) -> [f64; 4];

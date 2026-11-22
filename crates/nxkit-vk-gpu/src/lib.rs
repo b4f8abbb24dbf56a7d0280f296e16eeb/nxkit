@@ -8,7 +8,7 @@
 //! |---|---|---|
 //! | 0 | `settings`, `log`, `convert`, `queries`, `fixed`, `formats`, `table`, `bind`, `vertex`, `passplan` | the typed settings, the once-log, and pure functions: format and state maps, the shader table, which descriptor goes to which slot, the vertex slots, the load and store actions of render pass segments |
 //! | 1 | `objects` | the Metal objects by Vulkan handle |
-//! | 2 | `make`, `blit` | making images, views, samplers and pipelines; the present blit |
+//! | 2 | `make`, `blit` | making images, views, samplers and pipelines, and the present blit |
 //! | 3 | `replay` | one submit into one Metal 4 command buffer |
 //! | 4 | `gpu` | [`VkGpu`]: the backend, its submits, completions, presents and display ticks |
 //!

@@ -1,7 +1,7 @@
 //! The controller buttons of the host's own screens (the Home menu of `nxkit-host`), apart from the game.
 //!
-//! The host reads Home, A, B and the directions of every connected controller by their printed labels, before the
-//! layout of the game, and while one of its screens is open the game gets no controller, keyboard or mouse input
+//! The host reads Home, the face buttons, `+`, `-`, the shoulders and the directions of every connected controller by
+//! their printed labels, before the layout of the game, and while one of its screens is open the game gets no controller, keyboard or mouse input
 //! ([`set_blocked`]). [`claim_home`] asks GameController to give the Home button to the app instead of the system.
 
 use std::sync::atomic::{AtomicBool, Ordering};

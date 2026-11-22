@@ -7,14 +7,15 @@
 //! `fma(V, m2, fma(Y, m0, U * m1))` with the game's matrix and offsets, clamped to 0 to 1, scaled by 255 and rounded half
 //! to even, and the byte `k` becomes the f16 of `k / 255`. A chroma texel lies at `x / 2 - 1/4` in texels of its plane,
 //! so a pixel's weights are 3/4 and 1/4 in each direction, towards the nearer and the farther texel. The GPU's
-//! sampler gives the same weights; its arithmetic may differ from this one by a unit in the last place before the
-//! rounding to a byte, so a result can differ by one code where the value lies on a rounding edge.
+//! sampler gives the same weights. Its arithmetic may differ from this one by a unit in the last place before the
+//! rounding to a byte. Thus a result can differ by one code where the value lies on a rounding edge.
 //!
 //! On the CPU rather than on a queue of its own: the picture is already in memory here (the decoder's NV12), nothing
 //! has to be uploaded, the GPU the game renders on does no extra pass, and the work runs on the feeder's threads ahead
 //! of the game. The loops run over blocks of 16 pixels with no table lookups and no branches that depend on the data
 //! (the chroma sums are made a row at a time, the byte to f16 is integer arithmetic), so the compiler turns them into
-//! NEON vectors; a picture takes about a millisecond on four cores. The constant fourth plane is written once per tensor.
+//! NEON vectors. A picture takes about a millisecond on four cores. The constant fourth plane is written once per
+//! tensor.
 
 use nxkit_svc_video::Frame;
 
@@ -23,7 +24,7 @@ pub(super) const WIDTH: usize = 1920;
 pub(super) const HEIGHT: usize = 1080;
 
 /// The colour conversion's constants: the push block of the game's dispatch. Word `4 * row + column` is the matrix
-/// (rows give R, G, B; columns weigh Y, U, V), words 12 to 14 are the offsets added to Y, U and V.
+/// (rows give R, G, B, and columns weigh Y, U, V), words 12 to 14 are the offsets added to Y, U and V.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Params([u32; 15]);
 

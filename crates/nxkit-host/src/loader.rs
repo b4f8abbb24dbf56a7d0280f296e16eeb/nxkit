@@ -51,7 +51,7 @@ pub struct Loaded {
     pub dylib: Option<Dylib>,
 }
 
-// The `DT_INIT` record belongs to the boot sequence that runs it; the loader only finds it.
+// The `DT_INIT` record belongs to the boot sequence that runs it. The loader only finds it.
 pub use crate::boot::ModuleInit;
 
 struct Lists {

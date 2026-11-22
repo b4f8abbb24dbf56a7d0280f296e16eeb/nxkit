@@ -16,7 +16,7 @@
 //! - `nxkit-mem tex scale`: the scaled textures and what they would take at scale 1 (bytes divided by scale squared).
 //! - `nxkit-mem tex dup`: entries that have the same guest start and description as another live entry, and entries
 //!   whose guest range overlaps another live entry's range, each with the Metal textures behind them and their bytes.
-//! - `nxkit-mem tex attach`: the attachment entries (ids that were a render target; the store never evicts them) by
+//! - `nxkit-mem tex attach`: the attachment entries (ids that were a render target, which the store never evicts) by
 //!   frames since the last use, in the buckets of `idle` (the MiB are of the distinct textures behind them), the
 //!   number of distinct (format, width, height) among them, and the overlap line of `dup` split into attachment
 //!   entries and all others, then `superseded` (Metal textures dropped because another texture overwrote their guest
@@ -220,7 +220,7 @@ fn grew(now: u64, before: u64) -> String {
     format!("{now} (+{})", now.saturating_sub(before))
 }
 
-/// The line of the texture life. `prev` is the snapshot of the previous report; without one the change is from zero.
+/// The line of the texture life. `prev` is the snapshot of the previous report. Without one, the change is from zero.
 fn texlife_line(s: &Snapshot, prev: &Snapshot) -> String {
     let (c, p) = (&s.counts, &prev.counts);
     format!(

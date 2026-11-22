@@ -22,7 +22,7 @@
 //! signal after the CPU wrote. Only a wait that returned before the frame was done (the early wait of
 //! `NXKIT_PRIVATE=1`, the overlap) tells the CPU that the GPU passed the signal when it did not: a CPU signal after
 //! such a wait is newer on the console. A write of the GPU from a frame up to the newest fence a CPU wait returned
-//! for, at the time of a CPU signal of the same word, is dropped; an add of the GPU is still added (both adds count on
+//! for, at the time of a CPU signal of the same word, is dropped. An add of the GPU is still added (both adds count on
 //! the console in either order).
 
 use std::collections::{HashMap, VecDeque};
@@ -75,8 +75,8 @@ impl EventSignals {
         })
     }
 
-    /// Keeps the event signals among `reports` of the frame of `fence` and writes them when `batch` is complete; at
-    /// once without a batch. A frame without signals costs a scan of its reports.
+    /// Keeps the event signals among `reports` of the frame of `fence` and writes them when `batch` is complete.
+    /// Without a batch, it writes them at once. A frame without signals costs a scan of its reports.
     pub(super) fn hold(
         self: &Arc<Self>,
         fence: u64,
@@ -160,7 +160,8 @@ impl EventSignals {
         let Ok(off) = self.guest.address_map().offset_of_host(word, 4) else {
             return false;
         };
-        // A game thread that writes the word between the load and the swap makes the swap fail; it is tried again.
+        // A game thread that writes the word between the load and the swap makes the swap fail. The swap is then tried
+        // again.
         for _ in 0..64 {
             let Ok(old) = self.guest.load_u32(off) else {
                 return false;
@@ -354,7 +355,7 @@ mod tests {
         let (w, v) = (mem.host(0x40), mem.host(0x80));
         hold_pending(&ev, 1, &[write(w, 9), add(v, 5)]);
         hold_pending(&ev, 2, &[write(w, 11)]);
-        // The wait for fence 1 returned before the GPU finished it; the CPU then resets both counters.
+        // The wait for fence 1 returned before the GPU finished it. The CPU then resets both counters.
         ev.waited(1);
         mem.set(0x40, 0);
         ev.cpu_signalled(w);

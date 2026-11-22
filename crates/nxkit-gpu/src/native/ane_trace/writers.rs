@@ -5,7 +5,7 @@ use crate::detail::{CopyDetail, DrawDetail};
 use nxkit_nvn::frame::RtSet;
 use nxkit_nvn::resource::TextureRecord;
 
-/// The lines of one list that are printed; the rest is counted.
+/// The lines of one list that are printed. The rest is counted.
 const LINES: usize = 24;
 
 /// A frame as the report needs it: the commands, the detail, and what the textures and image handles meant then.

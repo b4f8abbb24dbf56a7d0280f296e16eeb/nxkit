@@ -12,7 +12,7 @@ fn the_alias_is_the_same_memory_with_its_own_protection() {
         alias[9], 77,
         "a store through the guest mapping shows in the alias"
     );
-    // The guest page loses all access; the alias still reads and writes it.
+    // The guest page loses all access. The alias still reads and writes it.
     protect_pages(1, 2, PROT_NONE, false);
     let alias_w = alias.as_ptr().cast_mut();
     // SAFETY: inside the alias page, which is writable.
@@ -81,7 +81,7 @@ unsafe fn exercise(r: *mut u8) -> (u64, u64, u64, i64, u64, u64, u64, u64, u64, 
         u64,
     );
     let (mut p1, mut p2) = (r, r);
-    // SAFETY: per the caller, the accesses lie inside the region; the registers are declared.
+    // SAFETY: per the caller, the accesses lie inside the region. The registers are declared.
     unsafe {
         asm!(
             "ldr {x0}, [{r}, #0]",
@@ -238,7 +238,7 @@ fn accesses_outside_the_written_bytes_are_done_by_the_handler_on_several_threads
     let mut st3 = Collect::default();
     let f3 = pg.flush_mirrored(3, &[], &[], None, &mut st3);
     assert_eq!(f3.staged, 0);
-    // The frame completes; a read copies the written blocks only: the stores stay, the GPU's bytes arrive.
+    // The frame completes. A read copies the written blocks only: the stores stay, and the GPU's bytes arrive.
     pg.complete(3);
     let sync0 = pg.stats().synced;
     assert_eq!(m.load(1, 5), 0xee, "the GPU's byte is copied back");

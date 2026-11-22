@@ -111,7 +111,7 @@ impl Default for Config {
     }
 }
 
-// Process-wide (W26): the configuration of the SDK take-overs; the game calls in through a C function with no Rust
+// Process-wide (W26): the configuration of the SDK take-overs. The game calls in through a C function with no Rust
 // context.
 static CONFIG: OnceLock<Config> = OnceLock::new();
 

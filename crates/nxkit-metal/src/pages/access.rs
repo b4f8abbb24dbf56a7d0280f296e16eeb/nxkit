@@ -43,8 +43,8 @@ impl Pages {
         }
     }
 
-    /// The host reads or writes the range through a system call. A tracked page that a read needs and that is protected
-    /// against all access opens for reading; a write dirties the tracked pages and opens them for writing.
+    /// The host reads or writes the range through a system call. A read opens for reading a tracked page that it needs
+    /// and that is protected against all access. A write dirties the tracked pages and opens them for writing.
     pub(super) fn open(&self, addr: u64, len: u64, write: bool) {
         let Some((first, end)) = page_span(addr, len) else {
             return;

@@ -4,14 +4,14 @@
 //! entries and publishes the totals here. The host reads them with [`latest`]. It measures only: nothing in the
 //! encoder looks at it, and nothing runs per draw or per bind.
 //!
-//! What is counted. A Metal texture is one `generation`; several ids (texture objects of the game over the same
-//! memory) may share it, and it is counted once, in exactly one [`Class`]. The bytes are `allocatedSize` of the Metal
-//! texture. Not counted: the texture views (they share the storage of their texture, so only their number is kept),
-//! and the textures outside the store (the staging textures of the scaled upload, the upload scratch, the native
-//! plans). The host prints the process total beside the store total, so the difference shows. The block shadows own
-//! storage and are counted. The `retired` textures are the ones the store just replaced or evicted and still holds
-//! until the GPU is done; one of them may share storage with a live texture only when its id was made again before it
-//! was dropped, which the totals count twice.
+//! What is counted. A Metal texture is one `generation`. Several ids (texture objects of the game over the same memory)
+//! may share it, and it is counted once, in exactly one [`Class`]. The bytes are `allocatedSize` of the Metal texture.
+//! Not counted: the texture views (they share the storage of their texture, so only their number is kept), and the
+//! textures outside the store (the staging textures of the scaled upload, the upload scratch, the native plans). The
+//! host prints the process total beside the store total, so the difference shows. The block shadows own storage and are
+//! counted. The `retired` textures are the ones the store just replaced or evicted and still holds until the GPU is
+//! done. One of them may share storage with a live texture only when its id was made again before it was dropped. The
+//! totals count such storage twice.
 //!
 //! The guest size of a texture is `TextureLayout::size` of its record when the Metal texture was made (`Res`). The
 //! scale is the effective scale of that moment, 1 for an unscaled texture.
@@ -26,7 +26,7 @@ use super::*;
 /// The class of a Metal texture. A texture is in the first class that fits, in this order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
-    /// Tile memory only; it owns no storage, so its bytes are normally 0.
+    /// Tile memory only. It owns no storage, so its bytes are normally 0.
     Memoryless,
     /// A render target at any time.
     Attachment,
@@ -186,7 +186,7 @@ pub struct Inventory {
     pub frame: u64,
     /// The classes, in the order of [`Class::ALL`].
     pub classes: [ClassTotal; 7],
-    /// The texture views in the caches (they own no storage; only their number is kept).
+    /// The texture views in the caches (they own no storage, so only their number is kept).
     pub views: u64,
     /// The block shadows of compressed attachments.
     pub shadows: Total,
@@ -209,7 +209,7 @@ pub struct Inventory {
     /// The part of `overlap` that are all other entries.
     pub overlap_other: Dup,
     /// The attachment entries (ids that were an attachment) by idle frames of their Metal texture, in the buckets of
-    /// `idle`. The count is entries; the bytes are of the distinct Metal textures behind them.
+    /// `idle`. The count is entries. The bytes are of the distinct Metal textures behind them.
     pub attachment_idle: [Total; 3],
     /// The distinct (format, width, height) among the attachment entries.
     pub attachment_shapes: u64,

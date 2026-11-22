@@ -427,7 +427,7 @@ fn whole_mode_register_and_unregister_change_nothing() {
     assert!(Arc::ptr_eq(&before, &set.current()));
     assert_eq!(set.current().generation(), 0);
     assert_eq!(set.drain_graveyard(), Drained::default());
-    // No pin and no make; a bad range is still refused.
+    // No pin and no make. A bad range is still refused.
     assert!(events(&log).is_empty());
     assert!(set.register(VA, 0, 0).is_err());
     // The backing drops in place with the last snapshot, with no unpin.
@@ -470,7 +470,7 @@ fn overlay_over(snap: &PoolSnapshot<Fake>, members: &[usize], log: &Log) -> Pool
     for &p in members {
         bits[p / 64] |= 1 << (p % 64);
     }
-    // Pages 4 to 8 of the guest range have a run; a Fake's real base is 0x1000_0000 plus its start.
+    // Pages 4 to 8 of the guest range have a run. A Fake's real base is 0x1000_0000 plus its start.
     let runs = vec![Run {
         va_start: VA + 4 * K16,
         va_end: VA + 9 * K16,

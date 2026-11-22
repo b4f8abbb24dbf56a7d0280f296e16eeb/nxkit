@@ -66,7 +66,7 @@ pub(super) use track::Track;
 /// The most templates that one handle keeps. The least recently used goes first.
 ///
 /// A model recording runs once per instance and pass, with another program, uniform buffer or vertex buffer each
-/// time; BotW calls one recording with more than four states in a frame. The key digest keeps the search cheap.
+/// time. BotW calls one recording with more than four states in a frame. The key digest keeps the search cheap.
 pub(super) const MAX_PER_HANDLE: usize = 32;
 /// The most handles with templates. The cache starts again when a new handle would pass it.
 const MAX_HANDLES: usize = 1 << 16;

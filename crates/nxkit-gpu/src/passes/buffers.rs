@@ -2,7 +2,7 @@
 //!
 //! The pools are Metal buffers over guest memory, so a kernel that writes through a real address writes guest
 //! memory. A game fills the records of its indirect draws with a buffer copy from the output of its culling and
-//! resets counters with a buffer clear; without them the GPU draws what the CPU saw in memory.
+//! resets counters with a buffer clear. Without them, the GPU draws what the CPU saw in memory.
 //!
 //! One host kernel does both. A job is a source and destination address (real, resolved through the pool snapshot),
 //! a byte count and a mode:

@@ -46,7 +46,7 @@ pub(super) fn member_bit(page: usize, set: bool) {
 
 /// Sleeps until the wake word changes from `seen` or the slice ends.
 pub(super) fn sleep_on_wake(seen: u32) {
-    // SAFETY: the address of a static atomic of 4 bytes; the kernel reads 4 bytes. Safe in a signal handler.
+    // SAFETY: the address of a static atomic of 4 bytes. The kernel reads 4 bytes. Safe in a signal handler.
     unsafe {
         os_sync_wait_on_address_with_timeout(
             (&raw const SHARED.wake).cast_mut().cast(),

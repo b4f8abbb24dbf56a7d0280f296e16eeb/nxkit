@@ -3,10 +3,10 @@
 //! - Objects: [`nxkit_vk::Backend::create_memory`] maps memory of its own below `1 << 39` and wraps it as a no-copy
 //!   buffer (`GuestMemory::map_below`): Vulkan 1.1 gives the game no GPU addresses, the game only maps the memory, and
 //!   the host address is the guest address (R18). Images, views, samplers and pipelines are made at once (`make`).
-//! - Submits (`submit`): one command buffer per submit from a ring of two in flight; the replay resolves the ids
+//! - Submits (`submit`): one command buffer per submit from a ring of two in flight. The replay resolves the ids
 //!   while it encodes, and the command buffer keeps what it encodes alive. Its completion advances the completed
 //!   serial in order and writes the query results.
-//! - Present (`present`, `tick`): a present queues the swapchain image for the [`Pacer`]; a display tick blits it into
+//! - Present (`present`, `tick`): a present queues the swapchain image for the [`Pacer`]. A display tick blits it into
 //!   the drawable at the tick's target time. `acquire` waits while [`MAX_PENDING`] presents wait for a tick, and until
 //!   the image's previous present has been shown.
 
@@ -127,7 +127,7 @@ pub(crate) struct Presents {
     pub(crate) presented: u64,
 }
 
-/// The backend. Make it with [`VkGpu::new`]; the host installs it as the `Backend` of `nxkit_vk::Vk` and as the
+/// The backend. Make it with [`VkGpu::new`]. The host installs it as the `Backend` of `nxkit_vk::Vk` and as the
 /// `TickSink` of its pacer.
 pub struct VkGpu {
     ctx: Context,
@@ -154,7 +154,7 @@ pub struct VkGpu {
 }
 
 impl VkGpu {
-    /// Makes the backend. The shader table and library come from `settings.shader_dir`; when they are missing the
+    /// Makes the backend. The shader table and library come from `settings.shader_dir`. When they are missing, the
     /// backend still runs and every pipeline fails with the reason.
     pub fn new(ctx: &Context, settings: VkGpuSettings) -> Result<Arc<Self>, BackendError> {
         let shaders = ShaderTable::load(ctx, &settings.shader_dir);

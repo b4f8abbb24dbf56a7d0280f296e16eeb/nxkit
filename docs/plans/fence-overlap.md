@@ -14,7 +14,7 @@ Measured with the `nowait` knob (`nvnSyncWait` returns at once, nothing is prote
 and holds it, 60 fps, at a CPU cost of 0.67 vsyncs and a GPU time of 0.99 vsyncs. A UI element flickers, because the
 game writes data for the next frame while the GPU still draws the current one.
 
-The cause is game specific; the fix belongs in the host and is general. A game that waits on an older fence already
+The cause is game specific. The fix belongs in the host and is general. A game that waits on an older fence already
 overlaps and is not affected.
 
 ## Why the GPU sees the CPU's writes
@@ -42,20 +42,20 @@ race.
    memory before the chunks start. No detection is needed. (Built.)
 2. **Vertex buffers: copied when their bytes change.** Bound vertex data is about 19 MiB a frame, but only about 52 KiB
    of it changes from frame to frame (UI, particles). A hash per binding, compared with the last frame that had it,
-   marks a range dynamic; dynamic ranges get the same shadow copy. Static data (meshes, textures) stays zero-copy.
-   (Not built yet; the picture was stable without it.)
+   marks a range dynamic. Dynamic ranges get the same shadow copy. Static data (meshes, textures) stays zero-copy.
+   (Not built yet. The picture was stable without it.)
 3. **One frame of overlap.** With the switch on, `nvnSyncWait` for fence N waits for fence N - 1 only. The batch ring
    already bounds the frames in flight.
 4. **Full waits where the CPU reads GPU results.** A frame that copies GPU-written textures back to CPU-visible memory,
    has a `CpuRead`, or writes a storage buffer in CPU-visible memory keeps the full wait for its fence. Counter reports
-   (timestamps) are written when the frame ends, one frame later than now; the game's GPU time reads then lag one frame.
+   (timestamps) are written when the frame ends, one frame later than now. The game's GPU time reads then lag one frame.
 5. **A safety net that learns.** A check mode compares, after the frame, the bytes of the zero-copy bindings with their
    hash at encode time. A difference is a write that the shadow copies missed. It is counted in the health report
    (`overlap.unprotected`), the range becomes dynamic, and the next frames wait fully until a frame passes without a
-   miss. Index buffers did not change at all in Breath of the Wild; storage buffers change, but likely because the GPU
+   miss. Index buffers did not change at all in Breath of the Wild. Storage buffers change, but likely because the GPU
    writes them, so they must not be copied.
-6. **A switch.** `NXKIT_OVERLAP=1` (built); a `game.json` key `overlap` later. Off by default until a game is verified,
-   so that every step can be compared with the `nowait` knob and the plain wait.
+6. **A switch.** `NXKIT_OVERLAP=1` (built), and a `game.json` key `overlap` later. Off by default until a game is
+   verified, so that every step can be compared with the `nowait` knob and the plain wait.
 
 ## What the measurements showed
 
@@ -73,17 +73,17 @@ In Zora's Domain at 1080p, per frame:
 - `NXKIT_OVERLAP=1` (uniform copies, wait for N - 1): hold 1, 60 fps, stable picture, CPU cost and GPU time ~0.8 vsyncs.
   Single frames are still late now and then (see the hitches below).
 
-The first version uploaded the snapshots from the chunks through a shared, locked map; the encode went from about 5 to
+The first version uploaded the snapshots from the chunks through a shared, locked map. The encode went from about 5 to
 10 ms. They are now uploaded once before the chunks.
 
 ## Measurements before the build (done)
 
 The diagnostic `NXKIT_DIAG=overlap` runs without changing the behaviour and prints:
 
-- the flush calls and bytes per frame, and the dynamic pages;
-- the bytes of the frame's buffer bindings that overlap dynamic pages, and the flushes that race with the frame on the
-  GPU (both near zero for Breath of the Wild, because its flushes are command memory);
-- per kind of binding, the distinct bindings and bytes, and how many of them changed since the last frame (the table
+- The flush calls and bytes per frame, and the dynamic pages.
+- The bytes of the frame's buffer bindings that overlap dynamic pages, and the flushes that race with the frame on the
+  GPU (both near zero for Breath of the Wild, because its flushes are command memory).
+- Per kind of binding, the distinct bindings and bytes, and how many of them changed since the last frame (the table
   above). It hashes every bound range each frame, so it is slow.
 
 ## Risks

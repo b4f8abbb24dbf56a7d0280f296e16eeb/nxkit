@@ -64,7 +64,7 @@ impl GuestMemory {
     /// that puts other pages under the range leaves the GPU on stale ones (measured 2026-11-09). `NXKIT_GUEST_KEEP`
     /// (on unless `0`) pins the range in the kernel (`nxkit_hos::pinned`): there `MapMemory` copies, and giving memory
     /// back zeroes it in place. `NXKIT_GUEST_WIRE=1` also wires the range with `mlock`, so macOS never compresses guest
-    /// pages when the driver lets go of them for a while; it takes the whole range in RAM at once.
+    /// pages when the driver lets go of them for a while. It takes the whole range in RAM at once.
     pub fn keep_gpu_pages(&self, env: &crate::hostenv::HostEnv) {
         let r = self.gpu_range();
         if env.guest_keep {

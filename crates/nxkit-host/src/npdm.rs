@@ -1,6 +1,6 @@
 //! Facts from the program's `main.npdm` that the build does not copy into `game.json`.
 //!
-//! The NPDM starts with a `META` header; at 0x70 it gives the offset and size of the `ACI0` block, whose kernel
+//! The NPDM starts with a `META` header. At 0x70 it gives the offset and size of the `ACI0` block, whose kernel
 //! capabilities (offset and size at 0x30 and 0x34 of `ACI0`) are 32-bit words. A word whose low four bits are 0b0111
 //! is the thread info capability: lowest and highest priority, then the lowest and highest core the process may use.
 

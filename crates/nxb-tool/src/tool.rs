@@ -18,7 +18,7 @@ pub struct ToolId {
 }
 
 /// An external tool behind one interface. The first implementation of every tool is a process per job
-/// ([`ProcessTool`]); persistent workers and servers are later implementations picked by configuration (design-v2 7.3).
+/// ([`ProcessTool`]). Persistent workers and servers are later implementations picked by configuration (design-v2 7.3).
 pub trait Tool: Send + Sync {
     /// The tool's identity.
     fn id(&self) -> &ToolId;

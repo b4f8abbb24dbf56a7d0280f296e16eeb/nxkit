@@ -74,7 +74,7 @@ impl CommandBuffer {
         let result = self
             .fill_pass(&mut pd, desc, first)
             .and_then(|()| self.set_resolves(&pd, desc, resolves));
-        // SAFETY: the buffer is a live shared buffer in the residency set. The GPU writes it while the pass runs; the
+        // SAFETY: the buffer is a live shared buffer in the residency set. The GPU writes it while the pass runs. The
         // caller keeps it alive and reads it only after the command buffer finished.
         unsafe {
             pd.raw
@@ -357,7 +357,7 @@ impl RenderPass<'_> {
                 };
                 let offset = if *counting { *offset as usize } else { 0 };
                 // SAFETY: a counting offset is 8 byte aligned and its 8 bytes lie in the buffer of the pass (checked
-                // above); a disabled test writes nothing.
+                // above). A disabled test writes nothing.
                 unsafe { self.enc.setVisibilityResultMode_offset(mode, offset) };
             }
             RenderCommand::Timestamp { heap, index } => {
@@ -476,7 +476,7 @@ impl RenderPass<'_> {
                 check_indirect(*indirect_addr)?;
                 check_real(*indirect_addr)?;
                 // The GPU reads the arguments when the draw runs. A wrong address makes the GPU fault, which is not a
-                // memory safety matter for the host; the alignment is checked above.
+                // memory safety matter for the host. The alignment is checked above.
                 self.enc
                     .drawPrimitives_indirectBuffer(primitive.to_mtl(), *indirect_addr);
             }

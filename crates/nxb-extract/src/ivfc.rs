@@ -75,7 +75,7 @@ impl IvfcStorage {
         Self::open_with(section, fs, false)
     }
 
-    /// Like [`IvfcStorage::open`]; with `lenient` a data block that fails its hash is read as it is and listed by
+    /// Like [`IvfcStorage::open`]. With `lenient`, a data block that fails its hash is read as it is and listed by
     /// [`IvfcStorage::damaged_in`] (the hash levels above the data must still pass).
     pub fn open_with(
         section: Arc<dyn Storage>,

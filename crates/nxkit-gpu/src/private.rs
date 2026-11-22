@@ -1,5 +1,5 @@
 //! Private GPU memory: step 1, tracking (`NXKIT_PRIVATE=track`), step 2, the mirror, and step 3, early fences
-//! (`NXKIT_PRIVATE=1`; see `docs/nxkit-gpu.md`).
+//! (`NXKIT_PRIVATE=1`). See `docs/nxkit-gpu.md`.
 //!
 //! The question of step 1 is what a private copy of guest memory for the GPU would cost, before any copy exists. At
 //! the flush of each frame the host computes the pages the frame may write on the GPU, the would-be members of the
@@ -12,7 +12,7 @@
 //!
 //! Member pages are protected read only (clean) by the page tracker of `nxkit-metal` ([`nxkit_metal::Pages`]), so a CPU
 //! write to one faults once per frame and is counted. The pages that the new frame may write are protected against all
-//! access until its batch completes; a CPU access in that time is a read or a write in flight, counted with its program
+//! access until its batch completes. A CPU access in that time is a read or a write in flight, counted with its program
 //! counter. Guest memory stays the truth: the handler only opens the page, nothing is copied, nothing waits and
 //! nothing is redirected.
 //!
@@ -21,19 +21,19 @@
 //! current). The GPU reads and writes a private copy of them ([`nxkit_metal::Mirror`], the same offsets in a host
 //! reservation, no-copy buffers over runs of 2 MiB segments) and never guest memory:
 //!
-//! - when a page becomes a member its guest bytes are copied into the mirror (the page is read only first);
+//! - when a page becomes a member its guest bytes are copied into the mirror (the page is read only first).
 //! - the pages the CPU wrote since the last flush (write faults on read only pages) are copied into a staging buffer at
-//!   the flush, after the page went read only again, and a compute pass at the start of the frame's first command
-//!   buffer copies them into the mirror, so the bytes for frame N + 1 land after frame N;
+//!   the flush, after the page went read only again. A compute pass at the start of the frame's first command buffer
+//!   copies them into the mirror, so the bytes for frame N + 1 land after frame N.
 //! - the pages a frame writes lose all access at its flush and stay tagged: guest memory is stale. A CPU access
-//!   waits for the batch if it still runs, then copies the page from the mirror and goes on (`nxkit-metal` `pages`);
+//!   waits for the batch if it still runs, then copies the page from the mirror and goes on (`nxkit-metal` `pages`).
 //! - every site that turns a guest address into a GPU address finds the mirror through the overlay of the frame's pool
-//!   snapshot ([`crate::pools::overlay`], [`crate::pools::PoolSnapshot::resolve`]); the table of raw global memory is split at
-//!   the member pages.
+//!   snapshot ([`crate::pools::overlay`], [`crate::pools::PoolSnapshot::resolve`]). The table of raw global memory is
+//!   split at the member pages.
 //!
 //! Step 3 answers the waits for fences when the flush has run, not when the GPU is done (`GpuBackend::wait_early`): the
 //! inputs of the frame are in the staging buffer and its outputs are guarded, so the CPU goes on and waits only where it
-//! touches a page that a frame in flight may write. The flush is the boundary for the data the frame reads; the one
+//! touches a page that a frame in flight may write. The flush is the boundary for the data the frame reads. The one
 //! exception is a flush that ran submits before the CPU signals they wait for ([`late_expect`], [`late_stage`]). The overlap
 //! and the renamer are off. Without the variable nothing here runs.
 //!
@@ -45,8 +45,8 @@
 //!
 //! Step 6 gives the CPU's reads of the GPU's results a signal of their own: the pages that game threads waited for as the
 //! writer of a frame are learned, the encoder cuts the frame after the last pass that writes each ([`early_cuts`]), and the
-//! command buffers up to the cut are committed on their own; when they are done the waiting thread copies the page and goes on,
-//! while the frame runs to its end.
+//! command buffers up to the cut are committed on their own. When they are done, the waiting thread copies the page and
+//! goes on, while the frame runs to its end.
 //!
 //! The counters print every [`REPORT_EVERY`] frames (`NXKIT_DIAG=private`, also with the variable set).
 
@@ -441,8 +441,8 @@ pub(crate) fn run_ahead() -> u64 {
         .min(nxkit_metal::BATCHES_IN_FLIGHT as u64)
 }
 
-/// True when the CPU sees the GPU's results one frame late (`NXKIT_PRIVATE_LATE`, default on; 0 turns it off and a CPU access
-/// to bytes a frame in flight writes waits for the frame again).
+/// True when the CPU sees the GPU's results one frame late (`NXKIT_PRIVATE_LATE`, default on). 0 turns it off, and then
+/// a CPU access to bytes a frame in flight writes waits for the frame again.
 pub(crate) fn late_results() -> bool {
     crate::settings::env().private_late
 }

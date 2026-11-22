@@ -363,7 +363,7 @@ impl UeJob {
     }
 
     /// `finish`: the archives with every shader decoded (file name, bytes), from the host's output of the job (`DMOR`,
-    /// u32 count, then per record u32 decoded length, 0 for a failure, and the bytes; `None` when the job is empty).
+    /// u32 count, then per record u32 decoded length, 0 for a failure, and the bytes, or `None` when the job is empty).
     pub fn finish(&self, out: Option<&[u8]>) -> R<Vec<(String, Vec<u8>)>> {
         let empty = [OUT_MAGIC.to_le_bytes(), [0; 4]].concat();
         let b = out.unwrap_or(&empty);

@@ -70,7 +70,7 @@ impl Model {
                     )));
                 }
                 let url = file_url(mlpackage_dir, true);
-                // SAFETY: a plain class method. The asynchronous variant gives the same result through a block; this
+                // SAFETY: a plain class method. The asynchronous variant gives the same result through a block. This
                 // call is already on a background thread, so the blocking one is the simpler.
                 #[allow(deprecated)]
                 let compiled = unsafe { MLModel::compileModelAtURL_error(&url) }

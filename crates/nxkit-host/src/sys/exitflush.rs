@@ -26,13 +26,13 @@ const SIG_DFL: usize = 0;
 /// How often the watcher looks for a stop signal.
 const WATCH: Duration = Duration::from_millis(100);
 
-/// The last stop signal that arrived, 0 for none. Process-wide because a signal handler has no context; the handler only
-/// stores it (async-signal-safe).
+/// The last stop signal that arrived, 0 for none. Process-wide because a signal handler has no context. The handler
+/// only stores it (async-signal-safe).
 static PENDING: AtomicI32 = AtomicI32::new(0);
 
 extern "C" fn on_stop_signal(sig: c_int) {
     PENDING.store(sig, Ordering::Relaxed);
-    // SAFETY: `signal` is async-signal-safe; the next signal of this kind takes the default action.
+    // SAFETY: `signal` is async-signal-safe. The next signal of this kind takes the default action.
     unsafe { signal(sig, SIG_DFL) };
 }
 

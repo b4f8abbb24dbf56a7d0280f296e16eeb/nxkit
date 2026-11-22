@@ -454,7 +454,7 @@ pub(super) fn copy(
             );
         } else {
             // Two NVN objects can share one backing texture, or in-place bytes. Reads and writes of the same texels
-            // in parallel threads race; other levels, slices or boxes of one backing do not.
+            // in parallel threads race. Other levels, slices or boxes of one backing do not.
             let same = src == dst || rs.barrier_id == rd.barrier_id;
             let overlap = super::scale::in_place_overlaps(
                 rs.in_place.map(|p| (p.real, rs.guest_size)),

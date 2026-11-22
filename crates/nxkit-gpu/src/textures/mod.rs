@@ -57,8 +57,8 @@ pub(crate) struct Res {
     pub(crate) fresh: bool,
     /// The Metal format has another layout than the NVN format (depth 24 bits).
     pub(crate) widened: bool,
-    /// The GPU address of the guest storage this texture was made for (the memory report keeps it; 0 for a staging
-    /// texture).
+    /// The GPU address of the guest storage this texture was made for (the memory report keeps it). It is 0 for a
+    /// staging texture.
     pub(crate) guest_address: u64,
     /// The bytes of that storage in guest memory.
     pub(crate) guest_size: u64,

@@ -16,8 +16,8 @@
 //! path of the render pass. The CPU never waits for the GPU. The pre-pass runs once for each render pass that has such
 //! draws, before the pass, in the same command buffer: a compute pass cannot run inside a render pass. It waits for
 //! all earlier work, and the render pass waits for it. The arguments must be final when the render pass starts, which
-//! holds when a dispatch or copy wrote them; a draw of the same pass that writes them through a storage buffer is not
-//! seen.
+//! holds when a dispatch or copy wrote them. The pre-pass does not see a draw of the same pass that writes them through
+//! a storage buffer.
 
 use nxkit_metal::{ArgumentTable, CommandBuffer, ComputeCommand, Scratch};
 
@@ -206,7 +206,7 @@ pub(crate) fn prepass(
 }
 
 /// Writes the jobs and their outputs into the scratch buffer and encodes the kernel. Gives the address of the output of
-/// job 0; job `k` writes at `RECORD * k` from there.
+/// job 0. Job `k` writes at `RECORD * k` from there.
 fn run(
     sh: &Shared<'_>,
     cb: &mut CommandBuffer,

@@ -6,7 +6,7 @@
 //! - the time from that commit to the start of the batch on the GPU.
 //!
 //! The first comes from the commit hook of the metal crate, the second from the GPU start time of the done hook. Both use
-//! the clock of `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)`. [`take`] gives the sums since its last call; the `frame`
+//! the clock of `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)`. [`take`] gives the sums since its last call. The `frame`
 //! line prints them, and the `BATCH` line of `gateseq` carries the two times of its batch.
 
 use std::collections::HashMap;

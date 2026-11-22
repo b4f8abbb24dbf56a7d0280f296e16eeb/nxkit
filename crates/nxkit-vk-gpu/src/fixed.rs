@@ -64,7 +64,7 @@ pub(crate) fn stencil_op(op: u32) -> StencilOp {
 }
 
 /// The colour target of attachment `format` with the blend state `b`. Blending is on only for a format that blends
-/// (not an integer format); the write mask has Vulkan's bit order, which is `ColorTarget`'s.
+/// (not an integer format). The write mask has Vulkan's bit order, which is `ColorTarget`'s.
 pub(crate) fn color_target(format: Format, vk: u32, b: Option<&BlendAttachment>) -> ColorTarget {
     let blends = nxkit_vk::format::lookup(vk).is_some_and(|f| f.is_color() && !f.is_int());
     let mut t = ColorTarget::new(format);

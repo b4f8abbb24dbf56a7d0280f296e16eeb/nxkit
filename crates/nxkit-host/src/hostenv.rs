@@ -106,7 +106,8 @@ pub struct HostEnv {
     /// `NXKIT_HOME_TEXT`: the texts of the Home button in the player's language, one per line (`home::Texts`).
     pub home_text: Option<String>,
     /// `NXKIT_LAUNCHER_PID`: the process of the launcher that started the game. Back to the launcher activates this
-    /// process, so it reaches the right one when two copies of a launcher run; else the first with the bundle id.
+    /// process, so it reaches the right one when two copies of a launcher run. Else it reaches the first with the
+    /// bundle id.
     pub launcher_pid: Option<i32>,
     /// `NXKIT_CURSOR_HIDE` (3): the seconds without movement after which the pointer over the game hides, `0` never.
     pub cursor_hide: f64,

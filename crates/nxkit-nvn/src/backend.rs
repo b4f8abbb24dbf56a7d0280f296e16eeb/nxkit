@@ -7,8 +7,8 @@
 //! [`Backend::acquire`], [`Backend::submit`], [`Backend::program_set`]) have empty defaults.
 //!
 //! - A memory pool appears or goes away ([`Backend::register_pool`], [`Backend::unregister_pool`]). The GPU address of the
-//!   pool is `gpu_base + (host - host_base)`. It is a guest address that the backend owns; the backend turns it into the
-//!   address the GPU uses.
+//!   pool is `gpu_base + (host - host_base)`. It is a guest address that the backend owns. The backend turns it into
+//!   the address the GPU uses.
 //! - A frame ends ([`Backend::flush_frame`]). The call hands over the commands, the pass plan and a [`Fence`].
 //! - The game presents a window texture ([`Backend::present`]). It follows the flush of the frame that drew it.
 //! - The CPU waits ([`Backend::wait_fence`], [`Backend::wait_idle`]).
@@ -219,7 +219,7 @@ pub trait Backend: Send + Sync {
     /// event signals were not satisfied: the game gives those signals later, after the flush. The default does nothing.
     fn forced_waits(&self, _fence: Fence, _waits: &[ForcedWait]) {}
 
-    /// The game signalled the event whose counter is at the guest address `word` (`nvnEventSignal`); the counter holds
+    /// The game signalled the event whose counter is at the guest address `word` (`nvnEventSignal`). The counter holds
     /// the new value. The call may come from any thread. The default does nothing.
     fn cpu_event_signalled(&self, _word: u64) {}
 

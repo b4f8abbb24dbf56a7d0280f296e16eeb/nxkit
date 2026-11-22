@@ -198,13 +198,13 @@ fn overlapping_buffers_see_the_same_bytes() {
     assert_eq!(b_gpu % PAGE_SIZE, 0, "B gpuAddress {b_gpu:#x}");
     eprintln!("A at {a_gpu:#x}, B at {b_gpu:#x}, they overlap by 16 KiB");
 
-    // (1) the CPU writes at 20K; the GPU reads it through A at 20K and through B at 4K.
+    // (1) the CPU writes at 20K. The GPU reads it through A at 20K and through B at 4K.
     let first = pattern(64, 1);
     region.cpu_write(20 * KIB, &first);
     assert_eq!(rig.read(a_gpu + 20 * KIB, 64), first, "read through A");
     assert_eq!(rig.read(b_gpu + 4 * KIB, 64), first, "read through B");
 
-    // (2) the GPU writes through A at 24K; the CPU sees it, and a second command buffer reads it through B at 8K.
+    // (2) the GPU writes through A at 24K. The CPU sees it, and a second command buffer reads it through B at 8K.
     let second = pattern(64, 2);
     rig.write(a_gpu + 24 * KIB, &second);
     assert_eq!(region.cpu_read(24 * KIB, 64), second, "CPU after the write");
@@ -213,7 +213,7 @@ fn overlapping_buffers_see_the_same_bytes() {
     assert_eq!(via_a.as_slice(), second.as_slice());
     assert_eq!(rig.read(b_gpu + 8 * KIB, 64), second, "read through B");
 
-    // (3) drop A; B still reads and writes.
+    // (3) drop A. B still reads and writes.
     drop(a);
     assert_eq!(rig.read(b_gpu + 4 * KIB, 64), first, "B after A is gone");
     assert_eq!(rig.read(b_gpu + 8 * KIB, 64), second, "B after A is gone");

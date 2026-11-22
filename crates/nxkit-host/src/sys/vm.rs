@@ -235,7 +235,7 @@ pub struct Regions {
     pub other: Pages,
 }
 
-/// Walks every VM region of the process. The guest range is `[guest_start, guest_end)`; a region that lies across its
+/// Walks every VM region of the process. The guest range is `[guest_start, guest_end)`. A region that lies across its
 /// edge counts by its start. Expensive (the kernel visits the pages of each region): call it every few seconds at most.
 pub fn regions(guest_start: u64, guest_end: u64, page: u64) -> Regions {
     let mut out = Regions::default();
@@ -245,7 +245,7 @@ pub fn regions(guest_start: u64, guest_end: u64, page: u64) -> Regions {
         let mut size: u64 = 0;
         let mut info = SubmapInfo::default();
         let mut count = SUBMAP_INFO_COUNT;
-        // SAFETY: `info` is writable for `count` ints; the other pointers are to locals. The call only reads the
+        // SAFETY: `info` is writable for `count` ints. The other pointers are to locals. The call only reads the
         // map of this task.
         let kr = unsafe {
             mach_vm_region_recurse(
@@ -292,7 +292,7 @@ pub fn regions(guest_start: u64, guest_end: u64, page: u64) -> Regions {
 /// The bytes in use in all malloc zones.
 pub fn malloc_in_use() -> u64 {
     let mut s = MallocStats::default();
-    // SAFETY: a null zone asks for the sum of all zones; `s` is a writable `malloc_statistics_t`.
+    // SAFETY: a null zone asks for the sum of all zones. `s` is a writable `malloc_statistics_t`.
     unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut s) };
     s.size_in_use as u64
 }

@@ -1,7 +1,7 @@
 //! The QoS class of host threads that encode for the GPU, their CPU clock, and a pool of encode threads.
 
 /// Puts the calling thread in the user-interactive QoS class, so that the system runs it on a performance core. Threads
-/// that encode a frame are on the frame's critical path; at the default class the system often put them on the
+/// that encode a frame are on the frame's critical path. At the default class the system often put them on the
 /// efficiency cores, and the caller waited for the slowest of them.
 pub fn set_user_interactive() {
     #[cfg(target_vendor = "apple")]
@@ -31,8 +31,8 @@ pub fn set_utility() {
 }
 
 /// Puts the calling thread in the user-initiated QoS class: below the threads that encode a frame, above background
-/// work. For the compile of a pipeline that draws of the frame on screen wait for; the class carries over to the
-/// system's shader compiler service, which at the utility class runs on the efficiency cores.
+/// work. For the compile of a pipeline that draws of the frame on screen wait for. The class carries over to the
+/// system's shader compiler service. At the utility class, that service runs on the efficiency cores.
 pub fn set_user_initiated() {
     #[cfg(target_vendor = "apple")]
     {

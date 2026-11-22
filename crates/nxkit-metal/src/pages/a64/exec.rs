@@ -14,7 +14,7 @@ pub(crate) struct Regs {
 }
 
 impl Regs {
-    /// The value of general register `n`; 31 reads as zero.
+    /// The value of general register `n`. 31 reads as zero.
     ///
     /// # Safety
     /// `self.x` must point at 31 readable registers.
@@ -27,7 +27,7 @@ impl Regs {
         }
     }
 
-    /// The value of the base register `n`; 31 is the stack pointer.
+    /// The value of the base register `n`. 31 is the stack pointer.
     ///
     /// # Safety
     /// As for [`Regs::gpr`], and `self.sp` must be readable.
@@ -91,7 +91,7 @@ pub(crate) unsafe fn plan(op: &Mem, r: &Regs) -> Plan {
 /// `p` must be readable for `n` bytes.
 pub(super) unsafe fn read(p: *const u8, n: usize, order: Ordering) -> u128 {
     let aligned = (p as usize).is_multiple_of(n);
-    // SAFETY: readable per the caller; the typed pointers are aligned when `aligned`.
+    // SAFETY: readable per the caller. The typed pointers are aligned when `aligned`.
     unsafe {
         match n {
             1 => u128::from(AtomicU8::from_ptr(p.cast_mut()).load(order)),
@@ -120,7 +120,7 @@ pub(super) unsafe fn read(p: *const u8, n: usize, order: Ordering) -> u128 {
 /// `p` must be writable for `n` bytes.
 unsafe fn write(p: *mut u8, n: usize, v: u128, order: Ordering) {
     let aligned = (p as usize).is_multiple_of(n);
-    // SAFETY: writable per the caller; the typed pointers are aligned when `aligned`.
+    // SAFETY: writable per the caller. The typed pointers are aligned when `aligned`.
     unsafe {
         match n {
             1 => AtomicU8::from_ptr(p).store(v as u8, order),
@@ -157,7 +157,7 @@ pub(crate) unsafe fn perform(op: &Mem, r: &Regs, plan: &Plan, p: *mut u8) {
     // Stores read both registers before anything is written.
     for k in 0..regs {
         let reg = if k == 0 { op.rt } else { op.rt2 };
-        // SAFETY: `p` covers `len` bytes; the register file is valid per the caller.
+        // SAFETY: `p` covers `len` bytes. The register file is valid per the caller.
         unsafe {
             let at = p.add(k * n);
             if op.load {

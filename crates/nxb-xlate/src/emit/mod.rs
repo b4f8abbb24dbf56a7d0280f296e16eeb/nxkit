@@ -2,7 +2,7 @@
 //!
 //! `alu` (arithmetic, move, comparison, conversion, flow control) and `mem` (attributes, memory, textures, surfaces) are
 //! written separately: each has a `try_emit` that returns `None` for an `Emit` it does not handle. `emitter` holds the
-//! `EmitterContext` (`Translation/EmitterContext.cs`) that the emitters write the IR through; it reads the state of
+//! `EmitterContext` (`Translation/EmitterContext.cs`) that the emitters write the IR through. It reads the state of
 //! the translation (`crate::translation`), which is why it is here and not in `crate::ir` (W28).
 
 pub mod alu;

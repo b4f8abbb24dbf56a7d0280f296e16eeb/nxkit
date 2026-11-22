@@ -7,7 +7,7 @@
 //!
 //! Width: every compiler run takes a permit from a [`Headroom`] built from [`StreamInputs::limits`]. A few runs
 //! always go, more start while the machine's CPU and memory stay below the limits (90 % each by default), up to the
-//! ceiling. While the shader step keeps the cores busy the stream stays narrow; cores it leaves idle, and all of them
+//! ceiling. While the shader step keeps the cores busy the stream stays narrow. Cores it leaves idle, and all of them
 //! once it ends, fill with compiler runs, one more per settle interval (the reference title, wave 9: a 232 s tail
 //! after the shader step at a fixed three).
 
@@ -263,7 +263,7 @@ impl Stream {
         }
     }
 
-    /// Compile groups as they become ready until [`Stream::finish`] was called and all are done; then merge into
+    /// Compile groups as they become ready until [`Stream::finish`] was called and all are done, then merge into
     /// `c.out`. Run it on its own thread beside the shader step. Returns the report and the planned base count.
     pub fn run(&self, c: &Config, inp: &StreamInputs) -> Result<(Report, usize), String> {
         let t0 = Instant::now();

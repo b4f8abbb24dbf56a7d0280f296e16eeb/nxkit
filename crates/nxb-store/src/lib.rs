@@ -14,13 +14,13 @@
 //!
 //! Rules (design-v2 10.2, 10.3, design-pipeline-rest 8):
 //! - **Digests once.** A blob's digest is computed while its bytes are written ([`Store::put_bytes`],
-//!   [`Store::put_reader`]); manifests record it; consumers take it from the manifest and never re-hash to learn it.
+//!   [`Store::put_reader`]). Manifests record it. Consumers take it from the manifest and never re-hash to learn it.
 //! - **Durability.** Every file is written to a temp name (`O_EXCL`), `fsync`ed, renamed, then its directory is
 //!   `fsync`ed. The manifest is written last, so an entry is visible only when all its blobs are durable.
-//! - **Integrity.** [`Store::lookup`] checks the manifest checksum and every blob's size; [`Store::verify`] also
+//! - **Integrity.** [`Store::lookup`] checks the manifest checksum and every blob's size. [`Store::verify`] also
 //!   re-hashes. Anything damaged moves to `quarantine/` and the lookup misses, so the work is redone.
 //!
-//! - **Locks.** [`Store::open`] holds a shared `flock` on `LOCK`, [`Store::open_exclusive`] an exclusive one;
+//! - **Locks.** [`Store::open`] holds a shared `flock` on `LOCK`, [`Store::open_exclusive`] an exclusive one.
 //!   [`lock_output_dir`] guards a build's output directory.
 //! - **Dirty marker.** Each open store journals what it is about to write under an exclusive lock, a clean drop deletes
 //!   the journal. A journal whose lock is free belongs to a dead process: the next open re-hashes its blobs, verifies its

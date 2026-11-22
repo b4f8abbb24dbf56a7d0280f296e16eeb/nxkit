@@ -70,7 +70,7 @@ pub(crate) fn rewrite_with_loader(
     mut say: impl FnMut(&str),
     mut progress: impl FnMut(u64, u64, &str),
 ) -> Result<Vec<Built>, String> {
-    // the title's file, then one file per family; a family's rules have its id as their scope
+    // the title's file, then one file per family. A family's rules have its id as their scope
     let files: Vec<(String, String)> =
         std::iter::once((format!("{profile}.toml"), rules.to_string()))
             .chain(

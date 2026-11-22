@@ -113,7 +113,7 @@ impl Startup {
         }
     }
 
-    /// Something changed (the start, the activation, the Space). True when the window must toggle now; the request
+    /// Something changed (the start, the activation, the Space). True when the window must toggle now. The request
     /// then counts as under way.
     pub(crate) fn poll(&mut self, active: bool, on_active_space: bool, full_screen: bool) -> bool {
         if !self.want || full_screen || !active || !on_active_space {

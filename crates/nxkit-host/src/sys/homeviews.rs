@@ -235,7 +235,8 @@ impl HoldRing {
 }
 
 /// A capsule with its label centred, cream when `primary`, with the focus ring when `focused`. The label gets a
-/// smaller font, down to 80 %, then is cut, so every capsule keeps its width (`minimumScaleFactor(0.8)`).
+/// smaller font, down to 80 %, then is cut, so every capsule keeps its width (`minimumScaleFactor(0.8)`). A capsule
+/// that is not `enabled` is quiet and its label faint, whatever `primary` says (a disabled `DSSheetPrimaryButton`).
 fn capsule(
     mtm: MainThreadMarker,
     parent: &NSView,
@@ -464,7 +465,7 @@ pub(super) fn fade_in(view: &NSView) {
 pub(super) fn fade_out(view: &NSView) {
     animate(view, 0.0);
     let none: Option<&AnyObject> = None;
-    // SAFETY: `performSelector:withObject:afterDelay:` of `NSObject` on the main thread; `removeFromSuperview` takes no
+    // SAFETY: `performSelector:withObject:afterDelay:` of `NSObject` on the main thread. `removeFromSuperview` takes no
     // argument (the nil object is ignored). The run loop retains the view until then.
     unsafe {
         let _: () = msg_send![

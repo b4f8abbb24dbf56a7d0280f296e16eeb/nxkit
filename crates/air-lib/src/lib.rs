@@ -1,7 +1,7 @@
 //! The metallib container (`MTLB`) as Apple's `metallib` (air-lld) writes it: header, function list,
 //! header extension, public and private metadata, bitcode. Layout from the REA notes
 //! (`rea-frontend/metallib-format.md`). [`write`] computes every derived field (sizes, offsets,
-//! `HASH` = SHA-256 of each bitcode blob, `MDSZ`, `OFFT`); [`parse`] reads a library back into
+//! `HASH` = SHA-256 of each bitcode blob, `MDSZ`, `OFFT`). [`parse`] reads a library back into
 //! parts, so `write(&parse(x)?) == x` for every `metallib` output.
 
 #![deny(missing_docs)]
@@ -60,7 +60,7 @@ pub type Tag = ([u8; 4], Vec<u8>);
 /// One function of the library.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Function {
-    /// Function list tags in order. `HASH`, `MDSZ` and `OFFT` are recomputed by [`write`]; their
+    /// Function list tags in order. `HASH`, `MDSZ` and `OFFT` are recomputed by [`write`]. Their
     /// values here are ignored (but their positions are kept).
     pub tags: Vec<Tag>,
     /// Public metadata tags (`CNST`, `VATT`, `VATY` ...).

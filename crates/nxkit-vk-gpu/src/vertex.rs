@@ -80,7 +80,7 @@ fn used_slots(resources: &[Resource]) -> u32 {
 }
 
 /// Plans the vertex input. An attribute with a format that is no vertex format, at a location above 30 or on a
-/// binding above 13 is left out and named; a pipeline whose vertex buffers find no free slot is an error.
+/// binding above 13 is left out and named. A pipeline whose vertex buffers find no free slot is an error.
 pub(crate) fn plan(
     resources: &[Resource],
     bindings: &[VertexBinding],

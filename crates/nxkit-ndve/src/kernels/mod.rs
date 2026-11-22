@@ -16,14 +16,14 @@
 //! | `luma` | the luma of the 1920x1080 picture as f16, for the resampler | 1920x1080 |
 //! | `pic` | the converted picture, 3 bytes of each pixel in a `uint` | 1920x1080x4 bytes |
 //!
-//! The colour conversion runs once (`ndve_convert`) into `pic`, the 3 bytes of each picture pixel (8 MB); layers 1 and
+//! The colour conversion runs once (`ndve_convert`) into `pic`, the 3 bytes of each picture pixel (8 MB). Layers 1 and
 //! 12 read the picture from there (nothing writes the RGBA8 image of the game). Layer 12 writes the RGB10A2 picture
 //! ([`GameResource::Intermediate`] 1) which the luma pass and the resampler read. Converting in both fused steps took
 //! 0.34 ms of texture work, the pass 0.05 ms.
 //!
 //! Layers 1 + 2 and 11 + 12 are one dispatch each (`ndve_l01_l02`, `ndve_l11_l12`): the first layer's output, with a
 //! one pixel halo, lives in threadgroup memory, so layer 1's output and layer 11's output are never buffers. The
-//! 12 layers still own their packed weights (buffers 0 to 11); the fused steps bind two of them.
+//! 12 layers still own their packed weights (buffers 0 to 11). The fused steps bind two of them.
 
 mod ane;
 
@@ -92,7 +92,7 @@ const PAIR: Geometry = Geometry::Pair {
 };
 const PAIR_TW: usize = 30;
 const PAIR_TH: usize = 12;
-/// Simdgroups of the fused pairs' threadgroups (`THREADS / 32`); only the tests read it.
+/// Simdgroups of the fused pairs' threadgroups (`THREADS / 32`). Only the tests read it.
 #[cfg(test)]
 const PAIR_SIMDGROUPS: usize = 4;
 const T16X4: Geometry = Geometry::Tiles { tw: 16, th: 4 };
@@ -332,8 +332,8 @@ fn game(index: u32, resource: GameResource, writes: bool) -> Binding {
 /// layers 1 + 2 fused (`ndve_l01_l02`),
 /// layers 3 to 10, layers 11 + 12 fused (`ndve_l11_l12`, writes the RGB10A2 picture), the luma pass, the resampler:
 /// 13 steps. The kernels and their binding indices are those of [`crate::msl::SOURCE`]: buffer 0 input, 1 output,
-/// 2 packed weights, 3 skip (the picture in the fused pairs and the conversion), 4 push block, 5 the packed weights of a fused pair's second layer; the resampler's are
-/// listed with its step.
+/// 2 packed weights, 3 skip (the picture in the fused pairs and the conversion), 4 push block, 5 the packed weights of
+/// a fused pair's second layer. The resampler's are listed with its step.
 ///
 /// # Errors
 ///

@@ -14,7 +14,7 @@
 //! |---|---|
 //! | 0 | start of the range, u64, guest GPU address |
 //! | 8 | end of the range, u64, exclusive |
-//! | 16 | delta, u64: the address the GPU reads is `guest address + delta` (wrapping); the real address of the pool minus its guest address, so it is not 0 and it may be negative |
+//! | 16 | delta, u64: the address the GPU reads is `guest address + delta` (wrapping). It is the real address of the pool minus its guest address, so it is not 0 and it may be negative |
 //! | 24 | hint, u32: `chunk << 13 \| entry index` for the 2 MiB chunk `chunk & 8191`, 0 for none |
 //! | 28 | padding |
 //!
@@ -186,7 +186,7 @@ impl Gmem {
         })
     }
 
-    /// A pool appeared. It is added to the pools it overlaps; none of them is dropped.
+    /// A pool appeared. It is added to the pools it overlaps. None of them is dropped.
     pub(crate) fn add_pool(&mut self, start: u64, len: u64) {
         if self.pools.add(start, len) {
             self.generation += 1;
@@ -201,7 +201,7 @@ impl Gmem {
     }
 
     /// Builds the table again when the pools or the snapshot changed. The delta of a pool is the snapshot's real
-    /// address of its start minus the start; a pool that the snapshot does not resolve is left out and counted
+    /// address of its start minus the start. A pool that the snapshot does not resolve is left out and counted
     /// (`gmem.pool-unresolved`). Returns the
     /// table's buffer, which the batch must keep alive.
     pub(crate) fn refresh<B: Backing>(

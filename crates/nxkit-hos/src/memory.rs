@@ -54,7 +54,7 @@ pub trait HostSpace: Send + Sync {
 
     /// Gives the pages back: they read as zero when they are made accessible again, and they are not accessible now.
     /// Pages that share a host page with memory that stays are zeroed instead, and so are the host pages that a pin
-    /// reaches (`crate::pinned`); those lose their access too.
+    /// reaches (`crate::pinned`). Those pages lose their access too.
     fn release(&self, addr: u64, len: u64) -> bool;
 
     /// Writes zeros. The pages stay as accessible as they are.

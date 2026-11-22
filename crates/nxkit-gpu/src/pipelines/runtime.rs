@@ -16,16 +16,18 @@
 //! archive loads), then what the runtime list adds. The shipped list is read only: the run's list notes only what it
 //! lacks, so the player's list holds what this player met beyond it.
 //!
-//! The archives are in `<root>/pipecache/id-<identity>/`; the list is not: it is kept in
-//! `<root>/pipecache/seen-<scheme>.list` across builds (`carry.rs`), so a rebuilt app starts with the list of the
+//! The archives are in `<root>/pipecache/id-<identity>/`. The list is not there. It is kept in
+//! `<root>/pipecache/seen-<scheme>.list` across builds (`carry.rs`). Thus a rebuilt app starts with the list of the
 //! earlier builds and makes its pipelines before the first frame. The identity is a hash of the app build (`GpuConfig::build_id`), the
 //! key scheme ([`KEY_SCHEME`], see `keys.rs`), the macOS build and the GPU: the binaries are only good for that app
 //! build, macOS and GPU, and the keys of the list only for that scheme, so the folder of any other identity is removed
 //! at the start. The host executable is not part of it: a new host build with the same key scheme keeps the cache. `NXKIT_PIPELINE_CACHE=0` turns the whole cache off.
 //!
-//! Writes: the list (`seen-<scheme>.list`) is written every `NXKIT_PIPELINE_CACHE_FLUSH` seconds (30) when the list grew; a new
-//! archive file when pipelines were compiled since the last one, at most every 30 s at first and then at doubling
-//! gaps up to 10 minutes, 5 s after a burst of at least 16 compiles ended (at most every 30 s), and at once when the serializer has captured `NXKIT_PIPELINE_CACHE_ROTATE` (1000) pipelines (a file is another lookup archive, so a run should not make dozens), and both at the exit
+//! Writes: the list (`seen-<scheme>.list`) is written every `NXKIT_PIPELINE_CACHE_FLUSH` seconds (30) when the list
+//! grew. A new archive file is written when pipelines were compiled since the last one. This occurs at most every 30 s
+//! at first and then at doubling gaps up to 10 minutes. It also occurs 5 s after a burst of at least 16 compiles ended
+//! (at most every 30 s). It also occurs at once when the serializer has captured `NXKIT_PIPELINE_CACHE_ROTATE` (1000)
+//! pipelines (a file is another lookup archive, so a run should not make dozens). Both are written at the exit
 //! ([`flush_runtime_cache`]). Every write goes to a temporary file and is renamed. The archives are bounded by
 //! `NXKIT_PIPELINE_CACHE_MB` (512) and 64 files: the oldest go first, and what they held compiles again when asked.
 
@@ -180,7 +182,7 @@ pub(crate) fn plan(
     archive.runtime = files.iter().map(|f| dir.join(&f.0)).collect();
     archive.collect = true;
     // The list lives outside the identity folders. The lists of the folders that were removed above are merged in
-    // first (the folders of the old layout); they are read before the removal.
+    // first (the folders of the old layout). They are read before the removal.
     let list = carry::list_path(&base, KEY_SCHEME);
     let shipped = shipped.map(read_shipped).unwrap_or_default();
     if record::record_on() {
@@ -247,8 +249,8 @@ struct Io {
 
 static SESSION: Mutex<Option<Arc<Session>>> = Mutex::new(None);
 
-/// Writes what the run has made so far, the list and the archive, for the next run. The host calls it at the exit; a
-/// thread of the cache calls it every 30 s. Does nothing when the runtime cache is off.
+/// Writes what the run has made so far, the list and the archive, for the next run. The host calls it at the exit, and
+/// a thread of the cache calls it every 30 s. Does nothing when the runtime cache is off.
 pub fn flush_runtime_cache() {
     let s = SESSION
         .lock()

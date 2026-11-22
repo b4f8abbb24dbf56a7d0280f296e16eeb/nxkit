@@ -480,8 +480,8 @@ mod posix {
 /// `protect` rounds outward when it grants access and inward when it removes it, so a host page that still has a
 /// Horizon page with access stays accessible. Two Horizon pages with different access on one host page get the
 /// access of the last call. `release` leaves a host page that it only partly releases readable and writable. The host
-/// pages that a pin reaches (`crate::pinned`) are zeroed and lose their access instead of being replaced; the rest of the
-/// range is given back (`release.rs`).
+/// pages that a pin reaches (`crate::pinned`) are zeroed and lose their access instead of being replaced. The rest of
+/// the range is given back (`release.rs`).
 impl HostSpace for HostMemory {
     fn page_size(&self) -> u64 {
         posix::page_size().max(PAGE_SIZE)

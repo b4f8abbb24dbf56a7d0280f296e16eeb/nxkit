@@ -14,8 +14,8 @@ pub enum Variant {
     UnetOnly,
 }
 
-/// `[tap][cin][cout]` to `[cout][cin][k][k]` (`tap = k dy + dx`); input channel `q` of the result is channel
-/// `perm[q]` of the source when `perm` is given.
+/// `[tap][cin][cout]` to `[cout][cin][k][k]` (`tap = k dy + dx`). Input channel `q` of the result is channel `perm[q]`
+/// of the source when `perm` is given.
 fn conv_w(w: &[u16], k: usize, cin: usize, cout: usize, perm: Option<&[usize]>) -> Vec<u16> {
     let mut out = vec![0u16; w.len()];
     for co in 0..cout {
@@ -74,7 +74,7 @@ pub(super) fn build(
 
 /// The U-Net: returns the clipped picture, which is the `final` output and the resampler's input.
 fn unet(b: &mut Builder, blob: &[u8], x: &Tensor) -> Result<Tensor, String> {
-    // pixel_unshuffle channel q = c * 4 + s; the network's channel k = 4 * s + c.
+    // pixel_unshuffle channel q = c * 4 + s, and the network's channel k = 4 * s + c.
     let q_to_k: Vec<usize> = (0..16).map(|q| 4 * (q % 4) + q / 4).collect();
     let mut t = b.pixel_unshuffle(x, 2);
     let mut outs: Vec<Option<Tensor>> = vec![None; 13];

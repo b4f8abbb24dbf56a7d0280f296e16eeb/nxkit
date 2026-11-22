@@ -500,8 +500,8 @@ pub fn scan(n: &Nup) -> Result<Scan> {
     scan_with(n, false)
 }
 
-/// [`scan`]; with `newest_dlc` (the generic path) the DLC records are read by [`addon_records`], so several complete
-/// versions of one DLC title may be present and the newest is selected.
+/// Like [`scan`]. With `newest_dlc` (the generic path), [`addon_records`] reads the DLC records. Then several complete
+/// versions of one DLC title can be present, and the scan selects the newest.
 pub fn scan_with(n: &Nup, newest_dlc: bool) -> Result<Scan> {
     let p = &n.path;
     let bases: Vec<&Package> = n.packages.iter().filter(|k| k.kind == BASE).collect();

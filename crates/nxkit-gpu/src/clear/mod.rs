@@ -2,7 +2,7 @@
 //!
 //! The clear fills a box of a texture with one colour. The encoder packs that colour into the bytes of one texel of the
 //! destination format and blits a block of such texels from the scratch buffer. Every uncompressed colour format of
-//! Metal that NVN maps to has a packing; depth, stencil and compressed formats have none (NVN clears those through
+//! Metal that NVN maps to has a packing. Depth, stencil and compressed formats have none (NVN clears those through
 //! render targets, not with this call).
 
 #[cfg(test)]

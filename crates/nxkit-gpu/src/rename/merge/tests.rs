@@ -123,8 +123,8 @@ fn the_kernels_fill_the_copy_and_merge_the_gpu_words_back() {
     assert_eq!(after[33], 0xbeef);
 }
 
-/// A probe: the copy and the copy of the start state are filled from guest memory; at the end every word that differs from
-/// the start state goes back, and no other.
+/// A probe: the copy and the copy of the start state are filled from guest memory. At the end every word that differs
+/// from the start state goes back, and no other.
 #[test]
 fn a_probe_writes_back_every_word_that_the_gpu_changed_and_only_those() {
     let Ok(ctx) = Context::system_default() else {
@@ -179,7 +179,7 @@ fn a_probe_writes_back_every_word_that_the_gpu_changed_and_only_those() {
     let both = words(&slot, 128);
     assert_eq!(&both[..40], &g[..]);
     assert_eq!(&both[64..104], &g[..]);
-    // The GPU changes words 3 and 20 of the copy; the CPU changes word 7 of guest memory meanwhile.
+    // The GPU changes words 3 and 20 of the copy. The CPU changes word 7 of guest memory meanwhile.
     let mut c = both[..40].to_vec();
     c[3] = 7777;
     c[20] = 8888;

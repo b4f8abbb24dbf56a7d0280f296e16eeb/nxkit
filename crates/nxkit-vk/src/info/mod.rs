@@ -1,5 +1,5 @@
 //! Decoders of the structs that the game passes: each reads a `Vk*CreateInfo` (or an array of regions) from guest
-//! memory into a plain Rust value. The values still name other objects by handle; the front end resolves them.
+//! memory into a plain Rust value. The values still name other objects by handle. The front end resolves them.
 //!
 //! The ABI layer calls a decoder with [`crate::mem::GuestMemory`] and the address that the game gave, then the front
 //! end with the value. Tests call them with [`crate::mem::TestMemory`].

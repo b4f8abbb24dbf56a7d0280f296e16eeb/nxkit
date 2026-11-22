@@ -335,7 +335,7 @@ impl Texture {
 
     /// Makes the view that a shader needs for image atomics: `R32Uint` or, with `signed`, `R32Sint`, over the levels and
     /// slices of `v` (its `format` is ignored). The texture must be 4 bytes per pixel. A texture made with
-    /// `shader_atomic` serves any 4 byte colour format; an `R32Uint` or `R32Sint` texture serves itself.
+    /// `shader_atomic` serves any 4 byte colour format. An `R32Uint` or `R32Sint` texture serves itself.
     pub fn atomic_view(&self, v: &ViewDesc, signed: bool) -> Result<Texture> {
         let d = self.inner.desc;
         let ok = d.shader_write

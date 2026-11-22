@@ -5,7 +5,7 @@ const MODULE: u64 = BASE + 0x4_0000;
 const DATA: u64 = MODULE + 0x2000;
 const BSS: u64 = DATA + 0x1000;
 
-/// A rig whose memory model holds `modules`; [`build`] is this with none.
+/// A rig whose memory model holds `modules`. [`build`] is this with none.
 pub(super) fn build_modules(
     host: Arc<dyn HostSpace>,
     guest: Arc<dyn GuestMemory>,

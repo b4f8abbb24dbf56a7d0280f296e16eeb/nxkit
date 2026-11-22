@@ -341,7 +341,7 @@ fn writers(detail: &FrameDetail, flags: &[Flag]) {
         if c.buffer == 0 {
             continue;
         }
-        // The size of the buffer side is estimated from the strides; a copy without strides counts its first byte.
+        // The size of the buffer side is estimated from the strides. A copy without strides counts its first byte.
         let len = match (c.image_stride, c.row_stride) {
             (s, _) if s > 0 => s * u64::from(c.size[2].max(1)),
             (_, r) if r > 0 => r * u64::from(c.size[1].max(1)) * u64::from(c.size[2].max(1)),

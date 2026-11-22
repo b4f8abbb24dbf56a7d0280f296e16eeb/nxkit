@@ -29,7 +29,7 @@ pub struct Weights {
 }
 
 impl Weights {
-    /// Decode a vr blob of [`BLOB_LEN`] or [`SHORT_BLOB_LEN`] bytes; `None` for any other length.
+    /// Decode a vr blob of [`BLOB_LEN`] or [`SHORT_BLOB_LEN`] bytes. Returns `None` for any other length.
     pub fn from_vr_blob(blob: &[u8]) -> Option<Weights> {
         if blob.len() != BLOB_LEN && blob.len() != SHORT_BLOB_LEN {
             return None;
@@ -53,8 +53,9 @@ impl Weights {
     }
 }
 
-/// The network on one patch. `x[k][n]` is the input with `k` along x and `n` along y; the result `y[r][c]` has `r`
-/// along y and `c` along x for six layers (an odd number of transposes), the other way round for three. Every `f16()` of the notes is one [`hmma`]; there is a ReLU and a transpose between layers.
+/// The network on one patch. `x[k][n]` is the input with `k` along x and `n` along y. For six layers the result
+/// `y[r][c]` has `r` along y and `c` along x (an odd number of transposes). For three layers it is the other way round.
+/// Every `f16()` of the notes is one [`hmma`]. There is a ReLU and a transpose between layers.
 pub fn network(w: &Weights, x: &Mat) -> Mat {
     let mut z = *x;
     let mut d = [[0.0; 16]; 16];

@@ -335,7 +335,7 @@ mod tests {
         bufs: [AudioBuffer; 2],
     }
 
-    /// Renders 512 frames of a tone on the 5.1 channel `ch` through a mixer for `kind`; returns left and right.
+    /// Renders 512 frames of a tone on the 5.1 channel `ch` through a mixer for `kind`, and returns left and right.
     fn render(kind: u32, ch: usize) -> (Vec<f32>, Vec<f32>) {
         let mut t = 0usize;
         let fill: Fill = Box::new(move |out: &mut [f32]| {
@@ -359,7 +359,7 @@ mod tests {
             n: 2,
             bufs: [buf(&mut l), buf(&mut r)],
         };
-        // SAFETY: a zeroed time stamp is a valid value; the sample time is marked valid.
+        // SAFETY: a zeroed time stamp is a valid value. The sample time is marked valid.
         let mut stamp: AudioTimeStamp = unsafe { std::mem::zeroed() };
         stamp.mFlags = objc2_core_audio_types::AudioTimeStampFlags(1);
         for _ in 0..4 {

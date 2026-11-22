@@ -14,7 +14,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 
 /// The process-wide kernel. Set by the first successful [`nxkit_kernel_init`].
-// Process-wide (W26): the kernel that `nxkit_kernel_init` (C ABI) makes; the svc gate reaches it with no context.
+// Process-wide (W26): the kernel that `nxkit_kernel_init` (C ABI) makes. The svc gate reaches it with no context.
 static KERNEL: OnceLock<Arc<Kernel>> = OnceLock::new();
 
 /// Runs the guest code of a thread on the calling host thread and returns when the guest thread ends.

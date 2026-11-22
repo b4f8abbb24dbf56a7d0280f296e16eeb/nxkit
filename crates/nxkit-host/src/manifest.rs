@@ -160,7 +160,7 @@ impl Memory {
         self.heap + self.alias + self.stack + RESERVE_FRONT
     }
 
-    /// The profile with another `reserve` or alias region; the heap region takes what is left. None keeps a size.
+    /// The profile with another `reserve` or alias region. The heap region takes what is left. None keeps a size.
     pub fn resized(self, reserve: Option<u64>, alias: Option<u64>) -> Result<Memory> {
         let alias = alias.unwrap_or(self.alias);
         let heap = heap_of(reserve.unwrap_or(self.reserve()), alias, self.stack)?;
@@ -173,7 +173,7 @@ impl Memory {
 
     /// The profile with `NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` (sizes as `parse_size` reads them) in place of
     /// the title's numbers, to try a smaller split before the title module gets it. The GPU buffer covers the heap,
-    /// stack and alias regions and the driver wires all of it, so each GiB less is a GiB of RAM; a region smaller than
+    /// stack and alias regions and the driver wires all of it, so each GiB less is a GiB of RAM. A region smaller than
     /// the game's peak makes its `SetHeapSize` or `MapPhysicalMemory` fail (the host prints the peaks at the end of a
     /// run).
     pub fn with_env(self, env: &crate::hostenv::HostEnv) -> Result<Memory> {

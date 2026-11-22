@@ -207,7 +207,7 @@ pub fn reserve_guest(game: &Game) -> Result<(Reservation, Game, Layout)> {
         got.checked_add(len).is_some_and(|e| e <= layout::SPACE_END)
             && got.wrapping_sub(start) % layout::REGION_ALIGN == 0
     };
-    // The hints first; when the system gives unaligned addresses, a range with room for the alignment.
+    // The hints first. When the system gives unaligned addresses, a range with room for the alignment.
     let res = sys::reserve_where(&hints, len, accept)
         .or_else(|first| {
             sys::reserve_aligned(

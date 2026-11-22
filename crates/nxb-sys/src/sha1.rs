@@ -1,5 +1,5 @@
 //! Hardware SHA-1 block compression (ARMv8 SHA1 instructions), detected at run time. Output-neutral, like
-//! [`crate::sha256`]; `nxb-model` tests it on the same vectors as its scalar path.
+//! [`crate::sha256`]. `nxb-model` tests it on the same vectors as its scalar path.
 
 /// True when this CPU has the SHA1 instructions (part of the `sha2` crypto feature in Rust's naming).
 pub fn available() -> bool {

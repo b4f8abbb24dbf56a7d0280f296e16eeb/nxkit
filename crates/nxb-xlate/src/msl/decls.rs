@@ -123,7 +123,7 @@ pub(super) fn uninit(info: &StructInfo, f: usize, skip: &BTreeSet<A>) -> BTreeSe
             out.insert(l);
         }
     }
-    // A local that is never written keeps its initial value; this loop only lists locals the walk saw written.
+    // A local that is never written keeps its initial value. This loop only lists locals the walk saw written.
     out
 }
 

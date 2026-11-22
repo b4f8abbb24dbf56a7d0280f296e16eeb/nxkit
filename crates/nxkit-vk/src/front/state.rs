@@ -45,7 +45,7 @@ impl Buffer {
 #[derive(Clone, Debug)]
 pub(crate) struct Image {
     pub(crate) desc: ImageDesc,
-    /// The row pitch of a linear image whose texture lies over its memory; 0 otherwise.
+    /// The row pitch of a linear image whose texture lies over its memory, or 0 otherwise.
     pub(crate) pitch: u64,
     /// The bytes of the image (for its memory requirements and subresource layout).
     pub(crate) size: u64,

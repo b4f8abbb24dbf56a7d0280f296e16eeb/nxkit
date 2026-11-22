@@ -9,11 +9,11 @@
 //!   `nxtitles` depends on a `T` crate.
 //! - `limits`: source files at most 600 lines, stage modules of `nxb-stages` at most 400.
 //! - `modules`: the module cycles inside each crate do not grow (ADR W24). The accepted cycle groups are in
-//!   `xtask/module-cycles.txt`; a new or larger group fails, and so does a group that got smaller until the file is
+//!   `xtask/module-cycles.txt`. A new or larger group fails, and so does a group that got smaller until the file is
 //!   shrunk. `graph <crate>...` prints the groups of a crate and the edges inside them with their first place.
 //!
-//! - `settings`: no runtime crate reads an `NXKIT_*` variable from the process; the snapshot `nxkit_abi::env` is the one
-//!   source (ADR W27).
+//! - `settings`: no runtime crate reads an `NXKIT_*` variable from the process. The snapshot `nxkit_abi::env` is the
+//!   one source (ADR W27).
 //! - `statics`: the process-wide statics of each runtime crate do not grow (ADR W26, `xtask/statics.txt`).
 //!
 //! Usage: `cargo run -p xtask -- [layers] [limits] [modules] [settings] [statics]` (all when no argument is given), or

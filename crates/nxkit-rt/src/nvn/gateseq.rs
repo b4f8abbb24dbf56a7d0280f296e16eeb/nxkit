@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn last_signals_are_remembered_by_word_and_sync() {
-        // The state is global and the category is off in tests, so the recorders do nothing; the formatting of an
+        // The state is global and the category is off in tests, so the recorders do nothing. The formatting of an
         // unknown word and sync is what a trace shows for a wait nobody signalled.
         gpu_signal(1, 2);
         cpu_signal(1);

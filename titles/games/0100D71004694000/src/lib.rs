@@ -10,7 +10,7 @@
 //!
 //! RenderDragon finds `vkGetInstanceProcAddr` through `nn::ro::LookupSymbol` and asks for every Vulkan function by
 //! name. The engine also repairs RenderDragon's unsigned bone indices in the shaders and keeps shader resource tables
-//! over 24 entries; nxkit's Vulkan layer has neither yet. The module holds the build data.
+//! over 24 entries. nxkit's Vulkan layer has neither yet. The module holds the build data.
 //!
 //! The rewrite rules are data in `rules/0100D71004694000.toml`: the build row of v10747904 and the engine's SDK-wide
 //! rules for the `sdk` module (15 rules: the node area of 62 MB and the 2 MB alignment of large regions, one rule per

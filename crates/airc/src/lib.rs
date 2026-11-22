@@ -1,4 +1,4 @@
-//! `airc`: drives the own MSL front end. The command line is [`main`]; the `airc` program is a thin binary over it
+//! `airc`: drives the own MSL front end. The command line is [`main`]. The `airc` program is a thin binary over it
 //! (and `nxb airc` calls it).
 //!
 //! ```text

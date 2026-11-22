@@ -75,7 +75,7 @@ def entries(rows, static):
 def listfile(name, doc, ty, items):
     (root / 'titles' / 'nxtitles' / 'src' / name).write_text(f'''//! {doc}
 //!
-//! Written by `tools/gen_title_registry.py` from the folders; do not edit.
+//! `tools/gen_title_registry.py` writes this file from the folders. Do not edit it.
 
 use nxtitle::{ty};
 

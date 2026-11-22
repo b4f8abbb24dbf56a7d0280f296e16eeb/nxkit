@@ -27,7 +27,7 @@ pub(super) fn declared_views<'a>(
 }
 
 /// For each pass, whether one of its draws binds a texture in the vertex stage. Only such a render pass has to hold its
-/// vertex stage until an earlier pass wrote what it samples; the others let their vertex work overlap the fragment work
+/// vertex stage until an earlier pass wrote what it samples. The others let their vertex work overlap the fragment work
 /// before them.
 pub(super) fn vertex_sampling_passes(
     frame: &Frame,

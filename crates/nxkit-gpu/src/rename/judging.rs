@@ -73,7 +73,7 @@ impl State {
                 }
             }
             // A range that only waits to be judged (or has nothing to do) is looked at once in 60 flushes, to keep it from
-            // being forgotten; the others are looked at in every flush.
+            // being forgotten. The others are looked at in every flush.
             if matches!(class, Class::Never | Class::Watch)
                 && !learn_frame
                 && !now.is_multiple_of(60)
@@ -113,7 +113,7 @@ impl State {
                 && (c.ro || probeable(addr, c.size) || class == Class::Idle)
                 && u64::from(c.size) <= budget;
             let learn_judge = matches!(class, Class::Learning | Class::Rename);
-            // Only a range that is judged in this flush is read; most bound ranges are not.
+            // Only a range that is judged in this flush is read. Most bound ranges are not.
             let want = (c.sample.is_some() && learn_judge)
                 || (learn_frame && c.learn.sampling())
                 || in_flight;
@@ -150,10 +150,10 @@ impl State {
                     atwait: None,
                 });
                 if !c.ro && matches!(c.learn.class(), Class::Never | Class::Merge) {
-                    // A written range is judged on a copy (`Kind::Probe`); the flush says below whether it got one.
+                    // A written range is judged on a copy (`Kind::Probe`). The flush says below whether it got one.
                     renaming.push((addr, c.size, Kind::Probe));
                 } else if c.ro {
-                    // A read-only range is measured when the wait begins; the frame needs no full wait.
+                    // A read-only range is measured when the wait begins. The frame needs no full wait.
                     out.watching = true;
                 } else {
                     out.sampling = true;
@@ -178,7 +178,7 @@ impl State {
         renaming.sort_unstable();
         let ranges: Vec<(u64, u32)> = renaming.iter().map(|&(a, s, _)| (a, s)).collect();
         // A range that passed the check against other uses in the last flushes is trusted for a while (the buffers that a
-        // game binds do not move); the check is made for all others, and for all once in 60 flushes.
+        // game binds do not move). The check is made for all others, and for all once in 60 flushes.
         let trusted: Vec<bool> = renaming
             .iter()
             .map(|&(a, _, k)| {

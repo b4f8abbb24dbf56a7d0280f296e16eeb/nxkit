@@ -52,7 +52,7 @@ fn state_that_the_gpu_keeps_is_never_renamed() {
     for fence in 1..=200u64 {
         // The CPU does not reset the word: the GPU keeps adding.
         let f = play(&mut st, &g, fence, 3, false);
-        // A judged frame may give the range a probe copy; nothing else is renamed.
+        // A judged frame may give the range a probe copy. Nothing else is renamed.
         assert!(f.renamed.iter().all(|r| r.kind == Kind::Probe));
     }
     assert_eq!(st.cands[&SUM].learn.class(), Class::Never);
@@ -68,7 +68,7 @@ fn a_renamed_range_that_turns_into_state_is_demoted_by_the_check() {
         fence += 1;
         play(&mut st, &g, fence, 3, true);
     }
-    // Renamed frames: the host copies and writes back; here the range is only counted until the check is due.
+    // Renamed frames: the host copies and writes back. Here the range is only counted until the check is due.
     let mut checked = false;
     for _ in 0..RECHECK_EVERY + 40 {
         fence += 1;
@@ -227,7 +227,7 @@ fn snapshots_over_the_budget_of_a_frame_are_left_out() {
     let g = Guest(RefCell::new(vec![0; 0x400]));
     let mut st = State::default();
     let big = (SNAPSHOT_BUDGET / 2 + 1) as u32;
-    // Reads past the small guest fail; the state only needs the sizes, so the reader says yes.
+    // Reads past the small guest fail. The state only needs the sizes, so the reader says yes.
     let read = |_: u64, b: &mut [u8]| {
         b.fill(0);
         true

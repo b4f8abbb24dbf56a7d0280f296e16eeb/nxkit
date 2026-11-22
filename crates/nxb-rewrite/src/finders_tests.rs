@@ -41,7 +41,7 @@ fn mov(d: u32, s: u32) -> u32 {
     0xAA00_03E0 | (s << 16) | d
 }
 
-/// UE 4.2x / 5: the name into x1, blr (register); the object into x19, blr, `str x0, [x19, #0x10]`.
+/// UE 4.2x / 5: the name into x1, blr (register), then the object into x19, blr, `str x0, [x19, #0x10]`.
 fn register_form(at: usize, obj: i64) -> Vec<u32> {
     let mut w = vec![
         ldrx(8, 0),

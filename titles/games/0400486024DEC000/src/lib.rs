@@ -53,9 +53,9 @@ const PATCHES_PY: Evidence = Evidence::Recorded {
 /// 256 MB stack region and the heap region, with the Switch 2's 9 GB application pool. The host's GPU buffer covers
 /// the heap, stack and alias regions, and the driver wires all of it: this split costs 12.4 GiB of wired RAM per run
 /// (measured 2026-11-09). Shrink `reserve` and `alias` to the peaks of the host's `region use` line of a long run
-/// (`NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` try them first); they stay as they are until then. 48 MB of system resource, as
-/// the NPDM declares, so virtual address memory is on. The build row names no display version (`v131072` twice), so
-/// the app shows the number of the update.
+/// (`NXKIT_MEM_RESERVE` and `NXKIT_MEM_ALIAS` try them first). They stay as they are until then. 48 MB of system
+/// resource, as the NPDM declares, so virtual address memory is on. The build row names no display version (`v131072`
+/// twice), so the app shows the number of the update.
 const SETTINGS: Fact<Settings> = Fact::new(
     Settings {
         memory: Memory {
@@ -76,7 +76,7 @@ const SETTINGS: Fact<Settings> = Fact::new(
         tex_dirty_upload: true,
         // Measured on nxkit: with it on, `nvnSyncWait` for the newest frame waits only for the frame before, so the
         // game's CPU writes for frame N+1 (the storage buffers of its GPU foliage culling, which the overlap does not
-        // copy) raced with frame N on the GPU and the foliage showed large white blotches; with it off the picture is
+        // copy) raced with frame N on the GPU and the foliage showed large white blotches. With it off, the picture is
         // right. The cost is the opening movie, which was faster with it on (18-30 fps without).
         overlap: false,
         // Measured on nxkit: judged by how long frames were shown, the step went to 20 fps at a cost of 0.71 vsyncs

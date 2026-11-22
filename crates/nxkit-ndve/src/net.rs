@@ -3,7 +3,7 @@
 //! All numbers are from section 4 of `docs/plans/ndve-native.md` and are marked V there (read from the shader code and
 //! the file bytes), except which tensor is the skip of an up layer, which is I (inferred, strongly supported).
 //! Sizes are those of a 1920x1080 movie. The network works at any picture size that is a multiple of 8 in both
-//! directions; [`Layer::in_size`] and [`Layer::out_size`] scale the table.
+//! directions. [`Layer::in_size`] and [`Layer::out_size`] scale the table.
 
 /// Length of the weight blob in bytes.
 pub const BLOB_LEN: usize = 0x3c320;

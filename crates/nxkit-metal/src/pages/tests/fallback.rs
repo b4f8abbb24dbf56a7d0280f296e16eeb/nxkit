@@ -52,7 +52,7 @@ fn what_cannot_be_emulated_waits_and_is_counted_by_class() {
     let s0 = pg.stats();
     let base = m.addr(1) as usize + 1024;
     let reader = std::thread::spawn(move || {
-        // SAFETY: inside page 1 of the test mapping, which outlives the joined thread; LD2 is not emulated.
+        // SAFETY: inside page 1 of the test mapping, which outlives the joined thread. LD2 is not emulated.
         unsafe {
             std::arch::asm!("ld2 {{v0.16b, v1.16b}}, [{p}]", p = in(reg) base, out("v0") _, out("v1") _, options(nostack));
         }
@@ -109,7 +109,7 @@ fn a_store_across_the_page_border_and_a_lane_store_are_done_by_the_handler_witho
     let _ = pg.flush_mirrored(1, &[(m.addr(2), P)], &[(m.addr(1), 256)], None, &mut st);
     let s0 = pg.stats();
     let border = (m.addr(1) + P) as usize;
-    // SAFETY: the pair lies on the border of pages 1 and 2 of the test mapping; the handler does the store.
+    // SAFETY: the pair lies on the border of pages 1 and 2 of the test mapping. The handler does the store.
     unsafe {
         asm!("stp {a}, {b}, [{p}]", p = in(reg) border - 8, a = in(reg) 0x1122_3344_5566_7788u64,
             b = in(reg) 0x99aa_bbcc_ddee_ff00u64, options(nostack));
@@ -150,7 +150,7 @@ fn atomics_exclusives_and_ld1_outside_the_written_bytes_are_done_by_the_handler_
     let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
     let (m, _mir, pg) = emulating(4);
     let mut st = Collect::default();
-    // The frame may write bytes 0 to 255; everything below is outside.
+    // The frame may write bytes 0 to 255. Everything below is outside.
     let _ = pg.flush_mirrored(1, &[], &[(m.addr(1), 256)], None, &mut st);
     let s0 = pg.stats();
     let base = m.addr(1) as usize;
@@ -166,8 +166,8 @@ fn atomics_exclusives_and_ld1_outside_the_written_bytes_are_done_by_the_handler_
             std::thread::spawn(move || {
                 let p = base + 1024;
                 for i in 0..N {
-                    // SAFETY: the counters lie inside page 1 of the test mapping, which outlives the joined threads;
-                    // the offsets are aligned for their accesses.
+                    // SAFETY: the counters lie inside page 1 of the test mapping, which outlives the joined threads.
+                    // The offsets are aligned for their accesses.
                     unsafe {
                         // LDADD (add one), through the acquire-release form.
                         asm!(".arch_extension lse", "ldaddal {one}, {old}, [{p}]",

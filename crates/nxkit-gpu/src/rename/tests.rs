@@ -114,9 +114,9 @@ fn run_to(st: &mut State, g: &Guest, last: u64) {
 /// `cpu_word` of a judged frame in which the CPU writes nothing.
 const NO_CPU: u32 = u32::MAX;
 
-/// A judged frame of a written range, as the host sees it: the flush gives the range a copy (a probe); the CPU writes
-/// `cpu_word` after it; the wait begins (`landed` says whether the GPU's word has already gone back into guest memory);
-/// then the GPU is done with a copy that has `gpu_word` changed.
+/// A judged frame of a written range, as the host sees it: the flush gives the range a copy (a probe). The CPU writes
+/// `cpu_word` after it. The wait begins (`landed` says whether the GPU's word has already gone back into guest memory).
+/// Then the GPU is done with a copy that has `gpu_word` changed.
 fn judged_rw(
     st: &mut State,
     g: &Guest,

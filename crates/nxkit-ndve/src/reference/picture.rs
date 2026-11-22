@@ -24,8 +24,8 @@ pub(super) fn unorm8(v: f32) -> u8 {
 // ---------------------------------------------------------------------------------------------------------------
 // Colour conversion
 
-/// A bilinear sample at the unnormalised texel position (`x`, `y`), clamp to edge. The filter is in f32; the hardware
-/// uses fixed-point weights (R: the difference is below an 8-bit step).
+/// A bilinear sample at the unnormalised texel position (`x`, `y`), clamp to edge. The filter is in f32, but the
+/// hardware uses fixed-point weights (R: the difference is below an 8-bit step).
 fn bilinear<const N: usize>(
     fetch: impl Fn(usize, usize) -> [f32; N],
     x: f32,
@@ -194,7 +194,7 @@ fn mlp(blocks: &[Block; 6], x: &[f32; 256]) -> [u16; 64] {
 ///
 /// `push` is the 21 words of the push block (words 2 and 3 are the integer maximum x and y of the luma window, 10 and
 /// 11 the floats 1/2560 and 1/1440, 18 the flip base, 19 the flip enable, 20 the quantise and dither enable).
-/// `weights` are the 0x3000 bytes of the six blocks. `dither` is used when word 20 is not zero; without a texture the
+/// `weights` are the 0x3000 bytes of the six blocks. `dither` is used when word 20 is not zero. Without a texture the
 /// dither value is 0.5, which adds nothing.
 ///
 /// The output is `8 * ceil(w / 6)` by `8 * ceil(h / 6)` (2560x1440 for 1920x1080). Output block (`bx`, `by`) of 8x8
@@ -202,8 +202,8 @@ fn mlp(blocks: &[Block; 6], x: &[f32; 256]) -> [u16; 64] {
 /// `[0, w2]` x `[0, w3]` (the window mapping is inferred from the PR: I). Window element `X[row][col]` is the pixel at
 /// (`x0 + col`, `y0 + row`). Luma is `fma(B, 0.0722, fma(R, 0.2126, G * 0.7152))` in f32, rounded to half. Each output
 /// pixel is `(-0.0) + (s + delta)` per channel in half, with `s` the picture sampled bilinearly at
-/// `((x + 0.5) * w10, (y + 0.5) * w11)` and rounded to half (the TEX unit returns half); with `w20 != 0` then
-/// `k = rint(fma(v, 255, dither * 2 - 1))` and `v = k * (1/255)`; alpha is 1; the row is `w18 - y` when `w19 != 0`.
+/// `((x + 0.5) * w10, (y + 0.5) * w11)` and rounded to half (the TEX unit returns half). With `w20 != 0`,
+/// `k = rint(fma(v, 255, dither * 2 - 1))` and `v = k * (1/255)`. Alpha is 1. The row is `w18 - y` when `w19 != 0`.
 pub fn resample(
     picture: &Picture10,
     weights: &[u8],

@@ -3,7 +3,7 @@
 //! Every guest texture has a private Metal copy of about its size, and the guest copy stays in guest memory. A texture
 //! that the game uploaded once and does not draw any more holds that Metal copy for nothing. The store notes in which
 //! frame each Metal texture was last used, and every [`SCAN_EVERY`] frames it drops the ones that were not used for
-//! `NXKIT_TEX_EVICT` frames (default 600, about 10 s; 0 turns it off), when the guest copy is the current one. The
+//! `NXKIT_TEX_EVICT` frames (default 600, about 10 s, 0 turns it off), when the guest copy is the current one. The
 //! texture is made again, and uploaded again, when the game uses it later.
 //!
 //! A texture whose Metal copy may be newer than the guest copy never goes: a render target (an attachment at any
@@ -92,7 +92,7 @@ impl TextureStore {
     }
 
     /// Ends a frame. Every [`SCAN_EVERY`] frames it drops the textures that were idle for long enough. Returns how
-    /// many Metal textures it dropped. The textures are in `retired`; the caller drops them with `take_retired`.
+    /// many Metal textures it dropped. The textures are in `retired`. The caller drops them with `take_retired`.
     pub(crate) fn end_frame(&mut self) -> usize {
         self.frame += 1;
         let mut dropped = self.evict_scan();

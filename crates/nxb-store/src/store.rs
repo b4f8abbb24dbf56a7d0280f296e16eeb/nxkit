@@ -338,7 +338,7 @@ fn hash_file(path: &Path) -> Result<FileDigest, StoreError> {
     })
 }
 
-/// Collects an entry's files; [`EntryWriter::commit`] writes the manifest last.
+/// Collects an entry's files. [`EntryWriter::commit`] writes the manifest last.
 #[derive(Debug)]
 pub struct EntryWriter<'s> {
     store: &'s Store,

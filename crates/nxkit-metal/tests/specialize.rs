@@ -166,7 +166,7 @@ fn a_specialized_pipeline_draws_with_its_format_and_write_mask() {
     );
 }
 
-/// The build's archive holds unspecialized pipelines; one written by a cache that compiled its base stands in for it.
+/// The build's archive holds unspecialized pipelines. One written by a cache that compiled its base stands in for it.
 #[test]
 fn an_archived_base_is_specialized_without_a_compile() {
     let Some(ctx) = ctx() else { return };
@@ -272,7 +272,7 @@ fn a_specialized_pipeline_draws_what_the_full_compile_draws() {
         let (got, s) = spec.render_traced(key, &d).unwrap();
         assert!(matches!(s, Source::Specialized(_)), "{key}: {s:?}");
         let (want, got) = (draw(&ctx, want), draw(&ctx, got));
-        // With alpha to coverage on one sample, alpha 0.5 covers no sample, so both draw nothing; only equality counts.
+        // With alpha to coverage on one sample, alpha 0.5 covers no sample, so both draw nothing. Only equality counts.
         if !a2c {
             assert!(
                 want.chunks(4).all(|p| p != [0, 0, 255, 255]),

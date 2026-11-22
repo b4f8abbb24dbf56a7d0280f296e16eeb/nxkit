@@ -134,7 +134,7 @@ impl<'a> PackFile<'a> {
 
     /// The network programs in table order: a compute control section that follows a config entry. The weights are
     /// the last weights entry before it (the three variants of one blob each carry the same weights entry). Programs
-    /// that share their control and code with an earlier one are listed again; callers deduplicate.
+    /// that share their control and code with an earlier one are listed again. Callers deduplicate.
     pub fn networks(&self) -> Result<Vec<NetworkEntry>, Error> {
         let mut out = Vec::new();
         let (mut config, mut weights) = (None, None);

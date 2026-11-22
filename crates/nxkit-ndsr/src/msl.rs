@@ -1,7 +1,7 @@
 //! The Metal kernels of the network, as one MSL source.
 //!
 //! The text is kept in `.metal` files next to this module and joined at compile time. Every kernel of
-//! [`crate::plan::Plan::steps`] is a `kernel void` of this source; `kernels.rs` names them and sets their grids.
+//! [`crate::plan::Plan::steps`] is a `kernel void` of this source. `kernels.rs` names them and sets their grids.
 //!
 //! - `common.metal`: the K = 16 step with its f16 rounding (copied from `nxkit-ndve`).
 //! - `ndsr.metal`: the vr network program as one kernel template and its 15 instantiations, one per input scale and

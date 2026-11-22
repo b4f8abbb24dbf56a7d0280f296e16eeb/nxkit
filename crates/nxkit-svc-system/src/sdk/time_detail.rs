@@ -21,7 +21,7 @@ static DETAIL_CLAIM_ADDR: AtomicU64 = AtomicU64::new(0);
 const TIME_POINT_LEN: u64 = 0x18;
 
 /// `ClaimPeriodicBenefitWithUserSystemClock(PeriodicBenefitClaimContext*, const ClockSnapshot&, const TimeSpan&,
-/// const TimeSpan&, const CheckCalendarTimeCallback*)`: periodic benefit claim (time service session check); the
+/// const TimeSpan&, const CheckCalendarTimeCallback*)`: periodic benefit claim (time service session check). The
 /// SDK's detail implementation compares the snapshots.
 extern "C" fn claim_periodic_benefit(
     ctx: u64,
@@ -46,7 +46,7 @@ extern "C" fn claim_periodic_benefit(
 }
 
 /// `detail::GetStandardUserSystemClockAutomaticCorrectionUpdatedTime(SteadyClockTimePoint*)`: when automatic
-/// correction was last switched (time service); not known on the host: a time point of no clock.
+/// correction was last switched (time service). It is not known on the host: a time point of no clock.
 extern "C" fn automatic_correction_updated_time(point: u64) -> u32 {
     put_zero(point, TIME_POINT_LEN);
     0

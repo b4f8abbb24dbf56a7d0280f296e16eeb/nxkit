@@ -1,6 +1,6 @@
 //! The settings of the NVN procs from the `NXKIT_*` environment (W27): every key that the crate reads, its default and
 //! its parsing. The host builds them once from its snapshot ([`RtSettings::from_env`]) and hands them to
-//! `nvn::install` in [`crate::nvn::Settings::env`]; the procs read them from the installed context.
+//! `nvn::install` in [`crate::nvn::Settings::env`]. The procs read them from the installed context.
 
 use nxkit_abi::env::Env;
 

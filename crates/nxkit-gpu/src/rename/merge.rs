@@ -47,7 +47,7 @@ kernel void nxkit_merge_in(device const merge_job *jp [[buffer(0)]], uint t [[th
     if (t >= j.words) return;
     uint block = j.cmask[t >> 5];
     bool c = ((block >> (t & 31u)) & 1u) != 0u;
-    // The words of the CPU are packed in `cvals`; `cprefix` counts those before each block of 32 words.
+    // The words of the CPU are packed in `cvals`. `cprefix` counts those before each block of 32 words.
     uint v = c ? j.cvals[j.cprefix[t >> 5] + popcount(block & ((1u << (t & 31u)) - 1u))] : j.guest[t];
     j.slot[t] = v;
     // A probe keeps a second copy of the state at the start of the frame.
@@ -76,7 +76,7 @@ pub(crate) struct MergeRun {
     pub(crate) guest: u64,
     /// The real address of the copy.
     pub(crate) slot: u64,
-    /// For a probe, the real address of the copy as it started; 0 for a merge range.
+    /// For a probe, the real address of the copy as it started, 0 for a merge range.
     pub(crate) copy2: u64,
 }
 

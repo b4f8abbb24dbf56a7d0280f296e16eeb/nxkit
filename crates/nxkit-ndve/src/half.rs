@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(to_f32(0x0001), 2.0f32.powi(-24));
         assert_eq!(from_f32(2.0f32.powi(-24)), 0x0001);
         assert_eq!(to_f32(0x0400), 2.0f32.powi(-14));
-        // Half of the smallest subnormal is a tie and goes to even (zero); a hair more rounds up.
+        // Half of the smallest subnormal is a tie and goes to even (zero). A hair more rounds up.
         assert_eq!(from_f32(2.0f32.powi(-25)), 0x0000);
         assert_eq!(from_f32(2.0f32.powi(-25) * 1.001), 0x0001);
         // The largest subnormal plus a half ulp rounds up into the smallest normal.

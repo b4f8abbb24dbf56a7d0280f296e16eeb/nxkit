@@ -56,7 +56,7 @@ fn an_overlapping_pool_keeps_the_part_past_the_earlier_one() {
 #[test]
 fn hints_name_the_entry_that_holds_a_whole_chunk() {
     let size = 1u64 << HINT_SHIFT;
-    // chunks 3 and 4 lie inside [2.5 chunks, 5 chunks); chunk 2 is cut by the start
+    // chunks 3 and 4 lie inside [2.5 chunks, 5 chunks), and chunk 2 is cut by the start
     let t = build_table([(size * 5 / 2, size * 5, 0)]);
     let hint_of = |c: u64| u32_at(&t.bytes, (c as usize % ENTRIES) * ENTRY_BYTES + 24);
     assert_eq!(hint_of(2), 0);
@@ -243,7 +243,7 @@ fn a_pool_is_split_at_its_member_pages_with_the_delta_of_the_mirror_run() {
     use crate::pools::overlay::{Overlay, PAGE, Run};
     const VA: u64 = 0xc0_0000_0000;
     let snap = PoolSnapshot::whole(VA, 64 * PAGE, Fake(0x9000_0000_0000));
-    // Pages 10, 11 and 14 are members; the run for them starts at page 8.
+    // Pages 10, 11 and 14 are members. The run for them starts at page 8.
     let mut bits = vec![0u64; 1];
     for p in [10, 11, 14] {
         bits[0] |= 1 << p;

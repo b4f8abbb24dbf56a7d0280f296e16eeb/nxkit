@@ -49,7 +49,7 @@ Families and a title answer questions through hooks. `None` means no opinion.
 | `pacing` | `RuntimeHooks` | the game, the display or a fixed rate paces the frames |
 | `pace_profile` | `RuntimeHooks` | the keys that steer the frame step and the presents |
 | `limits` | `RuntimeHooks` | where the game's own frame limit sits, so that the host can write the target into it |
-| `temporal_view` | `RuntimeHooks` | the engine's layout for MetalFX temporal upscaling: the byte offsets of `ClipToPrevClip`, the jitter and the view size in the view uniform buffer, the velocity code (`scale`, `bias`, `y_up`, `zero_means_camera`) and `depth_reversed`. A family answers it only for an engine version whose layout it knows, otherwise the title does |
+| `temporal_view` | `RuntimeHooks` | the engine's layout for MetalFX temporal upscaling: the byte offsets of `ClipToPrevClip`, the jitter and the view size in the view uniform buffer, the velocity code (`scale`, `bias`, `y_up`, `zero_means_camera`) and `depth_reversed`. A family answers it only for an engine version whose layout it knows. Otherwise the title answers it |
 | `temporal_draws` | `RuntimeHooks` | the draws of the game that MetalFX temporal upscaling replaces: the upscale draw (fragment key, colour slot), the source draw (fragment key, depth slot, velocity slot, stage and slot of the view uniform buffer) and the pass-through draws (fragment key, slot). `nxb build` writes `settings.temporal_upscale` of `game.json` (R72) only when `temporal_view` and `temporal_draws` are both answered |
 | `runtime` | `RuntimeHooks` | whether the nxkit runtime runs one service of the game |
 
@@ -129,9 +129,9 @@ The Nintendo Switch 2 game on NVN2, family `agl`. The records are the game notes
 
 - The family marks the `agl_ndsr_vr` networks as the game's upscaler. The archive path that identifies them is unverified.
 - The title states `draw_barriers`, `mem_map_limit`, `render_cond`, `tex_flush_upload` and `tex_dirty_upload`. The last three come from agl's depth prepass and the terrain maps the CPU writes. They are title facts, because Breath of the Wild sets none of them.
-- The game builds with `nxb build --nup <game>.nup`. The title module gives update v131072, the modules `main`, `subsdk0` and `sdk` with their build IDs, the shader groups, the marker `Pack/ZsDic.pack.zs` and the run settings recorded at `37f076a5` (memory split, `sys_resource`, `mem_map_limit`, `fps_target 120` with `fps_max 120` (the record says 60; 120 is not checked in the game yet), `pad_layout full`, the graphics keys).
-- The NVN function list is not a hand list. The title module gives an empty list, and the build takes the `nvn…` names in the read-only data of the modules: 774 names in v131072 (738 in `main`, 36 more in `sdk`). That is what the game can fetch through the NVN loader, more than one route calls.
-- `fps_target 60` and `120` need the frame ratio stub (`MATCH_FRAME_STEP`). It is the one rule of `rules/0400486024DEC000.toml`, a `frame-step` rule for main build `e0f3ccfaf50065ae4ea01eb5aeb13b1a`: at `main+0x6e6cc4` (`fdiv s8,s1,s0`) the ratio becomes the host's step × base rate / 60, with the step in vsyncs of 1/60 s: the whole step (state page `+0x20`) at 60, and at 120 the variable step (`+0x50`, 1/30 s units) times 2, so half the ratio per 120 Hz tick. The game steps its time by that ratio, so the pacing is the display's. The dynamic resolution stub of the same file is a separate change.
+- The game builds with `nxb build --nup <game>.nup`. The title module gives update v131072, the modules `main`, `subsdk0` and `sdk` with their build IDs, the shader groups, the marker `Pack/ZsDic.pack.zs` and the run settings recorded at `37f076a5`. The run settings are the memory split, `sys_resource`, `mem_map_limit`, `fps_target 120` with `fps_max 120`, `pad_layout full` and the graphics keys. For `fps_target`, the record says 60, but 120 is not checked in the game yet.
+- The NVN function list is not a hand list. The title module gives an empty list. The build takes the `nvn…` names in the read-only data of the modules: 774 names in v131072 (738 in `main`, 36 more in `sdk`). That is what the game can fetch through the NVN loader, more than one route calls.
+- `fps_target 60` and `120` need the frame ratio stub (`MATCH_FRAME_STEP`). It is the one rule of `rules/0400486024DEC000.toml`, a `frame-step` rule for main build `e0f3ccfaf50065ae4ea01eb5aeb13b1a`. At `main+0x6e6cc4` (`fdiv s8,s1,s0`) the ratio becomes the host's step × base rate / 60. The step is in vsyncs of 1/60 s. At 60 it is the whole step (state page `+0x20`). At 120 it is the variable step (`+0x50`, 1/30 s units) times 2, so half the ratio per 120 Hz tick. The game steps its time by that ratio. Thus the pacing is the display's. The dynamic resolution stub of the same file is a separate change.
 - The `.nup` of v131072 is one standalone update: 186,587 RomFS files, 26.2 GB. 146,000 files (23.2 GB) are stored raw and 40,600 (3.0 GB) as one zstd frame each. The build writes the RomFS as a folder in one pass with the shader split (no `RomFS.img`), and links the files into the app.
 
 ### Fixed resolution
@@ -156,7 +156,7 @@ Open questions:
 The Nintendo Switch game on NVN, update 1.9.0 (v1114112), family `agl`. The records are the game notes at a commit, with the day they were read.
 
 - The title states `fps_target 60`, `present_snap`, `pso_mtl4` and `screen_aspect`.
-- `fps_target 60` needs the frame-step stubs. They are the 168 steps of `rules/01007EF00011E000.toml` in the title module, which `rewrite_rules()` gives to the build.  These steps have the variable step, the render pool, the heap growth and the output size. The screen shape, layout and FOV stubs (about 2900 more steps) are not part of the file. They use the same sites and state page offsets as the variable step, so they need their own state page layout and host support first, and `screen_aspect` does nothing until then.
+- `fps_target 60` needs the frame-step stubs. They are the 168 steps of `rules/01007EF00011E000.toml` in the title module, which `rewrite_rules()` gives to the build.  These steps have the variable step, the render pool, the heap growth and the output size. The screen shape, layout and FOV stubs (about 2900 more steps) are not part of the file. They use the same sites and state page offsets as the variable step. Thus they need their own state page layout and host support first. Until then, `screen_aspect` does nothing.
 - The settings are recorded values. R19 sets the target to 120 fps through the same frame step stubs, so `fps_target 60` is a record and not a cap. R10 and R17 replace `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys. The host reader reads no `settings` object yet.
 - `Settings` names no engine. An engine with a texture pool or a frame rate variable uses `texture_pool_mb` and `fps_cvar`.
 - The game is the pilot for the nxkit runtime.
@@ -189,16 +189,16 @@ renderer. The records are the game notes in the engine tree at `034e91a8`, read 
 
 - `BuildHooks::graphics_api` is `Vulkan`, so `game.json` says `"graphics": "vulkan"` and the host installs the Vulkan
   layer (`nxkit-vk`, `nxkit-rt::vk`, `nxkit-vk-gpu`, R64) and no NVN layer. `main` holds 126 `vk*` names (imports and
-  names it fetches through `vkGet*ProcAddr`); each one has an export.
+  names it fetches through `vkGet*ProcAddr`). Each one has an export.
 - The modules are `main` and `sdk`. `subsdk0` (the Vulkan loader) and `subsdk1` (NVIDIA's driver) are replaced by the
   host's layer, so the build row of the rules names neither.
 - The shaders are the 74 SPIR-V files of `Content/EffectsForgeSwitch` (`romfs_marker` is `Default.vert`). The build
-  translates them with `nxb-spirv` into `shaders/vk_shaders.metallib` and its table `vk_shaders.tsv` (D21); the table
+  translates them with `nxb-spirv` into `shaders/vk_shaders.metallib` and its table `vk_shaders.tsv` (D21). The table
   equals the engine's row for row. The game has no NVN shaders, no shader split and no pipeline archive.
-- The rules are the build row and the engine's SDK-wide rules for `sdk`: both match this sdk (the node area at
-  `0xd2240`, implementation 2 of 8; the 2 MB alignment at `0xd2434`, implementation 1 of 4).
+- The rules are the build row and the engine's SDK-wide rules for `sdk`: both match this sdk. The node area is at
+  `0xd2240`, implementation 2 of 8. The 2 MB alignment is at `0xd2434`, implementation 1 of 4.
 - `main` imports 39 `EOS_*` functions (Epic Online Services, from an NRO through `nn::ro`). The host refuses an NRR that
-  registers only online SDKs, so the game never loads the module; the names are `optional_imports` and stay 0.
+  registers only online SDKs. Thus the game never loads the module. The names are `optional_imports` and stay 0.
 - The memory partition is the engine's (Link's Awakening's, not measured for this game), `pad_layout full`.
 - Checked on 2026-11-21 (MacBook Pro, a fresh `nxb build` of the folder with both packages): the game shows the title
   screen and plays a room of Tartarus at about 60 presents a second, 0 skipped draws. The layer logs one gap: texel
@@ -222,8 +222,8 @@ has the same parts:
 - The NVN function list is empty: the build reads the names from the modules.
 - `rules/<title id>.toml`: the package's build row, the byte cuts (`CUTS`) and capabilities of `patches.py` for the
   builds of that row, the byte cuts of `sdk_patches.py` for an sdk build of the row, the function-matched rules of
-  `patches.py` (`MATCH_CUTS`), the engine's SDK-wide rules for `sdk` (node area 62 MB, regions aligned to 2 MB; one
-  `[[rule]]` per reviewed implementation, so 12 in all, and 15 in the modules of the second import below). The engine-wide
+  `patches.py` (`MATCH_CUTS`), the engine's SDK-wide rules for `sdk` (node area 62 MB, regions aligned to 2 MB, one
+  `[[rule]]` per reviewed implementation). This gives 12 rules in all, and 15 in the modules of the second import below. The engine-wide
   rule of Unity 2018 from `engine_patches.py` is in the engine family `unity`, not in the title files. Each rule names its source in `evidence`. A frame step stub (`FRAME_STEP`, `MATCH_FRAME_STEP`)
   and code stubs (`STUBS`) are not byte cuts and are left out. A game whose `fps_target` needs the left-out stub gets
   `fps_target 0`, as the engine gives a build without its stub.
@@ -248,9 +248,9 @@ has the same parts:
 - Unreal Engine 4 on NVN calls `nvnDeviceSetDepthMode(NEAR_IS_ZERO)` (seen in OCTOPATH TRAVELER, 4.18). The depth
   mode is a capability, not a profile key: the host follows the call, and the build learns it from the recorded pipeline
   list. It is a candidate fact for the family `unreal` once a run of a second Unreal title shows it.
-- OCTOPATH TRAVELER sets `spatial_audio` in its run settings: CRIWARE ADX2 mixes its buses into a six-channel AudioOut
-  in the SDK's order (L R C LFE Ls Rs, `criNcVoice_InterleavePcmFloat32toInt16`), so the game gains from 5.1 played as
-  spatial audio. The setting is the default of the launch option `NXKIT_SPATIAL_AUDIO`; the player's choice wins.
+- OCTOPATH TRAVELER sets `spatial_audio` in its run settings. CRIWARE ADX2 mixes its buses into a six-channel AudioOut
+  in the SDK's order (L R C LFE Ls Rs, `criNcVoice_InterleavePcmFloat32toInt16`). Thus the game gains from 5.1 played as
+  spatial audio. The setting is the default of the launch option `NXKIT_SPATIAL_AUDIO`. The player's choice wins.
 - `shader_facts.tsv` is the folder's `shader_facts_manual.tsv`, where it has one.
 
 ### The second import (`131bd013`)
@@ -271,7 +271,7 @@ Story Cyber Sleuth, Well Dweller, Balatro, Super Mario Galaxy and Galaxy 2 are n
 
 The tests of each module parse its profile and its rules with `nxb-rewrite` and count the rules. The rules of Pokémon
 Scarlet were run through the rewriter on the extracted v0: both SDK-wide rules match its sdk once. `nxb build
---dry-run` was run on Pokémon Scarlet (v0, the module's version; the update v786432 in the folder is not used).
+--dry-run` was run on Pokémon Scarlet (v0, the module's version). The update v786432 in the folder is not used.
 
 Notes: "frame step stub" means that `rules` leave a frame step stub out, "`fps_target` 0" that the module sets 0 for it,
 "code stubs" that `STUBS` are left out, "`snowdrop_pools`" that the build places Snowdrop's pools with the defaults
@@ -494,10 +494,10 @@ Notes: "frame step stub" means that `rules` leave a frame step stub out, "`fps_t
 The folders without a module:
 
 - `010049900F546000` Super Mario 3D All-Stars: an application of several programs (a launcher, Super Mario 64, Super
-  Mario Sunshine; Galaxy is 32-bit ARM): nxb build makes one program, and Super Mario 64 runs its code through nn::jit,
+  Mario Sunshine, and Galaxy, which is 32-bit ARM). nxb build makes one program, and Super Mario 64 runs its code through nn::jit,
   which nxkit stops.
 - `010049900F546001` Super Mario 3D All-Stars: Super Mario 64: a program of Super Mario 3D All-Stars (program_of), not a
-  game of its own; it runs its code through nn::jit, which nxkit stops.
+  game of its own. It runs its code through nn::jit, which nxkit stops.
 - `010049900F546002` Super Mario 3D All-Stars: Super Mario Sunshine: a program of Super Mario 3D All-Stars (program_of),
   not a game of its own.
 - `010037C022390000` Hitman: Absolution: the folder holds only `feral_defaults.tsv` for the packer, no `game.tsv`.

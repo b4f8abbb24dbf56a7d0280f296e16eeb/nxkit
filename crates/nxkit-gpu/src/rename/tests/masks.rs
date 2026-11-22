@@ -206,7 +206,7 @@ fn the_judging_backs_off_when_nothing_new_is_found_and_returns_when_it_is() {
         flush(&mut st);
     }
     assert_eq!(st.period(), SLOW_PERIOD);
-    // A ring of buffers that comes round is nothing new; an address never seen before is.
+    // A ring of buffers that comes round is nothing new. An address never seen before is.
     st.candidate(SUM + 0x100, 0x40);
     assert_eq!(st.period(), LEARN_PERIOD);
     for _ in 0..QUIET_FRAMES {

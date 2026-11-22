@@ -170,7 +170,7 @@ struct Shared {
     notices: Vec<Notice>,
 }
 
-// Process-wide (W26): the pacing state of `nn::vi` and of the frame step stubs; the game calls in through a C function
+// Process-wide (W26): the pacing state of `nn::vi` and of the frame step stubs. The game calls in through a C function
 // with no Rust context.
 static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
 

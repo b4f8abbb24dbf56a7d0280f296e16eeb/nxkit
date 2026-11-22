@@ -11,7 +11,7 @@ fn a_re_shared_orphan_stays_alive_when_its_slot_is_reused() {
     with_pools(&mut f);
     let a = tex(&mut f, 0x10_0000);
     f.register_texture(0, a, TextureView::identity()).unwrap();
-    // the game finalizes the texture; the slot keeps the record as an orphan
+    // the game finalizes the texture, and the slot keeps the record as an orphan
     assert!(!f.finalize_texture(a).unwrap());
     let desc = f.resources().get(a).unwrap().desc;
     let bytes = f.resources().get(a).unwrap().layout.size;
@@ -30,7 +30,7 @@ fn a_re_shared_orphan_stays_alive_when_its_slot_is_reused() {
     assert!(shared && again == a);
     let c = f.texlife();
     assert_eq!((c.reshared, c.orphans, c.orphan_bytes), (1, 0, 0));
-    // another texture takes the slot; a texture object names the record, so it must not go
+    // another texture takes the slot. A texture object names the record, so it must not go
     let b = tex(&mut f, 0x20_0000);
     f.register_texture(0, b, TextureView::identity()).unwrap();
     assert!(f.take_dropped().is_empty());
@@ -82,7 +82,7 @@ fn the_scan_counts_records_outside_the_live_pools() {
     let size = f.resources().get(a).unwrap().layout.size;
     f.register_texture(0, a, TextureView::identity()).unwrap();
     f.finalize_texture(a).unwrap();
-    // a pool over the first texture only; the pool record is shared by the tests of the crate, so it is removed again
+    // a pool over the first texture only. The pool record is shared by the tests of the crate, so it is removed again
     let pool = HOST + 0x10_0000;
     crate::pools::made(PoolInfo {
         host: pool,

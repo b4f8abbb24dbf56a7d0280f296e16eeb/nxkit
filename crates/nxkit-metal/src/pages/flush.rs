@@ -4,8 +4,8 @@ use super::*;
 
 impl Pages {
     /// The flush of frame `frame`. First the pages that the CPU dirtied since the last flush go back to clean and read
-    /// only, except the ones the new frame may write; then the pages in `written` (host address and length) are
-    /// protected against all access and tagged with the frame, becoming tracked if they were not. The frame's runs
+    /// only, except the ones the new frame may write. Then the pages in `written` (host address and length) are
+    /// protected against all access and tagged with the frame. They become tracked if they were not. The frame's runs
     /// are released by [`complete`](Self::complete).
     pub fn flush(&self, frame: u64, written: &[(u64, u64)]) -> FlushStats {
         let mut st = FlushStats::default();
@@ -29,7 +29,7 @@ impl Pages {
             }
         } else {
             for slot in &SHARED.log[..n] {
-                // A handler that took its index may not have stored yet; it does so within a few instructions.
+                // A handler that took its index may not have stored yet. It does so within a few instructions.
                 let mut spins = 0;
                 let v = loop {
                     let v = slot.swap(0, Ordering::AcqRel);
@@ -317,9 +317,9 @@ impl Pages {
     }
 
     /// Stages the pages of `emu` (page numbers, sorted) that the handler stored to, except the ones in `done` (sorted),
-    /// which were staged whole. The bytes come through the alias, because a page of a frame in flight has no access; the
-    /// stale blocks go along with a mask and are not copied into the mirror. The flag is taken first: a store after it
-    /// sets it again and logs the page for the next flush. Returns the pages staged.
+    /// which were staged whole. The bytes come through the alias, because a page of a frame in flight has no access.
+    /// The stale blocks go along with a mask and are not copied into the mirror. The flag is taken first: a store after
+    /// it sets it again and logs the page for the next flush. Returns the pages staged.
     pub(super) fn stage_emulated(
         &self,
         emu: &[u32],

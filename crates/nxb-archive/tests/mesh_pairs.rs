@@ -100,7 +100,7 @@ fn a_vertex_shader_that_pulls_is_archived_with_its_bp_library() {
     );
 }
 
-/// A vertex shader without inputs keeps its `_b` library; one with inputs that cannot pull (no `pull` field, or one at
+/// A vertex shader without inputs keeps its `_b` library. One with inputs that cannot pull (no `pull` field, or one at
 /// another slot) needs the vertex layout of the draw and is left out.
 #[test]
 fn a_vertex_shader_with_inputs_that_cannot_pull_is_left_out() {
@@ -136,8 +136,8 @@ fn a_vertex_shader_with_inputs_that_cannot_pull_is_left_out() {
     );
 }
 
-/// With the device in the depth mode 0 to 1 the host draws `entry_z` (`main0_z`), so the plan archives that function;
-/// the runs tell the mode by the entries they recorded (`plan::keeps_depth`).
+/// With the device in the depth mode 0 to 1 the host draws `entry_z` (`main0_z`), so the plan archives that function.
+/// The runs tell the mode by the entries they recorded (`plan::keeps_depth`).
 #[test]
 fn the_depth_mode_zero_to_one_archives_the_entry_that_keeps_the_depth() {
     let d = dir().join("zero");

@@ -398,7 +398,7 @@ extern "C" fn nxkit_gate_dispatch(ret: u64, regs: *mut u64) {
         Some(Kind::Obs(arg)) => {
             // SAFETY: the assembly passes its own frame, which holds x0..x30 as its first 31 words. An observation
             // gate does not publish it to the kernel, so no other thread reads it. The handler gets x0..x28 only, so
-            // it cannot change the guest's x29 or the return point; the gate loads x0..x28 back but x18.
+            // it cannot change the guest's x29 or the return point. The gate loads x0..x28 back but x18.
             let regs = unsafe { std::slice::from_raw_parts_mut(regs, nxkit_abi::obs::REGS) };
             gates.obs.run(arg, regs, ret);
         }

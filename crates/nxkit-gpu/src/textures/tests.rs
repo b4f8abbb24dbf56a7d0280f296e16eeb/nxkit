@@ -407,7 +407,7 @@ fn a_linear_texture_reads_the_bytes_the_cpu_writes_later_without_an_upload() {
     );
     assert_eq!(stats.textures_in_place, 1);
     assert!(!TextureStore::needs_upload(&res, table.get(id).unwrap()));
-    // The CPU writes texel (3, 2) after the texture was made; the record stays `GuestNewer` or `InSync` as it was.
+    // The CPU writes texel (3, 2) after the texture was made. The record stays `GuestNewer` or `InSync` as it was.
     guest.write(0x1000 + 2 * 64 + 3 * 4, &[1, 2, 3, 4]).unwrap();
     let got = res.tex.debug_read_raw(&ctx, &[[3, 2]]).unwrap();
     assert_eq!(got[0], [1, 2, 3, 4]);

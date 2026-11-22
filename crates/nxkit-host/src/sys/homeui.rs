@@ -8,8 +8,9 @@
 //! Back to the launcher pauses the game in the background: the game is told it is in the background, the window
 //! leaves full screen so its Space goes away, the launcher (`NXKIT_LAUNCHER_PID`, else `NXKIT_LAUNCHER_BUNDLE_ID`) gets
 //! the activation and the application hides. It comes back when it is active again (the launcher activates it, the
-//! Dock, Command-Tab), when it is shown again, or when the launcher posts `org.nxkit.resume.<pid>`; `org.nxkit.quit.<pid>` quits it. The state goes
-//! out as the distributed notifications `org.nxkit.paused.<pid>` and `org.nxkit.resumed.<pid>`.
+//! Dock, Command-Tab), when it is shown again, or when the launcher posts `org.nxkit.resume.<pid>`.
+//! `org.nxkit.quit.<pid>` quits it. The state goes out as the distributed notifications `org.nxkit.paused.<pid>` and
+//! `org.nxkit.resumed.<pid>`.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -177,7 +178,7 @@ fn later(observer: &Observer, selector: objc2::runtime::Sel, delay: f64) {
 /// Watches the window's exit from full screen (`on`), or stops.
 fn observe_exit(ui: &Ui, on: bool) {
     let center = NSNotificationCenter::defaultCenter();
-    // SAFETY: the observer implements the selector with one `NSNotification` argument and lives as long as the UI;
+    // SAFETY: the observer implements the selector with one `NSNotification` argument and lives as long as the UI.
     // `removeObserver:name:object:` takes it off again.
     unsafe {
         let name = NSWindowDidExitFullScreenNotification;
@@ -194,7 +195,7 @@ fn observe_exit(ui: &Ui, on: bool) {
     }
 }
 
-/// Puts the Home button on `window`; the screens go over `overlay`, the window's content view above the game.
+/// Puts the Home button on `window`. The screens go over `overlay`, the window's content view above the game.
 pub(super) fn install(
     mtm: MainThreadMarker,
     window: &NSWindow,

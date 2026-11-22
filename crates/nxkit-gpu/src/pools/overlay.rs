@@ -205,7 +205,7 @@ impl<B: Backing> Overlay<B> {
         }
     }
 
-    /// The same view, marked as the view of the flush `frame`; `forced` says that the flush ran submits before the CPU
+    /// The same view, marked as the view of the flush `frame`. `forced` says that the flush ran submits before the CPU
     /// signals they wait for, so what the CPU writes until those signals belongs to the frame.
     #[must_use]
     pub fn with_frame(mut self, frame: u64, forced: bool) -> Self {

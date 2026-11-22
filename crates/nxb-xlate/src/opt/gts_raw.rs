@@ -79,7 +79,7 @@ pub(super) fn raw_target(
 
 /// The word load of a group whose range one resolve found in one table entry: the helper takes the address, the
 /// entry the resolve chose (0 when no single entry holds the range) and that entry's host delta. A chosen entry
-/// loads from the address plus the delta at once; otherwise the helper is `raw_target`'s.
+/// loads from the address plus the delta at once. Otherwise, the helper is `raw_target`'s.
 pub(super) fn raw_load_in_range(ir: &mut crate::ir::Ir, env: &mut Env) -> R<Option<Function>> {
     raw_op(ir, env, Inst::Load, StorageKind::GlobalMemory, true, true)
 }

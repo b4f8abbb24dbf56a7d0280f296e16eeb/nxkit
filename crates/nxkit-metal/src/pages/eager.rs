@@ -34,7 +34,7 @@ pub(super) fn eager_quiesce() {
         std::thread::yield_now();
     }
 }
-/// The most completed frames that wait for the eager thread; older ones are dropped (their pages copy on a fault).
+/// The most completed frames that wait for the eager thread. Older ones are dropped (their pages copy on a fault).
 const EAGER_QUEUE_MAX: usize = 16;
 
 pub(super) fn eager_submit(jobs: Vec<FrameRuns>) {

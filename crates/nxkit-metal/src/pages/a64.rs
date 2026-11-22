@@ -11,7 +11,7 @@
 //!
 //! | form | encodings |
 //! |---|---|
-//! | `Ldr`, `Str` | `LDR`/`STR` of `b`, `h`, `w`, `x` with an unsigned offset, a pre or post index, a register offset (`UXTW`, `LSL`, `SXTW`, `SXTX`, optional shift), and `LDUR`/`STUR`; `LDRB`, `LDRH`, `STRB`, `STRH` |
+//! | `Ldr`, `Str` | `LDR`/`STR` of `b`, `h`, `w`, `x` with an unsigned offset, a pre or post index, a register offset (`UXTW`, `LSL`, `SXTW`, `SXTX`, optional shift), and `LDUR`/`STUR`. Also `LDRB`, `LDRH`, `STRB`, `STRH` |
 //! | `Ldrs` | `LDRSB`, `LDRSH`, `LDRSW` into `w` or `x`, all the addressing modes above |
 //! | `Ldp`, `Stp`, `Ldpsw` | `LDP`/`STP` of `w` or `x`, `LDPSW`, signed offset, pre and post index, and `LDNP`/`STNP` |
 //! | `VLdr`, `VStr`, `VLdp`, `VStp` | the same for `b`, `h`, `s`, `d`, `q` registers |
@@ -23,7 +23,7 @@
 //!
 //! The executor works on a [`Regs`] of raw pointers, so the handler passes the saved thread state and the tests pass a
 //! local array. Aligned accesses of 1, 2, 4 and 8 bytes are single atomic accesses (relaxed, acquire for `LDAR`,
-//! release for `STLR`); a 16-byte access is two 8-byte ones; a misaligned access copies bytes.
+//! release for `STLR`). A 16-byte access is two 8-byte ones. A misaligned access copies bytes.
 
 mod atomic;
 mod decode;
@@ -191,11 +191,11 @@ impl Reason {
 /// How the address is formed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
-    /// The base plus an offset; the base register is not changed.
+    /// The base plus an offset. The base register is not changed.
     Offset(i64),
     /// The base plus an offset, which is also written back to the base.
     Pre(i64),
-    /// The base; the base plus an offset is written back after the access.
+    /// The base. The base plus an offset is written back after the access.
     Post(i64),
     /// The base plus a register, extended by `option` (2 `UXTW`, 3 `LSL`, 6 `SXTW`, 7 `SXTX`) and shifted left.
     Reg {

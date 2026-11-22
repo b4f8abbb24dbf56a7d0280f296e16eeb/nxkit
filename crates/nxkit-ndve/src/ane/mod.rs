@@ -4,8 +4,8 @@
 //! resampler weights of [`crate::file::Network::resampler`]) into the files of an `.mlpackage` directory. The
 //! caller writes the files and loads them with Core ML (`compute_units = cpuAndNeuralEngine`). Nothing here does I/O,
 //! and equal weights give equal bytes. The graph is the "fullnb" model of the feasibility study
-//! (`docs/plans/ndve-ane.md`): 50 operations, all on the Neural Engine, 9.1 ms on an M-series Mac; the model of
-//! [`Variant::UnetOnly`] has 33 operations. The protobuf encoder is hand written ([`mod@proto`]); the field numbers are
+//! (`docs/plans/ndve-ane.md`): 50 operations, all on the Neural Engine, 9.1 ms on an M-series Mac. The model of
+//! [`Variant::UnetOnly`] has 33 operations. The protobuf encoder is hand written ([`mod@proto`]). The field numbers are
 //! from the public coremltools `.proto` files (BSD-3-Clause, `THIRD_PARTY.md`).
 //!
 //! # What the model computes
@@ -22,8 +22,8 @@
 //!   at the top of the picture, no flip. A row stride larger than 1920 values (IOSurface padding) is the caller's to
 //!   declare to Core ML.
 //! - plane 0, 1, 2 = R, G, B of the picture the game's colour conversion writes (RGBA8 unorm) as `k / 255` rounded
-//!   to f16, i.e. the value in `[0, 1]` a shader reads from an RGBA8 texture, converted to half. plane 3 = alpha =
-//!   `1.0` everywhere (the network's weights use it; the picture's alpha is 255).
+//!   to f16, that is, the value in `[0, 1]` a shader reads from an RGBA8 texture, converted to half. plane 3 = alpha =
+//!   `1.0` everywhere (the network's weights use it, and the picture's alpha is 255).
 //!
 //! # Outputs (f16, NCHW, planar)
 //!
@@ -37,11 +37,11 @@
 //!
 //! For each output pixel `(X, Y)` of the 2560x1440 RGBA8 image: sample `q` (the quantised `final`, three channels)
 //! with a linear sampler at `uv = ((X + 0.5) / 2560, (Y + 0.5) / 1440)`, clamp-to-edge, result in f16 (this is the
-//! bilinear 4/3 of the game); `v = f16(s + delta[Y][X])` for R, G and B; if the game's quantise flag is set,
+//! bilinear 4/3 of the game). Then `v = f16(s + delta[Y][X])` for R, G and B. If the game's quantise flag is set,
 //! `k = rint(fma(v, 255, dither * 2 - 1))` (the dither texture value read at the pixel with the coordinates masked
-//! with `0x1ff`) and `out = k * (1 / 255)`, else `v` is written as it is (the RGBA8 store quantises); alpha = 1; the row is flipped when the game says so
-//! (`Y_out = flip_base - Y`). `epi.py` of the feasibility study emulates it: it reached the reference within
-//! 1/255.
+//! with `0x1ff`) and `out = k * (1 / 255)`. Else `v` is written as it is (the RGBA8 store quantises). Alpha = 1. The
+//! row is flipped when the game says so (`Y_out = flip_base - Y`). `epi.py` of the feasibility study emulates it: it
+//! reached the reference within 1/255.
 //!
 //! # Layout of the crate's code
 //!
@@ -65,7 +65,7 @@ pub use graph::Variant;
 pub use package::{Package, TensorSpec};
 
 /// Build the package of `variant` for the weight blob `blob` (`net::BLOB_LEN` bytes) and the resampler weights `res`
-/// (`net::RESAMPLER_LEN` bytes; [`Variant::UnetOnly`] does not read them).
+/// (`net::RESAMPLER_LEN` bytes, which [`Variant::UnetOnly`] does not read).
 ///
 /// # Errors
 ///

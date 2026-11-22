@@ -2,7 +2,7 @@
 # Build the dev-only oracle probe: a copy of the translator source plus Probe.cs (text dumps per phase).
 # Usage: build.sh <engine checkout dm dir> <work dir>   (needs DOTNET_ROOT, default $HOME/.dotnet, and the offline NuGet cache)
 # Run:   XLATE_DUMP=<dir> $DOTNET_ROOT/dotnet <work>/bin/dmsh_xlate.dll <jobs.json> <outdir>
-# The dumps are <key>.<phase>.txt; every translation attempt of a job appends a section starting with "== attempt".
+# The dumps are <key>.<phase>.txt. Every translation attempt of a job appends a section starting with "== attempt".
 # Phases are added by hooking Probe.Write into the translator copy (see the hooks listed in docs/translator-port.md).
 set -eu
 DM=$1; W=$2

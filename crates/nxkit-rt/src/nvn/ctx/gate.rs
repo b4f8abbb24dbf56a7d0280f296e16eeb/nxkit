@@ -20,7 +20,7 @@
 //! held work strictly oldest first ran a queue that waits for the GPU signal of another held queue before that queue,
 //! against the order the console keeps.
 //!
-//! `NXKIT_QUEUE_ORDER=0` holds nothing; the waits that would have held are still counted.
+//! `NXKIT_QUEUE_ORDER=0` holds nothing, but the waits that would have held are still counted.
 
 use std::collections::{HashMap, VecDeque};
 

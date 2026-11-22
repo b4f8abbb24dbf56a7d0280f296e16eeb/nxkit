@@ -4,7 +4,7 @@
 //! read the weights as 8x8 tiles for `simdgroup_load` with a row stride of 8, so a tile is 64 contiguous halves, row =
 //! input channel, column = output channel, and the tiles that one step of the chain needs sit next to each other:
 //!
-//! - tile `(tap, k8, n8)` is at tile index `(tap * (cin / 8) + k8) * (cout / 8) + n8`, 128 bytes;
+//! - tile `(tap, k8, n8)` is at tile index `(tap * (cin / 8) + k8) * (cout / 8) + n8`, 128 bytes.
 //! - the bias follows as `cout / 8` tiles whose 8 rows are all the 8 biases of the tile, so that a `simdgroup_load` gives
 //!   a matrix with the bias in each row, in whatever layout the lanes hold their elements.
 //!
@@ -80,7 +80,7 @@ pub fn pack_bias(bias: &[u8], cout: usize) -> Result<Vec<u8>, String> {
 }
 
 /// A whole layer for one buffer: [`pack_weights`] then [`pack_bias`]. `weights` and `bias` are the slices of the game's
-/// blob at the layer's offsets; `bias` may run past the layer.
+/// blob at the layer's offsets. `bias` may run past the layer.
 ///
 /// # Errors
 ///

@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn a_handle_of_texture_id_zero_is_an_unbind() {
         assert!(null_handle(0));
-        // The sampler id sits above the texture id; a sampler alone still binds no texture.
+        // The sampler id sits above the texture id. A sampler alone still binds no texture.
         assert!(null_handle(5 << 20));
         assert!(!null_handle(1));
         assert!(!null_handle(0x1930_0385));

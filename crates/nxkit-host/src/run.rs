@@ -84,7 +84,7 @@ fn check_kernel_service(mask: u64) -> Result<()> {
 /// Runs the game. It returns when the window or the game has stopped.
 pub fn run(opts: &Options) -> Result<()> {
     // The one read of the `NXKIT_*` environment (W27): every crate's typed settings come from this snapshot. The
-    // crates that keep them for code with no context get them now, before any part exists; a crate that had them
+    // crates that keep them for code with no context get them now, before any part exists. A crate that had them
     // already or was read before stops the run. The rest is passed in below. The saved choices of the player in the
     // preferences of the app fill the launch options that the environment leaves unset.
     let mut snapshot = nxkit_abi::env::Env::capture();
@@ -166,7 +166,7 @@ pub fn run(opts: &Options) -> Result<()> {
         )?,
         Graphics::Vulkan => seams::vulkan_frame_hooks(&ctx, &opts.root, &settings, &run, &refresh)?,
     };
-    // Over a launcher the window shows with the first picture that is not black; an NVN game's presents tell it.
+    // Over a launcher the window shows with the first picture that is not black. An NVN game's presents tell it.
     let probed = env.overlay && matches!(loaded.game.graphics, Graphics::Nvn);
     if probed {
         nxkit_gpu::when_shown(crate::sys::present_picture_done);

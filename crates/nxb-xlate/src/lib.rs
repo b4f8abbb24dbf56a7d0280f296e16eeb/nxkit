@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 //! The shader translator: Maxwell and Ampere machine code to Metal Shading Language.
 //!
-//! The modules form layers (W28, `docs/architecture.md`); a module uses only its own layer and the ones below:
+//! The modules form layers (W28, `docs/architecture.md`). A module uses only its own layer and the ones below:
 //!
 //! 1. base: `types`, `job`, `accessor` (the answers to the queries of the job), `corpus`
 //! 2. `ir`: the intermediate representation, with no translation state

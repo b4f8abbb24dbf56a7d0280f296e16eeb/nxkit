@@ -7,7 +7,7 @@ use crate::private::early::{plan_cuts, runs_of_pages};
 
 #[test]
 fn the_cuts_follow_the_last_pass_that_writes_a_page_and_the_earliest_ones_are_kept() {
-    // Passes 0..5; readers are pages 10, 20, 30, 40, 50, 60.
+    // Passes 0..5. The readers are pages 10, 20, 30, 40, 50, 60.
     let runs = |v: &[u32]| runs_of_pages(v);
     let pass_runs = vec![
         vec![(10, 11)],
@@ -141,7 +141,7 @@ fn the_planner_cuts_a_real_frame_after_the_passes_that_write_the_pages_a_thread_
     readers.into_iter().for_each(|r| {
         r.join().unwrap();
     });
-    // Frame 2 has the same passes: a cut after the dispatch and one after the fill; the last dispatch's page has none.
+    // Frame 2 has the same passes: a cut after the dispatch and one after the fill. The last dispatch's page has none.
     let o2 = at_flush(&detail, 2, &g.map, 0, false, &|| {}).expect("overlay");
     assert_eq!(o2.frame(), 2);
     let pg = |p: u64| {

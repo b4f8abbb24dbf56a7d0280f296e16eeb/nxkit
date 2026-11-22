@@ -2,7 +2,7 @@
 //!
 //! The address that NVN gives the game is a guest address:
 //! `gpu = gpu_base + (host - host_base)`. No translation table exists.
-//! The backend supplies the two bases; the GPU backend uses a virtual base and turns a guest address into the address
+//! The backend supplies the two bases. The GPU backend uses a virtual base and turns a guest address into the address
 //! the GPU uses when it encodes. A [`GpuSpace`] is the small interface for them.
 
 use crate::error::{NvnError, Result};

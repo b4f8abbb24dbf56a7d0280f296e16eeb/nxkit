@@ -66,7 +66,7 @@ fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Pending {
     number: u64,
     texture: Texture,
-    /// The part of the texture the game shows (`nvnWindowSetCrop`, or the vi layer crop); zero size is all of it.
+    /// The part of the texture the game shows (`nvnWindowSetCrop`, or the vi layer crop). A zero size is all of it.
     crop: nxkit_nvn::backend::Rect,
     /// The device origin when this image was presented, not the current mode at the display tick.
     origin_lower_left: bool,

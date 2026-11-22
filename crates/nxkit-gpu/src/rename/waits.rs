@@ -3,7 +3,7 @@
 use super::*;
 
 impl State {
-    /// The CPU waited and the GPU is done with the frames up to `done`; `newest` is the newest flushed fence. Reads the
+    /// The CPU waited and the GPU is done with the frames up to `done`. `newest` is the newest flushed fence. Reads the
     /// bytes after the frame of each sample that no later flush has overtaken.
     pub(super) fn waited(&mut self, done: u64, newest: u64, read: &dyn Fn(u64, &mut [u8]) -> bool) {
         let now = self.frame;
@@ -68,7 +68,8 @@ impl State {
     /// the GPU writes (`P`) are merged on the GPU, the words that both write (`R`) are written back by the host in the
     /// wait. A merge range whose masks keep growing after it was classified is not understood: `Conflict`, the wait for
     /// its frame is a full one. What cannot be seen: an `R` word that the CPU writes in flight after the GPU wrote it in
-    /// the same frame looks like one written before; its GPU value is dropped, as for a word that the CPU re-initialises.
+    /// the same frame looks like one written before. Its GPU value is dropped, as for a word that the CPU
+    /// re-initialises.
     fn classify(&mut self) {
         let now = self.frame;
         let mut news: Vec<u64> = Vec::new();
@@ -132,7 +133,7 @@ impl State {
             c.quiet = 0;
         } else {
             // A range that the CPU writes only in some frames (while the player moves) is not given up for one quiet
-            // frame; after [`SETTLE_PROBES`] it is settled and looked at again after [`REPROBE`] flushes.
+            // frame. After [`SETTLE_PROBES`] it is settled and looked at again after [`REPROBE`] flushes.
             c.quiet += 1;
             if c.learn.class() != Class::Merge {
                 c.rest_until = if c.quiet >= SETTLE_PROBES {

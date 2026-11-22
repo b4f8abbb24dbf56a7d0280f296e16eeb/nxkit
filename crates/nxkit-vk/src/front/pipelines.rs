@@ -14,7 +14,7 @@ use crate::result::{Log, VkError, VkResult};
 use super::Vk;
 use super::state::{Pipeline, State};
 
-/// The dynamic states that the backend implements; others are reported once.
+/// The dynamic states that the backend implements. Others are reported once.
 const DYNAMIC: [u32; 9] = [
     ds::VIEWPORT,
     ds::SCISSOR,
@@ -159,7 +159,7 @@ impl Vk {
         self.lock().caches.remove(cache);
     }
 
-    /// `vkCreateGraphicsPipelines`. A pipeline that the backend refuses is still handed out; its draws are skipped.
+    /// `vkCreateGraphicsPipelines`. A pipeline that the backend refuses is still handed out. Its draws are skipped.
     pub fn create_graphics_pipelines(&self, infos: &[GraphicsPipelineInfo]) -> VkResult<Vec<u64>> {
         let mut made = Vec::with_capacity(infos.len());
         for info in infos {

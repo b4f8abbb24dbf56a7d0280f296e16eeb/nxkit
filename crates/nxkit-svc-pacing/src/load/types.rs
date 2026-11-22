@@ -22,7 +22,7 @@ pub struct LoadConfig {
     /// Only the work of a frame judges it ([`crate::fstep::FrameStep::work`], `game.json` key `pace_work`).
     pub work: bool,
     /// The step never leaves the cap (`game.json` `pace_profile` `steady`): no hold above the cap's vsyncs and no thermal
-    /// cap; a movie still caps it. A frame that runs long shows late once and the game pays the time back. For a game
+    /// cap. A movie still caps it. A frame that runs long shows late once and the game pays the time back. For a game
     /// that must keep its frame rate whatever a frame costs (Ocarina of Time fell to 30 fps for short hitches).
     pub steady: bool,
 }

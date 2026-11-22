@@ -30,7 +30,7 @@ static DECODED_FILES: AtomicU64 = AtomicU64::new(0);
 static DECODED_BYTES: AtomicU64 = AtomicU64::new(0);
 
 /// Files and bytes the scans decoded from a zstd or size-prefixed frame so far in this process (a counter for the
-/// stage output; take two readings and subtract).
+/// stage output: take two readings and subtract).
 pub fn decoded_totals() -> (u64, u64) {
     (
         DECODED_FILES.load(Ordering::Relaxed),

@@ -17,7 +17,7 @@ use std::sync::atomic::AtomicBool;
 
 static INIT_LOGGED: AtomicBool = AtomicBool::new(false);
 
-/// `Initialize()`: connects to the jit service; the host runs the plugin itself.
+/// `Initialize()`: connects to the jit service. The host runs the plugin itself.
 extern "C" fn initialize() {
     log_once(&INIT_LOGGED, "init takeover: jit::Initialize (no-op)");
 }

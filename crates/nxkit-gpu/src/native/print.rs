@@ -2,12 +2,12 @@
 //! (by the GPU or by the CPU) before it used them.
 //!
 //! The fingerprint is a hash of [`SAMPLES`] bytes of the plane at fixed positions and of the plane's size. The decoder
-//! side takes it from the decoded picture ([`of_frame`]); the game's side takes the same samples from guest memory
-//! wherever the plane lies there, through the layout of that memory ([`Layout`]): rows `pitch` bytes apart (a buffer
-//! the game read into, the source of a copy, or a pitch-linear texture) or block-linear (a texture). The samples depend
-//! on the position of a texel in the picture only, never on the pitch or the tiling, so the same picture in any layout
-//! gives the same fingerprint. Two pictures whose samples are all equal (a black frame) give one fingerprint; they look
-//! the same at the samples, and the newest of them is taken.
+//! side takes it from the decoded picture ([`of_frame`]). The game's side takes the same samples from guest memory
+//! wherever the plane lies there. It reads them through the layout of that memory ([`Layout`]): rows `pitch` bytes
+//! apart (a buffer the game read into, the source of a copy, or a pitch-linear texture) or block-linear (a texture).
+//! The samples depend on the position of a texel in the picture only, never on the pitch or the tiling, so the same
+//! picture in any layout gives the same fingerprint. Two pictures whose samples are all equal (a black frame) give one
+//! fingerprint. They look the same at the samples, and the newest of them is taken.
 
 use nxkit_nvn::swizzle::{GobOrder, block_linear_offset};
 use nxkit_svc_video::Frame;

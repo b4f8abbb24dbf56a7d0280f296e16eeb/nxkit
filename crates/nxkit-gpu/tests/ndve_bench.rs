@@ -1,8 +1,8 @@
 //! GPU time of the native NDVE movie network at the real size (1920x1080 -> 2560x1440, synthetic weights and picture,
 //! no game data). A diagnostic, not a gate: `cargo test --release -p nxkit-gpu --test ndve_bench -- --ignored --nocapture`.
 //! Each step is timed alone in its own command buffer (the command buffer's GPU start to end), the whole plan in one
-//! command buffer; minimum and median of 30 runs. The picture hashes before and after a change must be equal.
-//! `NDVE_BENCH_SRC` names a file with the complete MSL source to use instead of `msl::SOURCE`.
+//! command buffer. The results are the minimum and median of 30 runs. The picture hashes before and after a change must
+//! be equal. `NDVE_BENCH_SRC` names a file with the complete MSL source to use instead of `msl::SOURCE`.
 #![cfg(target_os = "macos")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -43,7 +43,7 @@ fn weights(len: usize, amp: f64) -> Vec<u8> {
 
 fn push_conversion() -> Vec<u8> {
     let mut w = [0f32; 15];
-    // BT.709 limited range: rows (y, u, v) for r, g, b; offsets for y, u, v
+    // BT.709 limited range: rows (y, u, v) for r, g, b, and offsets for y, u, v
     w[0..3].copy_from_slice(&[1.1644, 0.0, 1.7927]);
     w[4..7].copy_from_slice(&[1.1644, -0.2132, -0.5329]);
     w[8..11].copy_from_slice(&[1.1644, 2.1124, 0.0]);

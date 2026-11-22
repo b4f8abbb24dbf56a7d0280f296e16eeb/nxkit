@@ -137,7 +137,7 @@ reasons! {
     /// Upload: guest data that does not reach a scaled texture.
     UploadScaledLost => "upload.scaled-lost",
     /// Upload: guest data that reached a scaled texture through a staging texture and a GPU scale. This is not a
-    /// loss; it shows how often the CPU writes a texture that the GPU renders at the scaled size.
+    /// loss. It shows how often the CPU writes a texture that the GPU renders at the scaled size.
     UploadScaled => "upload.scaled",
     /// Copy-back: a GPU-written texture in CPU-visible memory that is not copied back.
     CopybackRefused => "copyback.refused",
@@ -146,7 +146,7 @@ reasons! {
     /// Shaders: a program that did not translate or load.
     ProgramFailed => "program.failed",
     /// Pipelines: a pipeline that the build's archive lacked (or there is none) and Metal compiled. The draw waits as
-    /// `skip.pending`. It is a hitch, not a loss; `NXKIT_DIAG=stats` says why the archive missed.
+    /// `skip.pending`. It is a hitch, not a loss. `NXKIT_DIAG=stats` says why the archive missed.
     PipelineMiss => "pipeline.archive-miss",
     /// Pipelines: a render, compute or depth-stencil state that Metal did not build.
     PipelineFailed => "pipeline.failed",
@@ -168,13 +168,13 @@ reasons! {
     BindTexPool => "bind.tex-pool",
     /// Bindings: a sampler pool table (`samp_pool`) written into an argument buffer. A count, not a loss.
     BindSampPool => "bind.samp-pool",
-    /// Raw global memory: memory pools that do not fit the 8191 entries of the table; addresses in them are not
+    /// Raw global memory: memory pools that do not fit the 8191 entries of the table. Addresses in them are not
     /// reached.
     GmemPoolsOver => "gmem.pools-over",
     /// Raw global memory: a registered memory pool that the pool snapshot does not resolve. It is left out of the
     /// table, so raw loads into it read 0. The example gives the range.
     GmemPoolUnresolved => "gmem.pool-unresolved",
-    /// Raw global memory: more draws and dispatches with a write log than the batch has logs; they share the last one.
+    /// Raw global memory: more draws and dispatches with a write log than the batch has logs. They share the last one.
     GmemLogsShared => "gmem.logs-shared",
     /// Raw global memory: pools that shaders wrote through raw pointers, learned from the logs. Not a loss.
     GmemPoolWritten => "gmem.pool-written",
@@ -280,7 +280,7 @@ static COUNTERS: Counters = Counters {
 static SAMPLES: Mutex<Vec<Vec<String>>> = Mutex::new(Vec::new());
 
 /// Counts one dropped piece of work. With the report on, `example` (format, size, shader key) is kept for the first
-/// few of each reason; it is only formatted then.
+/// few of each reason. It is only formatted then.
 pub fn note(why: Reason, example: fmt::Arguments<'_>) {
     note_n(why, 1);
     if health_on() {

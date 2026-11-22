@@ -55,7 +55,7 @@ fn a_write_staged_while_its_frame_runs_skips_the_blocks_only_the_frame_wrote_and
     let mut st = Collect::default();
     let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
     let mut c2 = late_start(pg, &mir, 2);
-    // Frame 2 writes block 2 only; the CPU writes block 1.
+    // Frame 2 writes block 2 only. The CPU writes block 1.
     mir.store(1, 130, 0xB2);
     m.store(1, 70, 0x55);
     // The CPU runs ahead: the flush of frame 3 stages the page while frame 2 runs.
@@ -70,7 +70,7 @@ fn a_write_staged_while_its_frame_runs_skips_the_blocks_only_the_frame_wrote_and
         .position(|p| p.0 == 1)
         .expect("the page is staged");
     assert_eq!(st3.pages[i].1[70], 0x55);
-    // Block 1 (bytes 64 to 127) is the CPU's and goes along; block 2 (128 to 191) is the frame's and is skipped.
+    // Block 1 (bytes 64 to 127) is the CPU's and goes along. Block 2 (128 to 191) is the frame's and is skipped.
     assert_eq!(
         st3.skips[i].1[0], 0b100,
         "only the block of the frame is skipped"

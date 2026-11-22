@@ -64,7 +64,7 @@ pub fn base_data(
 }
 
 /// Opens the RomFS of the base alone, or patched by `update`.
-/// `base_data` is the base program's decrypted data section ([`base_data`]); every version shares the one instance,
+/// `base_data` is the base program's decrypted data section ([`base_data`]). Every version shares the one instance,
 /// so its chunks are decrypted once for all of them.
 pub fn open_romfs(
     ks: &KeySet,
@@ -98,7 +98,7 @@ pub fn open_romfs_or_empty(
     open_romfs_with(ks, base_data, update, cache, req.allow_damaged)
 }
 
-/// [`open_romfs`]; with `lenient` (`--allow-damaged`) data blocks that fail their hash are read as they are.
+/// Like [`open_romfs`]. With `lenient` (`--allow-damaged`), data blocks that fail their hash are read as they are.
 pub fn open_romfs_with(
     ks: &KeySet,
     base_data: Option<(Arc<dyn Storage>, crate::nca::FsHeader)>,

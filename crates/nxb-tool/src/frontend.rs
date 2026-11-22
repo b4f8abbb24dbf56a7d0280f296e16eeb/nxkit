@@ -48,7 +48,7 @@ impl std::error::Error for FrontEndError {}
 pub struct FrontEndOutput {
     /// The metallib bytes.
     pub metallib: Vec<u8>,
-    /// Which front end made it ([`FrontEnd::id`]); part of TOOL_FP and of the cache key (design-v2 6 rule 8).
+    /// Which front end made it ([`FrontEnd::id`]). It is part of TOOL_FP and of the cache key (design-v2 6 rule 8).
     pub frontend: String,
     /// The steps' costs, in order.
     pub steps: Vec<StepCost>,

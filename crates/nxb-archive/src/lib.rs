@@ -178,7 +178,7 @@ pub struct Report {
     pub merged_from_store: bool,
     /// The pieces of a streamed archive with the pipelines in each, in merge order.
     pub shards: Vec<shards::Shard>,
-    /// The recorded states that the compiler refused. They are not in the archive; the rest is.
+    /// The recorded states that the compiler refused. They are not in the archive, but the rest is.
     pub dropped: Vec<Dropped>,
 }
 

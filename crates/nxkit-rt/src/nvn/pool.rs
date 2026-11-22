@@ -361,7 +361,7 @@ fn decide(p: u64, n: i32, requests: u64, pool_size: u64) -> AbiResult<Option<VMo
 }
 
 /// The requests of a call on a sparse pool: each one goes into its page table. A request that the table refuses (out
-/// of range, not on the 4 KiB grid, a physical pool without storage) fails the call; the requests before it stay.
+/// of range, not on the 4 KiB grid, a physical pool without storage) fails the call, but the requests before it stay.
 fn map_sparse(p: u64, n: i32, requests: u64, pool_size: u64) -> AbiResult<u32> {
     let g = gpu("nvnMemoryPoolMapVirtual");
     let Some(v) = g.vpool(p) else {

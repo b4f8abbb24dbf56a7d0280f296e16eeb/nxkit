@@ -3,18 +3,18 @@
 //!
 //! The video service tells the feeder (a [`PictureSink`]) of every decoded picture and of the guest memory the game
 //! read it into. A thread of its own converts the picture to the model's input on the CPU ([`super::conv`]) and starts
-//! the model; when it is done the picture's result is `Ready` in [`super::slots`]. The game's NDVE dispatch names its
-//! planes by their addresses: [`Feed::pick`] finds the picture they hold and, if its result is ready on the CPU's side
-//! (the Core ML completion has run), hands out a [`Hold`] on the slot. Nothing on the GPU waits for the Neural Engine.
-//! A picture whose result is not ready is made by the Metal plan.
+//! the model. When the model is done, the picture's result is `Ready` in [`super::slots`]. The game's NDVE dispatch
+//! names its planes by their addresses: [`Feed::pick`] finds the picture they hold and, if its result is ready on the
+//! CPU's side (the Core ML completion has run), hands out a [`Hold`] on the slot. Nothing on the GPU waits for the
+//! Neural Engine. A picture whose result is not ready is made by the Metal plan.
 //!
 //! The game copies the picture into textures of its own before the dispatch, so the dispatch's planes are not the ones
 //! the video service wrote: the offload follows the game's copies back to them, and, when that finds nothing, looks for
 //! the picture's fingerprint ([`super::print`]) in the planes. A stream whose dispatches match no picture for a while is
 //! given up ([`super::matching`]): no picture of it is converted until the next stream starts.
 //!
-//! The conversion's constants (the game's colour matrix and offsets) are not known before the first NDVE dispatch; they
-//! are taken from its push block, and pictures decoded before that are made by the plan.
+//! The conversion's constants (the game's colour matrix and offsets) are not known before the first NDVE dispatch. They
+//! are taken from its push block, and the plan makes the pictures decoded before that.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -29,8 +29,8 @@ use super::matching::{How, Matcher};
 use super::print::{self, Print};
 use super::slots::{Binds, Miss, Pic, Table, Why};
 
-/// Decoded pictures that wait for the feeder. The decoder is three ahead of the game, so a longer queue means the
-/// feeder cannot keep up; the oldest pictures are dropped (the plan makes them).
+/// Decoded pictures that wait for the feeder. The decoder is three ahead of the game, so a longer queue means that the
+/// feeder cannot keep up. The oldest pictures are dropped (the plan makes them).
 const QUEUE: usize = 8;
 
 /// The fingerprints of decoded pictures the feed remembers.

@@ -80,7 +80,7 @@ impl Texture {
 
     /// Makes a 2D texture of one level over the guest memory `mem`: its first texel is at byte `offset`, its rows
     /// `stride` bytes apart. The storage is `Shared` whatever `desc.storage` says. The texture keeps the buffer
-    /// alive; it does not join the residency set itself, because its memory is the buffer's, which is in the set.
+    /// alive. It does not join the residency set itself, because its memory is the buffer's, which is in the set.
     pub fn over_guest(
         ctx: &Context,
         mem: &GuestMemory,
@@ -130,7 +130,7 @@ impl Texture {
     /// Makes a texture buffer (`MTLTextureType.textureBuffer`) of `elements` texels of `format` over the guest memory
     /// `mem`, from byte `offset`: a shader reads (and with `shader_write` writes) the bytes in place. The offset must be a
     /// multiple of `minimumTextureBufferAlignmentForPixelFormat`, and the texels must lie inside the memory. The texture
-    /// keeps the buffer alive; its memory is the buffer's, which is in the residency set.
+    /// keeps the buffer alive. Its memory is the buffer's, which is in the residency set.
     pub fn buffer_over_guest(
         ctx: &Context,
         mem: &GuestMemory,
@@ -159,7 +159,7 @@ impl Texture {
         if shader_write {
             usage |= MTLTextureUsage::ShaderWrite;
         }
-        // SAFETY: the width fits the buffer (checked above); the options are those of a shared buffer.
+        // SAFETY: the width fits the buffer (checked above). The options are those of a shared buffer.
         let d = unsafe {
             MTLTextureDescriptor::textureBufferDescriptorWithPixelFormat_width_resourceOptions_usage(
                 format.to_mtl(),

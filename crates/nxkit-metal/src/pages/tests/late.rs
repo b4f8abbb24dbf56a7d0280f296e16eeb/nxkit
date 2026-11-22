@@ -128,10 +128,10 @@ fn a_sum_the_cpu_reads_and_resets_while_the_frame_runs_is_read_next_time_and_the
     let mut st = Collect::default();
     let _ = pg.flush_mirrored(2, &[], &[(m.addr(1) + 64, 128)], None, &mut st);
     let mut c2 = late_start(pg, &mir, 2);
-    // Frame 2 adds up its sum in the block of byte 70; byte 130 (another block it may write) stays.
+    // Frame 2 adds up its sum in the block of byte 70. Byte 130 (another block it may write) stays.
     mir.store(1, 70, 0x10);
-    // The CPU reads the sum of the last completed frame and resets it for the next frame; it also writes a block
-    // the frame does not change.
+    // The CPU reads the sum of the last completed frame and resets it for the next frame. It also writes a block the
+    // frame does not change.
     assert_eq!(m.load(1, 70), 0xA1);
     m.store(1, 70, 0);
     m.store(1, 130, 0x77);

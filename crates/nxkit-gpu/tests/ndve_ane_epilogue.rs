@@ -1,11 +1,11 @@
 //! The GPU's share of the Neural Engine path (`ndve_ane_quant` and `ndve_ane_epilogue`) against the CPU reference
 //! `nxkit_ndve::ane::epilogue::reference` (steps 1 to 5 of `docs/plans/ndve-ane.md`), on synthetic `final`, `delta` and
-//! dither data (no game data). The tensors are ordinary shared textures here; the IOSurface wrapping is the same
+//! dither data (no game data). The tensors are ordinary shared textures here. The IOSurface wrapping is the same
 //! `R16Float` texture. Needs a Metal 4 device, so it is ignored by default:
 //! `cargo test -p nxkit-gpu --test ndve_ane_epilogue -- --ignored --nocapture`.
 //!
 //! The GPU's sampler has 8 fractional bits of weight and the reference is exact, so a pixel may differ by one step of
-//! the 8-bit result; the test allows 2 and counts how many pixels differ at all.
+//! the 8-bit result. The test allows 2 and counts how many pixels differ at all.
 #![cfg(target_os = "macos")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -61,7 +61,7 @@ fn the_epilogue_matches_the_cpu_reference() {
     let mut ring = FrameRing::new(&ctx).unwrap();
     let guest = Arc::new(GuestMemory::allocate(&ctx, 40 << 20).unwrap());
 
-    // final: a smooth picture with some noise, three planes of 1080 rows; delta: small values around zero.
+    // final: a smooth picture with some noise, three planes of 1080 rows. delta: small values around zero.
     let fin: Vec<u16> = (0..3 * 1920 * 1080)
         .map(|i| {
             let (x, y) = ((i % 1920) as f32, ((i / 1920) % 1080) as f32);

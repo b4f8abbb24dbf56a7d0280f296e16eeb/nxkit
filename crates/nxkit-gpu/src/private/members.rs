@@ -200,8 +200,8 @@ pub(super) fn closure(
     map: &AddressMap,
     members: &mut Members<'_>,
 ) -> u64 {
-    // The page range of each binding, once. Members only grow, so a range that is whole stays whole and leaves the list;
-    // the others are looked at again in the next round.
+    // The page range of each binding, once. Members only grow, so a range that is whole stays whole and leaves the
+    // list. The others are looked at again in the next round.
     let mut todo: Vec<(u32, u32)> = Vec::with_capacity(reads.len());
     for &(a, len, _) in reads {
         let len = len.min(RANGE_MAX_BYTES);

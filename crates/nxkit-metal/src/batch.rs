@@ -68,7 +68,7 @@ type Callback = Box<dyn FnOnce() + Send>;
 #[derive(Default)]
 struct DoneState {
     pending: bool,
-    /// The last handler is running the callbacks; the batch is not yet reported as complete.
+    /// The last handler is running the callbacks. The batch is not yet reported as complete.
     finishing: bool,
     callbacks: Vec<Callback>,
     stats: CommandBufferStats,
@@ -116,8 +116,8 @@ impl Completion {
         }
     }
 
-    /// Runs `f` when the batch is complete, on the thread of the Metal completion handler and before `wait` returns; at
-    /// once on this thread when the batch is complete already.
+    /// Runs `f` when the batch is complete, on the thread of the Metal completion handler and before `wait` returns.
+    /// When the batch is complete already, it runs `f` at once on this thread.
     fn on_complete(&self, f: Callback) {
         let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if st.pending && !st.finishing {
@@ -273,8 +273,8 @@ pub struct Batch {
 /// A command buffer that was ended, as the pointer the commit takes.
 struct Ended(NonNull<ProtocolObject<dyn MTL4CommandBuffer>>);
 
-// SAFETY: the pointer names an ended command buffer that its batch keeps alive until the commit; the queue takes it from
-// any thread.
+// SAFETY: the pointer names an ended command buffer that its batch keeps alive until the commit. The queue takes it
+// from any thread.
 unsafe impl Send for Ended {}
 
 /// An ended command buffer and what it keeps alive.
@@ -288,7 +288,7 @@ struct Split {
     done: Arc<Completion>,
     metrics: Arc<Metrics>,
     hooks: Option<BatchHooks>,
-    /// The end of each group, in command buffers; the last is the whole batch.
+    /// The end of each group, in command buffers. The last is the whole batch.
     bounds: Vec<usize>,
     /// Groups whose feedback has not come yet.
     remaining: AtomicUsize,
@@ -496,8 +496,8 @@ impl Batch {
     /// [`commit_ahead`](Self::commit_ahead) and [`submit`](Self::submit). Returns false (and drops `f`) when `count` is 0 or
     /// not smaller than the number of command buffers, or the groups are fixed already.
     ///
-    /// The queue runs the commits in order, so the prefix is done when its commit is; a commit costs the GPU a short pause
-    /// at the boundary (about 0.2 ms), which is the price of the early report.
+    /// The queue runs the commits in order, so the prefix is done when its commit is. A commit costs the GPU a short
+    /// pause at the boundary (about 0.2 ms). This pause is the price of the early report.
     pub fn on_prefix_complete(&mut self, count: usize, f: impl FnOnce() + Send + 'static) -> bool {
         if count == 0 || count >= self.buffers.len() || self.split.is_some() {
             return false;

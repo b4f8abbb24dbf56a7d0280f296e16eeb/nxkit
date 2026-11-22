@@ -5,7 +5,7 @@
 //! - [`Executor`] / [`Task`] / [`Ctx`]: worker threads, a priority injector, per-worker deques with stealing.
 //! - [`Join`]: run a task after `n` predecessors.
 //! - [`UseManifest`] and [`Partial`]: manifest-first ordering and the marker of a partial build.
-//! - [`SingleFlight`]: equal work runs once; followers continue without blocking a worker.
+//! - [`SingleFlight`]: equal work runs once, and followers continue without blocking a worker.
 //! - [`Headroom`]: admits child runs by machine load (CPU, memory, memory pressure) between a floor and a ceiling.
 //!
 //! Std only, `std::thread` and channels, no async runtime (design-v2 8.5). Planned: more resource kinds (`mem` bytes,

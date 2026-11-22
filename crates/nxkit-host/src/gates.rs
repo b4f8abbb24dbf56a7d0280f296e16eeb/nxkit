@@ -14,7 +14,7 @@ pub enum Kind {
     /// `mrs xN, cntpct_el0` or `cntvct_el0`. The system tick goes into register `N`.
     Counter(u8),
     /// An observation gate with its argument: the id in the low 8 bits, a parameter of the handler above them
-    /// (`nxkit_abi::obs`). The handler the host registered for the id runs; without one the pass does nothing.
+    /// (`nxkit_abi::obs`). The handler the host registered for the id runs. Without one, the pass does nothing.
     Obs(u32),
     /// A pass of a spin wait. The thread yields.
     Spin,

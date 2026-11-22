@@ -121,7 +121,7 @@ pub(crate) fn image(
         format,
         shader_read: true,
         shader_write: plain && d.usage & usage::STORAGE != 0,
-        // a transfer destination may be cleared, which is a render pass; a compressed format draws no pass. A
+        // a transfer destination may be cleared, which is a render pass. A compressed format draws no pass. A
         // multisample image is an attachment of the pass that resolves it.
         render_target: !format.is_compressed()
             && (d.usage & attachment != 0 || d.swapchain || d.samples > 1),

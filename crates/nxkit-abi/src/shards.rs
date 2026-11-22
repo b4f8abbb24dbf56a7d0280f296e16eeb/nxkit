@@ -24,7 +24,7 @@
 //! Version 2 adds the exact pipelines: the render pipelines of the states that a title recorded, archived fully
 //! specialized (colour formats, blend, write masks, vertex layout, samples, alpha to coverage), in shards of their
 //! own. A pair has one entry for each shard that holds some of its states, and the host asks each of them for the exact
-//! descriptor of the draw before it specializes the pair's base. A version 1 index has none; this reader takes both.
+//! descriptor of the draw before it specializes the pair's base. A version 1 index has none. This reader takes both.
 
 use std::collections::HashMap;
 

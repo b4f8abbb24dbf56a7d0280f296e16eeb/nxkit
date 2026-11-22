@@ -1,7 +1,7 @@
 //! The layout of a sparse texture (`NVN_TEXTURE_FLAGS_SPARSE`, block-linear), a port of the sparse parts of `nvn_tex.c`.
 //!
 //! A sparse texture is mapped in 64 KiB tiles: one row of blocks, 128 GOBs / (block height × block depth) wide. A level
-//! at least one tile wide, high and deep is laid out with its width padded to whole tiles, so it fills whole tiles; the
+//! at least one tile wide, high and deep is laid out with its width padded to whole tiles, so it fills whole tiles. The
 //! levels from the first smaller one on form the mip tail, packed as usual from there. The storage is whole tiles and
 //! 64 KiB aligned. Without a packaged layout a sparse texture whose level 0 is at least one tile large takes the block
 //! shape of the standard 64 KiB tile of its block size instead of the automatic one. Games depend on this: Octopath
@@ -19,7 +19,7 @@ pub const SPARSE_TILE: u64 = 0x1_0000;
 /// The tiled levels of a sparse texture and the size of its tile in texels (`NVNtextureSparseTileLayout`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SparseTiles {
-    /// The levels that fill whole tiles; the levels after them are the mip tail.
+    /// The levels that fill whole tiles. The levels after them are the mip tail.
     pub levels: u32,
     /// The tile width in texels.
     pub width: u32,
@@ -129,7 +129,7 @@ pub(super) fn shape_h(d: &TextureDesc, s: &Shape, t: FormatInfo, tile_h: u32) ->
 }
 
 /// The GOB columns of one level after the padding of the tiled levels. `tiled` says whether the levels before this one
-/// were tiled; it turns false at the first level of the mip tail and stays false.
+/// were tiled. It turns false at the first level of the mip tail and stays false.
 pub(super) struct TilePad {
     /// The GOB columns of one tile.
     pub cols: u32,
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn the_tiled_levels_end_at_the_first_level_smaller_than_a_tile() {
         let t = tex(RGBA8, 512, 512, 10).sparse_tiles().unwrap();
-        // 512, 256 and 128 texels are at least one 128×128 tile; 64 is the mip tail
+        // 512, 256 and 128 texels are at least one 128×128 tile, and 64 is the mip tail
         assert_eq!((t.levels, t.width, t.height, t.depth), (3, 128, 128, 1));
         let small = tex(RGBA8, 64, 64, 1).sparse_tiles().unwrap();
         assert_eq!(small.levels, 0);

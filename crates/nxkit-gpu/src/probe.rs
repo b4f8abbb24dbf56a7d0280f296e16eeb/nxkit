@@ -95,7 +95,7 @@ pub(crate) trait MeshCounts: Send + Sync {
     fn note(&self, ord: u32, p: &Prep);
     /// A Metal draw of mesh draw `ord` was encoded with its offset set.
     fn encoded(&self, ord: u32);
-    /// The lines of the frame; `shared` says whether a report of the game counts a draw, `samples` reads an offset
+    /// The lines of the frame. `shared` says whether a report of the game counts a draw, `samples` reads an offset
     /// index of the buffer and `record` a workgroup count in guest memory.
     fn report(
         &self,
@@ -103,7 +103,7 @@ pub(crate) trait MeshCounts: Send + Sync {
         samples: &dyn Fn(u64) -> Option<u64>,
         record: &dyn Fn(u64) -> Option<u32>,
     ) -> Vec<String>;
-    /// The lines of the indirect draws; `words` reads 4 words in guest memory, `place` places a GPU address.
+    /// The lines of the indirect draws. `words` reads 4 words in guest memory, and `place` places a GPU address.
     fn record_lines(
         &self,
         words: &dyn Fn(u64) -> Option<[u32; 4]>,

@@ -21,7 +21,7 @@ fn key(cfmt: u32, merged: bool, len: usize) -> String {
     // src 5, dst 6, src alpha 2, dst alpha 6, equations 1 and 1
     let w: u64 = (5 << 3) | (6 << 10) | (2 << 17) | (6 << 24) | (1 << 31) | (1 << 34);
     b[88 + 72..88 + 80].copy_from_slice(&w.to_le_bytes());
-    // attribute 3: Float3 (0x22), offset 12, stream 1; stream 1 stride 24
+    // attribute 3: Float3 (0x22), offset 12, stream 1, and stream 1 has stride 24
     put(&mut b, 88 + 136 + 12, 0x22 | (12 << 8) | (1 << 27));
     put(&mut b, 88 + 200 + 8, 24);
     let hex: String = b.iter().map(|c| format!("{c:02x}")).collect();

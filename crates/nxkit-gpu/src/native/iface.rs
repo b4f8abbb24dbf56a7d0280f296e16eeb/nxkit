@@ -59,8 +59,8 @@ pub(crate) struct ResourceSpec {
 }
 
 /// A Core ML model of the network and the GPU's share of running it (a network that can run on the Neural Engine). The
-/// tensors are `R16Float` textures over IOSurfaces; a tensor `[1, C, H, W]` is `W` wide and `C * H` high. The model runs
-/// on the decoded pictures ahead of the game, so the game's frame only makes the output from its results.
+/// tensors are `R16Float` textures over IOSurfaces. A tensor `[1, C, H, W]` is `W` wide and `C * H` high. The model
+/// runs on the decoded pictures ahead of the game, so the game's frame only makes the output from its results.
 pub(crate) struct Offload {
     /// Makes the game's output from the model's outputs. It runs in place of the plan.
     pub(crate) epilogue: Plan,

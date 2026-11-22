@@ -1,5 +1,5 @@
-//! Visibility results: the samples of draws counted into a buffer (the GPU counters of NVN). Needs a Metal 4 GPU;
-//! without one the tests print a message and pass.
+//! Visibility results: the samples of draws counted into a buffer (the GPU counters of NVN). Needs a Metal 4 GPU.
+//! Without one the tests print a message and pass.
 #![cfg(target_os = "macos")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

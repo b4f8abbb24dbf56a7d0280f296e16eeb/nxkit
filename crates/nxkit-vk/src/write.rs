@@ -21,7 +21,7 @@ fn zero(m: &impl Mem, addr: u64, len: u64) -> VkResult<()> {
     m.write(addr, &vec![0u8; len as usize])
 }
 
-/// The count-and-array protocol: with `out` null, writes the number of items to `count`; otherwise writes at most
+/// The count-and-array protocol: with `out` null, writes the number of items to `count`. Otherwise, it writes at most
 /// `*count` items, each with `put(index, address)`, sets `*count` to the number written and gives
 /// [`Status::Incomplete`] when that is fewer than all.
 pub fn enumerate<M: Mem>(

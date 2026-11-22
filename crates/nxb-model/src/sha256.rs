@@ -39,7 +39,7 @@ pub struct Sha256 {
     total_len: u64,
 }
 
-/// Which compression function a [`Sha256`] uses. Digests are identical; only speed differs.
+/// Which compression function a [`Sha256`] uses. Digests are identical. Only speed differs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Backend {
     /// The hardware path when the CPU has it, else scalar.

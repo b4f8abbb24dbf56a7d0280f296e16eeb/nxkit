@@ -142,10 +142,10 @@ pub struct FrameStep {
     /// The screen's verdict for the next call. The call clears it.
     pub screen: Screen,
     /// Only the work judges a frame (`game.json` key `pace_work`): a frame is late when its cost does not fit the
-    /// hold, not when it was shown longer; a hitch does not count; a trial waits at most [`FSTEP_HOLD_MAX_WORK`].
+    /// hold, not when it was shown longer. A hitch does not count. A trial waits at most [`FSTEP_HOLD_MAX_WORK`].
     pub work: bool,
     /// Time that a late frame lost is dropped, not paid back (the `steady` profile). Paying it back with longer steps
-    /// needs frames that fit a longer hold; a steady hold has none, so the debt stayed at its maximum and every frame
+    /// needs frames that fit a longer hold. A steady hold has none, so the debt stayed at its maximum and every frame
     /// stepped and showed two vsyncs (Ocarina of Time, 2026-11-09).
     pub drop_debt: bool,
     /// Vsyncs at `kmin` in a row.

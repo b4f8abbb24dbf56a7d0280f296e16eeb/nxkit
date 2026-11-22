@@ -14,7 +14,7 @@
 //!
 //! The handler allocates nothing and formats into a buffer on its stack. It reads the frames through
 //! `mach_vm_read_overwrite`, which fails instead of faulting on an unreadable address. `dladdr` takes the lock of
-//! dyld; a fault inside dyld could hang there, which is the price of the names.
+//! dyld. A fault inside dyld could hang there, which is the price of the names.
 
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fmt::Write;
@@ -173,7 +173,7 @@ pub fn thread_stack() {
     if unsafe { sigaltstack(std::ptr::null(), &mut cur) } != 0 || !cur.sp.is_null() {
         return;
     }
-    // The stack lives as long as the thread; a thread that ends leaves its 64 KiB behind.
+    // The stack lives as long as the thread. A thread that ends leaves its 64 KiB behind.
     let mem: &'static mut [u8] = Box::leak(vec![0u8; ALT_STACK].into_boxed_slice());
     let ss = StackT {
         sp: mem.as_mut_ptr().cast(),
@@ -198,7 +198,7 @@ pub fn set_modules(modules: Vec<(String, u64, u64)>) {
     let _ = MODULES.set(modules);
 }
 
-/// A writer into a fixed buffer; what does not fit is cut.
+/// A writer into a fixed buffer. What does not fit is cut.
 struct Buf {
     b: [u8; 8192],
     n: usize,
@@ -215,7 +215,7 @@ impl Write for Buf {
 
 impl Buf {
     fn flush(&mut self) {
-        // SAFETY: `b[..n]` is initialised; the descriptor is stderr, or the file behind the log pipe.
+        // SAFETY: `b[..n]` is initialised. The descriptor is stderr, or the file behind the log pipe.
         unsafe { write(super::logpipe::direct_fd(), self.b.as_ptr().cast(), self.n) };
         self.n = 0;
     }
@@ -228,7 +228,7 @@ fn read_u64(addr: u64) -> Option<u64> {
     }
     let mut v = 0u64;
     let mut out = 0u64;
-    // SAFETY: the kernel copies 8 bytes into `v` or fails; it never faults on `addr`.
+    // SAFETY: the kernel copies 8 bytes into `v` or fails. It never faults on `addr`.
     let r =
         unsafe { mach_vm_read_overwrite(mach_task_self_, addr, 8, &raw mut v as u64, &mut out) };
     (r == 0 && out == 8).then_some(v)
@@ -249,7 +249,7 @@ fn place(w: &mut Buf, addr: u64) {
         sname: std::ptr::null(),
         saddr: 0,
     };
-    // SAFETY: `info` is a valid `Dl_info`; `dladdr` only looks the address up.
+    // SAFETY: `info` is a valid `Dl_info`. `dladdr` only looks the address up.
     if addr == 0 || unsafe { dladdr(addr as *const c_void, &mut info) } == 0 || info.fname.is_null()
     {
         let _ = write!(w, "?");

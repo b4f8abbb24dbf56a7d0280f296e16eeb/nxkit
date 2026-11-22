@@ -123,7 +123,7 @@ pub(crate) fn budget() -> u64 {
 /// What the encoder knows for the copy-back: the memory pools with their flags, and the copy-backs in flight.
 #[derive(Debug, Default)]
 pub(crate) struct CopyBack {
-    /// The memory pools with their `NVNmemoryPoolFlags`. Every pool stays until its removal; pools may overlap.
+    /// The memory pools with their `NVNmemoryPoolFlags`. Every pool stays until its removal. Pools may overlap.
     pools: Registry<u32>,
     /// Textures the game presented. They are never candidates.
     presented: FastSet<TexId>,
@@ -140,7 +140,7 @@ pub(crate) struct CopyBack {
 }
 
 impl CopyBack {
-    /// A memory pool of the game at GPU address `start`. It is added to the pools it overlaps; none is forgotten.
+    /// A memory pool of the game at GPU address `start`. It is added to the pools it overlaps. None is forgotten.
     pub(crate) fn add_pool(&mut self, start: u64, len: u64, flags: u32) {
         self.pools.add_with(start, len, flags);
     }

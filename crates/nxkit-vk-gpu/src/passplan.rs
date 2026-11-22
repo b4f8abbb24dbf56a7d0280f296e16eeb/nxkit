@@ -1,8 +1,8 @@
 //! How a Vulkan render pass becomes Metal render passes (the reference layer's `begin_rp`, `end_rp`, `blit` and
 //! `resume_rp`). Pure functions over the recorded commands.
 //!
-//! - A load op of `CLEAR` clears; `LOAD` and `DONT_CARE` load. The Switch's driver discards nothing at the begin of a
-//!   pass, and games read what a `DONT_CARE` attachment held (Re:ZERO's effects layer came out black with a
+//! - A load op of `CLEAR` clears, and `LOAD` and `DONT_CARE` load. The Switch's driver discards nothing at the begin of
+//!   a pass, and games read what a `DONT_CARE` attachment held (Re:ZERO's effects layer came out black with a
 //!   discarding load).
 //! - A copy, a clear of an image, a dispatch or a barrier inside a render pass ends the Metal pass. The pass is a
 //!   *segment*: one that the game's `vkCmdEndRenderPass` ends stores as the pass says, one that a cut ends stores

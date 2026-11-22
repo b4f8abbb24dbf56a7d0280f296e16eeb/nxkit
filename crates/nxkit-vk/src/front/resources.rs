@@ -369,7 +369,7 @@ impl Vk {
             })
     }
 
-    /// `vkGetImageSubresourceLayout`: a linear image's own pitch; other images tightly packed, levels then layers.
+    /// `vkGetImageSubresourceLayout`: a linear image's own pitch, and other images tightly packed, levels then layers.
     pub fn subresource_layout(
         &self,
         image: u64,

@@ -226,7 +226,7 @@ fn the_block_holds_the_streams_and_attributes_of_the_draw() {
     }
 }
 
-/// The base address keeps 4-byte alignment for `dm_fetch`'s whole-word reads; its low bits move into the offsets.
+/// The base address keeps 4-byte alignment for `dm_fetch`'s whole-word reads. Its low bits move into the offsets.
 #[test]
 fn an_unaligned_base_moves_its_low_bits_into_the_offsets() {
     let d = draw(

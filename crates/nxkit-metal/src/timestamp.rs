@@ -19,7 +19,7 @@ use crate::error::{MetalError, Result};
 /// The Metal heap behind a [`TimestampHeap`].
 pub(crate) struct RawHeap(pub(crate) Retained<ProtocolObject<dyn MTL4CounterHeap>>);
 
-// SAFETY: a counter heap is a Metal object that may be used from any thread; writes come from the GPU and reads go
+// SAFETY: a counter heap is a Metal object that may be used from any thread. Writes come from the GPU and reads go
 // through `resolveCounterRange`, which Metal synchronises.
 unsafe impl Send for RawHeap {}
 // SAFETY: as above.
@@ -39,7 +39,7 @@ impl TimestampHeap {
     pub fn new(ctx: &Context, count: usize) -> Result<Self> {
         let desc = MTL4CounterHeapDescriptor::new();
         desc.setType(MTL4CounterHeapType::Timestamp);
-        // SAFETY: a positive count; the heap holds that many entries.
+        // SAFETY: a positive count. The heap holds that many entries.
         unsafe { desc.setCount(count.max(1)) };
         let device = ctx.device();
         let raw = device

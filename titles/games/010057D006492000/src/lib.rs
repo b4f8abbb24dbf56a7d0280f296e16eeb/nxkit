@@ -97,7 +97,7 @@ const SETTINGS: Fact<Settings> = Fact::new(
         tex_dirty_upload: true,
         pad_layout: "full",
         // CRIWARE ADX2 mixes 5.1 into a six-channel AudioOut in the SDK's order (L R C LFE Ls Rs), so the game gains
-        // from spatial audio; the player can turn it off.
+        // from spatial audio. The player can turn it off.
         spatial_audio: true,
         ..Settings::DEFAULT
     },

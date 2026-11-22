@@ -238,7 +238,7 @@ impl Seen {
         o
     }
 
-    /// Reads the text of a file. A line that does not parse is left out; a text of another version is an error.
+    /// Reads the text of a file. A line that does not parse is left out. A text of another version is an error.
     pub fn parse(text: &str) -> Result<Seen, String> {
         let mut lines = text.lines();
         match lines.next() {

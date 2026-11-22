@@ -103,7 +103,7 @@ pub struct WindowConfig {
     pub metal_hud: bool,
     /// The Home button of the controllers (`home.rs`), `None` when it is off.
     pub home: Option<crate::home::Setup>,
-    /// The GPU tells when the picture first shows something (`nxkit_gpu::when_shown`, an NVN game); else the first
+    /// The GPU tells when the picture first shows something (`nxkit_gpu::when_shown`, an NVN game). Else the first
     /// finished frame counts.
     pub probed: bool,
 }

@@ -405,7 +405,7 @@ fn template_writes_read_guest_data_and_keep_immutable_samplers() {
         (b.memory, b.offset, b.size),
         (MemoryId(mem), 512 + 64, 1024 - 64)
     );
-    // A reset pool frees the set; a free of it afterwards is ignored.
+    // A reset pool frees the set. A free of it afterwards is ignored.
     assert!(vk.reset_descriptor_pool(pool).is_ok());
     vk.free_sets(&[set]);
     assert!(vk.lock().sets.get(set).is_none());

@@ -22,7 +22,7 @@ pub(crate) struct BoundSet {
 }
 
 /// `vkCmdBindDescriptorSets` on the sets of one bind point. `dynamic_count` gives the dynamic offsets that a set
-/// takes, from its layout; a set that the submission lacks (the game freed it) takes none and binds nothing.
+/// takes, from its layout. A set that the submission lacks (the game freed it) takes none and binds nothing.
 pub(crate) fn bind_sets(
     bound: &mut [Option<BoundSet>; SETS],
     first: u32,

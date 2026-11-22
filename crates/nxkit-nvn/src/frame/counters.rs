@@ -10,9 +10,9 @@
 //! sums: the slots of its queue since the last reset of its counter in the frame (or since the start of the frame).
 //! The backend counts each slot when it encodes the frame and writes the reports when the GPU finished it:
 //!
-//! - samples passed ([`SAMPLES_PASSED`]): the draws of a slot count samples into a visibility result of their own;
+//! - samples passed ([`SAMPLES_PASSED`]): the draws of a slot count samples into a visibility result of their own.
 //! - vertices and primitives ([`INPUT_VERTICES`], [`INPUT_PRIMITIVES`], ...): the host adds them up from the
-//!   arguments of the draws; an indirect draw makes the slot unknown;
+//!   arguments of the draws. An indirect draw makes the slot unknown.
 //! - the other counters (the shader invocations of other stages, transform feedback, zcull) stay unknown.
 //!
 //! A report whose slots were all counted lands: the backend writes it to guest memory and into [`Landed`] with the

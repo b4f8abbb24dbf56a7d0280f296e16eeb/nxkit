@@ -30,7 +30,7 @@ impl<K: Hash + Eq + Clone, V> Lru<K, V> {
         self.map.contains_key(key)
     }
 
-    /// The entry for `key`; it counts as the most recently used.
+    /// The entry for `key`. It counts as the most recently used.
     pub(crate) fn get(&mut self, key: &K) -> Option<&V> {
         self.tick += 1;
         let tick = self.tick;

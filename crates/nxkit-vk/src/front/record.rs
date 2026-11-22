@@ -380,7 +380,7 @@ impl Vk {
         self.record(cb, |_| Some(Cmd::SetStencil { what, faces, value }));
     }
 
-    /// `vkCmdPushConstants`: the bytes are copied; at most 256 from offset 0.
+    /// `vkCmdPushConstants`: the bytes are copied, at most 256 from offset 0.
     pub fn cmd_push_constants(&self, cb: u64, stages: u32, offset: u32, data: Vec<u8>) {
         if offset >= 256 || data.len() > (256 - offset) as usize {
             self.log.once(

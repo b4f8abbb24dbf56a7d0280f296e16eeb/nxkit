@@ -155,7 +155,7 @@ impl Gpu {
         r
     }
 
-    /// `nvnQueueFenceSync`. The fence is the open frame when work is in it or held; a held queue keeps the fence
+    /// `nvnQueueFenceSync`. The fence is the open frame when work is in it or held. A held queue keeps the fence
     /// behind its held work, so a wait of another queue on it waits for that work.
     pub(crate) fn queue_fence(&self, queue: u64, s: u64) -> AbiResult<()> {
         sync::set_queue_fence(Obj(s), self.fence_now())?;
@@ -222,7 +222,7 @@ impl Gpu {
     /// After a CPU event signal released held submits: when the submits that went into the frame since it had `from`
     /// commands bring at least [`ReleaseFlush::min_work`] draws, dispatches and copies, the frame goes to the backend now
     /// ([`FlushReason::Release`]) and does not wait for the present. Nothing that is still held runs. The fence of the
-    /// released submits is the number of this flush; the present then flushes what comes after.
+    /// released submits is the number of this flush. The present then flushes what comes after.
     pub(super) fn flush_released(&self, front: &mut Front, from: usize) -> AbiResult<()> {
         let cfg = self.release_flush;
         if !cfg.on {
@@ -432,8 +432,8 @@ impl Gpu {
         }
         let r = match &h.op {
             Op::Submit { handles, origin } => self.run_submit(front, h.queue, handles, *origin),
-            // The fence of a held queue was taken as the next flush when the game made it; the flush of a release may have
-            // come since, so it names the flush that carries the work before it.
+            // The fence of a held queue was taken as the next flush when the game made it. The flush of a release may
+            // have come since, so it names the flush that carries the work before it.
             Op::Fence { sync: s } => {
                 let _ = sync::set_queue_fence(Obj(*s), Fence(self.flushed() + 1));
                 Ok(())

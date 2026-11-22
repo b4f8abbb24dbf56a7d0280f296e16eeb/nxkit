@@ -12,7 +12,7 @@ static STRAYS: AtomicU64 = AtomicU64::new(0);
 
 /// `NXKIT_DIAG=pull`: checks that every element a pulled draw reads lies in guest memory, for the draws whose vertex
 /// range the host knows (arrays, and indexed draws with readable indices), and prints the first reads that do not. A
-/// read outside makes the GPU fault; the command buffer then fails (`nxkit-metal: warning: frame ... failed`). The
+/// read outside makes the GPU fault. The command buffer then fails (`nxkit-metal: warning: frame ... failed`). The
 /// check works on guest addresses, so it builds its own block with the guest bases of the streams.
 pub(crate) fn diag_draw(sh: &Shared<'_>, d: &DrawDetail, inputs: &[u32]) {
     let block = &pull::layout(d, Some);

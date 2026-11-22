@@ -1,8 +1,8 @@
 //! The decompressed `Movie/Ndve/*.dat` container (section 2 of `docs/plans/ndve-native.md`).
 //!
 //! This is for tests and tools. At run time the game uploads the weights itself and `nxkit-gpu` reads them from the
-//! bound buffers; no game file is read. [`Network::parse`] walks the header and the network tables and finds the
-//! weight blobs. The shader bytes are not interpreted.
+//! bound buffers. No game file is read. [`Network::parse`] walks the header and the network tables and finds the weight
+//! blobs. The shader bytes are not interpreted.
 
 use std::fmt;
 
@@ -53,7 +53,7 @@ pub struct Model {
 /// One shader entry of a table. The offset is relative to the start of the table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shader {
-    /// Offset of the control section from the table start; the code follows it.
+    /// Offset of the control section from the table start. The code follows it.
     pub offset: u32,
     /// Bytes of the control section.
     pub control_len: u32,
@@ -155,7 +155,7 @@ impl Network {
     }
 
     /// The resampler's weights in `bytes`: 0x3000 bytes at 0x101f00 in the NDSR pack. The position is the one found
-    /// in the file of the Ocarina movie (V); the pack's entry table is not decoded. Check the result with
+    /// in the file of the Ocarina movie (V). The pack's entry table is not decoded. Check the result with
     /// [`crate::fingerprint::weights_ok`].
     pub fn resampler<'a>(&self, bytes: &'a [u8]) -> Option<&'a [u8]> {
         let at = self.pack_offset.checked_add(RESAMPLER_IN_PACK)?;

@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(ops.counts(), (0, 4));
         // The encoder takes the lock: it sees every op, register before unregister.
         assert_eq!(*ops.lock(&target), [REG, MAP, UNMAP, UNREG]);
-        // The queue is empty now; nothing is applied twice.
+        // The queue is empty now. Nothing is applied twice.
         assert_eq!(ops.lock(&target).len(), 4);
     }
 

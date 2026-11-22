@@ -2,9 +2,8 @@
 //!
 //! On the console a blend term whose factor is exactly 0 contributes 0, whatever the other operand is. A pixel
 //! shader can compute `Inf * 0 = NaN` in its colour and write it with alpha 0 under `SRC_ALPHA` /
-//! `ONE_MINUS_SRC_ALPHA`; the console keeps the destination. The question here is what this GPU does with
-//! `0 x NaN`, in a float target, and whether a shader that zeroes the colour when the source factor is 0 restores
-//! the console result.
+//! `ONE_MINUS_SRC_ALPHA`. The console keeps the destination. The question here is what this GPU does with `0 x NaN`, in
+//! a float target, and whether a shader that zeroes the colour when the source factor is 0 restores the console result.
 //!
 //! - `premise_zero_factor_keeps_nan` draws ten cases into `Rgba16Float` and `Rg11B10Float` targets, prints the
 //!   raw bits and the decoded values of every case and asserts the cases that decide the premise.
@@ -30,7 +29,7 @@
 //! NaN or Inf source colour with alpha 0 under `SRC_ALPHA` / `ONE_MINUS_SRC_ALPHA` stores NaN, where the console
 //! keeps the destination. The rule (zero the colour when the source factor is 0) fixes A, B and the like. It does
 //! not cover a NaN destination (H) or a zero blend colour (G), because the shader sees neither. A GPU on which A
-//! and B do not store NaN needs no rule; the first test then fails and documents that.
+//! and B do not store NaN needs no rule. The first test then fails and documents that.
 //!
 //! The colour comes as bits from a buffer, so the compiler cannot fold NaN or Inf away.
 //!

@@ -76,7 +76,8 @@ fn with_the_mirror_a_fence_wait_returns_at_the_flush_and_the_gpu_is_not_asked() 
         crate::private::test_mode(None);
         return;
     };
-    // Fence 1 (inside the run-ahead of one frame) is flushed and captured; the GPU has not seen it and nothing was encoded.
+    // Fence 1 (inside the run-ahead of one frame) is flushed and captured. The GPU has not seen it, and nothing was
+    // encoded.
     backend.flushed.store(1, Ordering::Release);
     backend.captured.store(1, Ordering::Release);
     let t0 = std::time::Instant::now();

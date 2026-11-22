@@ -3,7 +3,7 @@
 //!
 //! Needs a Metal 4 device, so the test is ignored by default: `cargo test -p nxkit-gpu --test ndsr_kernel -- --ignored`.
 //! The kernel is compiled with `NDSR_SOFT_SAMPLER`, which replaces the texture unit's filter by plain f32 bilinear, so
-//! that the reference can be matched; the hardware filter's sub-texel precision is a property of the game's GPU.
+//! that the reference can be matched. The hardware filter's sub-texel precision is a property of the game's GPU.
 #![cfg(target_os = "macos")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -288,8 +288,9 @@ fn gpu() -> Gpu {
 }
 
 /// Runs every network of [`KEYS`] on the GPU and on the CPU and compares the pictures. Variants A and B are written
-/// as f32 and compared in value; variant C is compared in the fields of the packed image. With `quantised` inputs the sums are exact and the pictures agree; with random ones a few pixels may
-/// differ by up to [`TOLERANCE`] and none by more than [`LIMIT`].
+/// as f32 and compared in value. Variant C is compared in the fields of the packed image. With `quantised` inputs the
+/// sums are exact and the pictures agree. With random ones a few pixels may differ by up to [`TOLERANCE`] and none by
+/// more than [`LIMIT`].
 fn compare(quantised: bool) {
     let gpu = gpu();
     let (blob, pic) = (blob(quantised), picture(quantised));

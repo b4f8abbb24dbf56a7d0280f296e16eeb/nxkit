@@ -116,7 +116,7 @@ pub(crate) fn take() -> (u64, u64) {
     )
 }
 
-/// The lowest and highest index the GPU shades: 8-bit indices are widened to 16 bits, so 0xff is a vertex; 0xffff of
+/// The lowest and highest index the GPU shades: 8-bit indices are widened to 16 bits, so 0xff is a vertex. 0xffff of
 /// 16-bit and 0xffffffff of 32-bit indices restart the strip and shade nothing. `None` without a vertex.
 pub(crate) fn index_range(index_type: u32, bytes: &[u8]) -> Option<(u32, u32)> {
     let it: Box<dyn Iterator<Item = u32>> = match index_type {

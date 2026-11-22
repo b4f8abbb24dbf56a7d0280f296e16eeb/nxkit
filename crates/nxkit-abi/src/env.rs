@@ -31,7 +31,7 @@ impl Env {
         Env::from_pairs(std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v))))
     }
 
-    /// A snapshot of the pairs whose name starts with [`PREFIX`]; the others are left out.
+    /// A snapshot of the pairs whose name starts with [`PREFIX`]. The snapshot leaves out the others.
     pub fn from_pairs<K: Into<String>, V: Into<OsString>>(
         pairs: impl IntoIterator<Item = (K, V)>,
     ) -> Env {

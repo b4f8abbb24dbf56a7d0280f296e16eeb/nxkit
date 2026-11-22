@@ -1,6 +1,6 @@
 //! The front end: [`Vk`], the one object that the ABI layer calls for every Vulkan function.
 //!
-//! One `Vk` exists per process; `nxkit-rt` installs it like the NVN context. It holds:
+//! One `Vk` exists per process. `nxkit-rt` installs it like the NVN context. It holds:
 //!
 //! - the state of every object behind one lock (the front lock). A call takes it for its own bookkeeping and gives it
 //!   back before it calls the backend, so a slow backend call (a texture, a pipeline, a submit) does not hold up the

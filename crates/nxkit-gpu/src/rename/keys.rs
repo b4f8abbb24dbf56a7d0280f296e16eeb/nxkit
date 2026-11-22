@@ -124,8 +124,8 @@ impl State {
     }
 
     /// The bindings of a frame meet the ranges that the host knows. A range that is not known, bound by a key with a
-    /// class, gets the class at once; a range that several keys bind gets what all of them need (a snapshot only reads,
-    /// so it asks for nothing; a merge and a renamed range cannot be combined: `Conflict`, the frame waits in full).
+    /// class, gets the class at once. A range that several keys bind gets what all of them need. A snapshot only reads,
+    /// so it asks for nothing. A merge and a renamed range cannot be combined: `Conflict`, and the frame waits in full.
     pub(super) fn adopt(&mut self, bindings: &[Binding]) -> Vec<Recheck> {
         let now = self.frame;
         let State {
@@ -258,7 +258,7 @@ impl State {
         }
     }
 
-    /// Adds a range that is only read. Its frames are judged for CPU writes in flight; it may become a snapshot.
+    /// Adds a range that is only read. Its frames are judged for CPU writes in flight. It may become a snapshot.
     pub(super) fn watch_read_only(&mut self, addr: u64, size: u32) {
         if let Some(c) = self.cands.get_mut(&addr) {
             if c.ro && size > c.size {
@@ -353,7 +353,7 @@ impl State {
             Kind::Rename => Class::Rename,
             Kind::Snapshot => Class::Snapshot,
             Kind::Merge => Class::Merge,
-            // A probe is judged by the class that it measures; it has no class of its own.
+            // A probe is judged by the class that it measures. It has no class of its own.
             Kind::Probe => return true,
         };
         self.cands

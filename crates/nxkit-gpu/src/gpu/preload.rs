@@ -24,8 +24,8 @@ pub(super) fn start(
         .name("nxkit-preload".into())
         .spawn(move || {
             // Every uniform snapshot of the frame goes to the scratch memory once. The chunks then only look the
-            // addresses up; when each chunk uploaded on first use, the shared map was locked twice per uniform of
-            // every draw by all chunk threads.
+            // addresses up. When each chunk uploaded on first use, all chunk threads locked the shared map twice per
+            // uniform of every draw.
             let mut preloaded: Preloaded = FastMap::default();
             for bytes in &snaps {
                 let key = bytes.as_ptr() as usize;

@@ -103,7 +103,7 @@ pub(crate) fn indirect_args<B: Backing>(
 }
 
 /// Where the index buffer at `addr` starts, and the bytes from there to the end of its pool. An indirect draw takes its
-/// index count from the GPU, so the encoder gives Metal all of the pool; Metal reads an index past it as 0.
+/// index count from the GPU, so the encoder gives Metal all of the pool. Metal reads an index past it as 0.
 pub(crate) fn index_room<B: Backing>(
     pools: &PoolSnapshot<B>,
     addr: u64,
@@ -226,7 +226,7 @@ pub(crate) fn geometry(
 }
 
 /// Reads `count` 8-bit indices at the guest GPU address `addr`, widens them to 16 bits and puts them into the sink.
-/// Returns the address of the 16-bit indices. The CPU reads the guest bytes; the GPU reads the copy in the sink.
+/// Returns the address of the 16-bit indices. The CPU reads the guest bytes, and the GPU reads the copy in the sink.
 fn widen_u8_indices(
     sh: &Shared<'_>,
     addr: u64,

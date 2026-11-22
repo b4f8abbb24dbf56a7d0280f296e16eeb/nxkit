@@ -2,7 +2,7 @@
 //!
 //! Argument conventions (they come from the rules in `lib.rs` and `vulkan_core.h`):
 //! - A handle, a pointer, a `VkDeviceSize` and a `size_t` are `u64`. A guest address is a host address (R18).
-//! - A `uint32_t`, a flags value, an enum and a `VkBool32` are `u32`; an `int32_t` is `i32`.
+//! - A `uint32_t`, a flags value, an enum and a `VkBool32` are `u32`. An `int32_t` is `i32`.
 //! - A `float` is `f32`: AArch64 passes it in a SIMD register, so it must not be declared as an integer.
 //! - A `VkResult` is returned as `i32`. No function is variadic.
 //!

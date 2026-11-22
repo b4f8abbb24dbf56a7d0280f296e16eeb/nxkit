@@ -1,7 +1,7 @@
 //! The Metal kernels of the network, as one MSL source.
 //!
 //! The text is kept in `.metal` files next to this module and joined at compile time. Every kernel of
-//! [`crate::plan::Plan::steps`] is a `kernel void` of this source; `kernels.rs` names them and sets their grids.
+//! [`crate::plan::Plan::steps`] is a `kernel void` of this source. `kernels.rs` names them and sets their grids.
 //!
 //! - `common.metal`: the shared pieces: the K = 16 step with its f16 rounding, the epilogues and the colour conversion.
 //! - `conv.metal`: the twelve convolution layers (3x3 with a staged input tile, 2x2 down, 2x2 up with the skip).

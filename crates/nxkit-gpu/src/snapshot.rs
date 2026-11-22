@@ -33,10 +33,10 @@ pub trait EncodeView: Sync {
     fn sampler_epoch(&self) -> u64;
 
     /// The registered samplers by id. A [`Snapshot`] lists them only when the sampler table did not hold them yet at
-    /// the flush; the encoder asks when [`EncodeView::sampler_epoch`] is newer than the table.
+    /// the flush. The encoder asks when [`EncodeView::sampler_epoch`] is newer than the table.
     fn samplers(&self) -> Vec<(u32, Tsc)>;
 
-    /// The texture ids that the encoder resolves for the pool table. A snapshot lists the ids it carries slots for;
+    /// The texture ids that the encoder resolves for the pool table. A snapshot lists the ids it carries slots for.
     /// `None` (the live tables) lets the encoder use the ids it read from the bitmap in this frame.
     fn pool_ids(&self) -> Option<&[u32]> {
         None

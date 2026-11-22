@@ -1,6 +1,6 @@
 //! Everything the back end reads besides the structured program: the shader definitions, host capabilities, resource
 //! properties and attribute usage as plain data. The probe phase `props` dumps it (see `tools/xlate-probe/Probe.cs`,
-//! `Props`) and [`Props::parse`] reads that text; the translation core fills the same structs from the real objects.
+//! `Props`) and [`Props::parse`] reads that text. The translation core fills the same structs from the real objects.
 //! These are the back end's view. The front end's port of `ShaderProperties` is `translation::props`.
 
 pub mod text;

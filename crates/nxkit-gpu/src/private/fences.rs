@@ -8,7 +8,7 @@ pub(crate) fn encoded(fence: u64, batch: Option<&SubmittedBatch>) {
     if !on() {
         return;
     }
-    // The frame is committed and runs; the completion says it is done.
+    // The frame is committed and runs. The completion says it is done.
     Pages::global().note_committed(fence);
     note_between(fence);
     let done = move || Pages::global().complete(fence);

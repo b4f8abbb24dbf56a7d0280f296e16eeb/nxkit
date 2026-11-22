@@ -15,8 +15,13 @@ These stages are in `nxb`:
 - pipeline archive
 - the ad-hoc signer (`nxb sign`)
 
-For the timings, refer to [benchmarks.md](benchmarks.md). Not in scope: a replacement of `metal-tt`, `metal-pack` or `clang`, an iOS app (nxkit has no iOS host yet), a game without a title module, a change of the host file formats
-(`DMROMFS1`, package records, `romfs.id`, `prebuilt.tsv`), and network access.
+For the timings, refer to [benchmarks.md](benchmarks.md). These items are not in scope:
+
+- a replacement of `metal-tt`, `metal-pack` or `clang`
+- an iOS app (nxkit has no iOS host yet)
+- a game without a title module
+- a change of the host file formats (`DMROMFS1`, package records, `romfs.id`, `prebuilt.tsv`)
+- network access
 
 ## One hash for each byte
 
@@ -89,15 +94,20 @@ Not ported at this time: the `--html` output of some titles. The base game of a 
 
 A title can say that its shaders lie only in the files under its `shader_groups` (`game.tsv` key `shader_scope groups`, from
 `Standalone::shader_groups_only` of the title module). The split of `nxb build --nup` then reads every file under a group
-as before, and every file outside the groups that is not compressed (a raw file costs one pass over bytes that are in memory
-anyway). A compressed file outside the groups (zstd, a size-prefixed zstd or LZ4 frame, gzip, Yaz0) is not decoded and not
-scanned. It is written to the RomFS as it is, raw. Without the key the split decodes and scans every file, so a title with
-unknown groups keeps the full scan. The title sets the key only after a split of the whole game found every shader under the
-groups. Ocarina of Time does so: all 42,851 file-sourced shader rows of the earlier split are under `/Shader/`, `/Effect/`, `/Lib/`,
-`/Layout2Shader/` and `/Movie/` (measured on the tables of the earlier split). The result for the scanned files is the same as a full
-scan. The stage output has one line of counters: files and bytes scanned and skipped, frames and bytes decoded, the CPU time
-of the scans, and the wall time of the write and scan pass and of the archive jobs and merge. The unpack also deletes the
-folder of an earlier run on all threads.
+as before. It also reads every file outside the groups that is not compressed (a raw file costs one pass over bytes that
+are in memory anyway). The split does not decode and does not scan a compressed file outside the groups (zstd, a
+size-prefixed zstd or LZ4 frame, gzip, Yaz0). It writes that file to the RomFS as it is, raw. Without the key the split
+decodes and scans every file, so a title with unknown groups keeps the full scan. The title sets the key only after a split
+of the whole game found every shader under the groups. Ocarina of Time does so. All 42,851 file-sourced shader rows of the
+earlier split are under `/Shader/`, `/Effect/`, `/Lib/`, `/Layout2Shader/` and `/Movie/` (measured on the tables of the
+earlier split). The result for the scanned files is the same as a full scan. The stage output has one line of counters:
+
+- files and bytes scanned and skipped
+- frames and bytes decoded
+- the CPU time of the scans
+- the wall time of the write and scan pass, and of the archive jobs and merge
+
+The unpack also deletes the folder of an earlier run on all threads.
 
 Since version 0.4.0, the split reads many more container families. A format that is not ported stops the split with a named
 `Unsupported` error and exit code 4. The split never gives a silent difference.
@@ -137,27 +147,38 @@ The split reads approximately 35 container formats. Only the real image and the 
   A case outside the rewriter's contract stops the stage with exit code 4.
   The licence notice of the engine patch data that the rules of the title modules come from is in `data/rewrite-rules/NOTICE` and in `THIRD_PARTY.md`.
 
-The rewriter covers these changes: the acquire order of locks (`ldaxr`), the Trinity barrier, `changed.tsv`, the observation gates at each instruction that can move,
-`BACK_MIN`, the recognizers of jump tables, the proof of tail calls and the finders `ue_cvar`, `ue_malloc`, `ue_region`, `fps_target` and `snowdrop_pools`.
+The rewriter covers these changes:
+
+- the acquire order of locks (`ldaxr`)
+- the Trinity barrier
+- `changed.tsv`
+- the observation gates at each instruction that can move
+- `BACK_MIN`
+- the recognizers of jump tables
+- the proof of tail calls
+- the finders `ue_cvar`, `ue_malloc`, `ue_region`, `fps_target` and `snowdrop_pools`
 
 The finder `ue_ring` runs on a main module (Unreal's dynamic buffers keep 4 copies instead of 3). `matchrule.rs` reads the word `0xe7ffdefe` as `brk #0`, and it accepts a replacement branch whose target stays inside the matched function.
 They are in `crates/nxb-rewrite/src/ring.rs` and `matchrule.rs`.
 
-The jump table rules are: a table's bound is the compare that a branch acts on, the walk for a table base passes a page-zero constant, and branches inside an exclusive window stay in its copy
-(`jumps.rs`, `windows.rs` and `analyse.rs`).
+The jump table rules are in `jumps.rs`, `windows.rs` and `analyse.rs`:
+
+- The bound of a table is the compare that a branch acts on.
+- The walk for a table base passes a page-zero constant.
+- Branches inside an exclusive window stay in its copy.
 
 The finders `ue_cvar`, `ue_malloc`, `ue_region`, `ue_ring`, `fps_target` and `snowdrop_pools` have no real positive sample. `ue_region` is tested on synthetic main modules (`crates/nxb-rewrite/tests/region.rs`, made by `tools/gen_synth_region.py`). `ue_ring` is tested the same way (`crates/nxb-rewrite/tests/ring.rs`, made by `tools/gen_synth_ring.py`).
 The earlier comparisons with the output of the Python rewriter (`patch_nso.py`) were made before this engine path was removed. They are in the history of this file.
 
 ## The bundle
 
-`nxb build` writes the app as `<name>.app.partial` and renames it when all stages are done. `Contents/MacOS/nxkit-host` is the program of the app. A folder at `-o` is replaced only if it is an app of nxkit (`Contents/MacOS/nxkit-host`) or of the old engine (`Contents/Resources/dm/` with `Contents/MacOS/nxnative` or `Contents/MacOS/dmhost`), which a launcher such as NX2Apple built at the same place before. The old engine keeps the save outside the app, so no save is lost. Any other folder stops the build with exit code 2.
+`nxb build` writes the app as `<name>.app.partial` and renames it when all stages are done. `Contents/MacOS/nxkit-host` is the program of the app. The build replaces a folder at `-o` only if it is an app of nxkit (`Contents/MacOS/nxkit-host`) or an app of the old engine (`Contents/Resources/dm/` with `Contents/MacOS/nxnative` or `Contents/MacOS/dmhost`). A launcher such as NX2Apple built such an app at the same place before. The old engine keeps the save outside the app, so no save is lost. Any other folder stops the build with exit code 2.
 The stage `bundle` adds `Info.plist`, signs `nxkit-host` ad hoc with the signer of `nxb-pack` and moves the app to its final path.
-Before the move it writes the six shared font stand-ins into `Contents/Resources/nxkit/font/` (`nxb-font`). Types 0 to 4 are unhinted cuts of macOS's Arial Unicode, each with the characters of its type. Type 5 holds the controller button icons at the console's private-use code points, with the letters of macOS's Arial Rounded Bold. A game sizes the memory of its font engine for the console's fonts, so the cuts have no hinting program and no glyph instructions. Without the system fonts the build gives a warning and the app has no font folder. `nxb fonts <app>` writes the folder into an app of an older build.
-The output is the output of NX2Apple's `make_shared_fonts.py` and `make_ext_font.py` with fontTools 4.63, compared on 2026-11-21: the same glyphs, outlines, glyph order, character maps, metrics and names. The differences are the time stamps in `head`, the code page bits of `OS/2` (the source's bits stay), the empty script list of `GSUB` and the segments of the format 4 `cmap`. `nintendo_ext.ttf` is byte-identical except the time stamps and the checksums. The character sets come from Python's codecs through `tools/gen_font_charsets.py` (`crates/nxb-font/data/charsets.txt`).
+Before the move it writes the six shared font stand-ins into `Contents/Resources/nxkit/font/` (`nxb-font`). Types 0 to 4 are unhinted cuts of macOS's Arial Unicode, each with the characters of its type. Type 5 holds the controller button icons at the private-use code points of the console. Its letters come from macOS's Arial Rounded Bold. A game sizes the memory of its font engine for the console's fonts, so the cuts have no hinting program and no glyph instructions. Without the system fonts the build gives a warning and the app has no font folder. `nxb fonts <app>` writes the folder into an app of an older build.
+The output is the output of NX2Apple's `make_shared_fonts.py` and `make_ext_font.py` with fontTools 4.63, compared on 2026-11-21. It has the same glyphs, outlines, glyph order, character maps, metrics and names. The differences are the time stamps in `head` and the code page bits of `OS/2` (the source's bits stay). The empty script list of `GSUB` and the segments of the format 4 `cmap` are also different. `nintendo_ext.ttf` is byte-identical except the time stamps and the checksums. The character sets come from Python's codecs through `tools/gen_font_charsets.py` (`crates/nxb-font/data/charsets.txt`).
 The host keeps the save outside the app, in `~/Library/Application Support/nxkit/<title id>/save` (R67). An app of an older build kept it in `Contents/Resources/nxkit/save/<title id>`. That folder moves into the new app, and the host moves it to the new place at the first start that finds no save there.
-The old engine keeps the save outside its app: in `~/Library/Application Support/nxnative/<title id>/save`, or in `<library>/save/<title id>` when the folder that holds the app has the file `.nx2apple-library`. When the old app is one of the old engine and the new app has no save yet, the stage `bundle` copies that save into `Contents/Resources/nxkit/save/<title id>` of the new app. It copies the save that the old engine would start the game on: the folder in `<Application Support folder>/save-location` first, then the library save if it has files, then the save in `~/Library`. The device save `<save>_device` comes along too. The old save stays in its place, because an older build can still read it. At its first start the host moves the copy to its own save folder, unless a save is there already. The copy is a clone on APFS and keeps the extended attributes on another volume.
-The save layout of nxkit-svc-fs is the one of the old engine (`dm/host/hle_fs.c`): the folder is the committed save, `<save>.work` and `<save>.new` are its siblings, and the attribute `org.d2rmobile.guest-name` holds a guest name that collides on APFS. So the copy needs no conversion. The work folder is not copied, because it holds only what the game wrote after its last commit. A failed copy stops the build, and the old app stays in place. Refer to [build-botw.md](build-botw.md) for the stages and [nxkit-host.md](nxkit-host.md) for the layout of the bundle.
+The old engine keeps the save outside its app, in `~/Library/Application Support/nxnative/<title id>/save`. When the folder that holds the app has the file `.nx2apple-library`, the save is in `<library>/save/<title id>`. The stage `bundle` can copy that save into the new app. It does this when the old app is one of the old engine and the new app has no save yet. The destination is `Contents/Resources/nxkit/save/<title id>`. The stage copies the save that the old engine would start the game on. It tries the folder in `<Application Support folder>/save-location` first. Then it tries the library save if it has files, and then the save in `~/Library`. The device save `<save>_device` comes along too. The old save stays in its place, because an older build can still read it. At its first start the host moves the copy to its own save folder, unless a save is there already. The copy is a clone on APFS and keeps the extended attributes on another volume.
+The save layout of nxkit-svc-fs is the one of the old engine (`dm/host/hle_fs.c`). The folder is the committed save, and `<save>.work` and `<save>.new` are its siblings. The attribute `org.d2rmobile.guest-name` holds a guest name that collides on APFS. So the copy needs no conversion. The work folder is not copied, because it holds only what the game wrote after its last commit. A failed copy stops the build, and the old app stays in place. Refer to [build-botw.md](build-botw.md) for the stages and [nxkit-host.md](nxkit-host.md) for the layout of the bundle.
 
 ## Code signature
 
@@ -216,7 +237,7 @@ The pipeline archive is an optimization. If it gives an error, the build writes 
 
 With `--progress json`, standard output has NDJSON events only. All other text goes to standard error.
 
-With `--progress bar`, one live line at the bottom of the terminal shows the stage, the step, a bar with the count (files, bytes, shaders, modules or batches), the time left and the time spent. A count whose total is not known shows without a bar. The default `--progress auto` and `--progress lines` print plain lines and no escape codes, also on a terminal.
+With `--progress bar`, one live line shows at the bottom of the terminal. It shows the stage, the step, a bar with the count (files, bytes, shaders, modules or batches), the time left and the time spent. A count whose total is not known shows without a bar. The default `--progress auto` and `--progress lines` print plain lines and no escape codes, also on a terminal.
 
 | exit code | meaning |
 |---|---|
@@ -240,12 +261,12 @@ The archive stage compiles one Metal 4 render pipeline base for each shader pair
 - When these tools are not found, each batch runs `metal-tt`. Then a batch has up to 1,000 bases and takes 2.2 GiB for each 1,000 bases. One batch runs for each two cores.
 - The archive also holds a compute pipeline for each compute shader of the profile (`30fb2136` upstream).
   The `C` rows of `pso_manifest.tsv` come first, the `C` rows of the host's pipeline lists (see "Recorded states") next. The compute rows of `shader_map.tsv` follow. Each library is listed once.
-  A shader is left out when its reflection is missing or has another chain or stage, when its library is unreadable, when it has no entry, or when the entry has function constants.
+  The stage leaves out a shader when its reflection is missing or has another chain or stage. It also leaves out a shader when its library is unreadable, when it has no entry, or when the entry has function constants.
   The script holds the pipelines as `compute_pipeline_descriptors`. Each one names its function and nothing else, as the host looks it up.
   The compute pipelines are compiled apart from the render bases, in groups of 16. A change on one side leaves the other side's batches in the store.
   `archive.tsv` has a `compute` line with their number. `nxb pso` takes `--shader-map` and `--manifest` (repeatable), and `--no-compute` builds the bases alone.
   `nxb build` reads the two tables of the profile.
-- The progress of the batches (`batches done of total`, printed every 30 s in the lines mode) has a total from the start. The streamed archive counts one batch for each group of pairs when it starts, and corrects that when the group is planned, as a group is cut further or holds no pipeline. The total is then right when the last group has been planned.
+- The progress of the batches (`batches done of total`, printed every 30 s in the lines mode) has a total from the start. The streamed archive counts one batch for each group of pairs when it starts. It corrects that count when it plans the group, because a group can be cut further or hold no pipeline. The total is then right when the last group is planned.
 - The merge puts the pieces in hash order (`metal-pack`).
 - Measured on the reference title, cold: 207 s, and 958 to 1,076 CPU seconds.
   The loader probe found all 18,300 bases. The machine load was 7 to 33.
@@ -253,37 +274,67 @@ The archive stage compiles one Metal 4 render pipeline base for each shader pair
 
 ### Recorded states
 
-A plain base has no vertex layout, one sample, no alpha to coverage and no ICB support. The host specializes it to the colour state of a draw, which costs little. The host draws with stage inputs and the `_b` library unless `NXKIT_PULL=1`, so without pulling every draw of a vertex shader with inputs has a vertex layout, and the plain `_bp` bases serve nothing. A pipeline whose other state differs (a vertex layout, several samples, alpha to coverage, ICB support) has no base, and the host compiled it from the functions while the title played: seconds each, with the draw skipped until it was done. The host records every pipeline it makes (`pipelines.seen`, see [shader-step.md](shader-step.md#the-runtime-pipeline-cache)), so the build can compile them ahead.
+A plain base has no vertex layout, one sample, no alpha to coverage and no ICB support. The host specializes it to the colour state of a draw, which costs little. The host draws with stage inputs and the `_b` library unless `NXKIT_PULL=1`. Thus without pulling, every draw of a vertex shader with inputs has a vertex layout, and the plain `_bp` bases serve nothing. A pipeline whose other state differs (a vertex layout, several samples, alpha to coverage, ICB support) has no base. The host compiled such a pipeline from the functions while the title played. This took seconds for each pipeline, and the host skipped the draw until the compile was done. The host records every pipeline it makes (`pipelines.seen`, see [shader-step.md](shader-step.md#the-runtime-pipeline-cache)), so the build can compile them ahead.
 
-- The build reads the lists, merged without repeats. It takes `--pipeline-list FILE` if given. Else it takes, from the app at the output path (the build replaces that app): `Contents/Resources/nxkit/pipecache/seen-*.list` and `pipecache/id-*/pipelines.seen`. It looks in `~/Library/Caches/nxkit/<title id>/pipecache/` (where the host keeps the cache when the app cannot be written) and in `$NXKIT_PIPELINE_CACHE_DIR/pipecache/` in the same way. A dry run prints the files it found, and a build prints one `pipeline list:` line for each.
-- Each `R` line whose state is not the plain one (`nxb-archive::seen`) gives one more base in the script, after the plain bases: the pair, the vertex descriptor, the primitive class, the sample count, alpha to coverage and ICB support of the state, and eight colour attachments that are all `Unspecialized`. The colour state is not needed: the host specializes it. A state with other colours is the same base. A pipeline that the point size fallback made (`fallback` is 1) also gets the base without a primitive class.
-- A base is added only when the plan accepts its pair by the rules of a plain base (same chain, no mesh stage, no function constants, no layer output, no primitive ID, the functions are in the libraries). The pair is planned as the host draws it with stage inputs: the `_b` library and the `entry` of the reflection, also for a vertex shader with a `pull` field (found with the real Ocarina of Time list: before this rule none of the extras matched, 1426 of 1429 states now do). A line that does not parse, or that names a vertex format the script has no name for (`FloatRg11B10`), is left out. Mesh lines are not used: the host builds mesh pipelines itself (Ocarina of Time: 52, about 17 s of compiling at the start, the largest cost left). The `C` lines (compute pipelines, `C <key> <stem> <entry>`) are: their libraries are added to the compute shaders of the archive after the manifest's `C` rows (`read_computes_with`, `nxb pso --pipeline-list`), so the start loads them (the 100 compute pipelines of Ocarina of Time were in the archive already through its shader map; they are loads now and the prewarm line counts them as `archive`).
-- A state is checked before it enters the script (`StateBase::invalid`): every attribute that the vertex function reads (the `vertex_inputs` locations of its reflection) needs a layout for its buffer and must lie inside the stride (`offset + size <= stride`), and a per vertex or per instance layout needs a stride. `applegpu-nt` fails a whole batch on a violation, and the game declares some (Ocarina of Time: attribute 2 at offset 12 in a stream of stride 8, 62 of 1487 states), which the host sets as they are. Such states are left out and counted (`nxb pso` prints the first five, the build writes all to `<work>/pso/mac/dropped.tsv` and counts them in the archive summary); they compile at run time as before. Attributes that the function does not read are not checked, as the compiler does not check them (`NXB_SEEN_NO_CHECK=1` skips the check).
-- A batch that still fails in the compiler does not fail the archive (`compile_resilient`): its plain bases are compiled alone, and its states in groups cut in halves until each group compiles. Only the states the compiler refuses are left out, with its message, in the same list. A batch of plain bases only fails as before.
-- The bases go into the batches like the plain ones (grouped by vertex function, so a state is in the shard of its pair unless a batch of a very large group is cut between them). The streamed archive gives each state to the group of its pair. `nxb pso` takes `--pipeline-list` (repeatable) and has the states in `bases.mtl4-json`.
-- Every `R` line with a fragment stage also gives one **exact** pipeline (`nxb-archive::exact`): the descriptor that the host builds for that draw, all of it set. The colour attachments are the slots of the line (`_` or beyond its length stay at the descriptor's default), each with its pixel format, write mask and, when it blends, `blending_state Enabled` with the six factors and operations; a slot without a blend sets nothing but the format (and the mask when it is not `All`). The vertex descriptor, class, samples, alpha to coverage and ICB support are those of the line, and the class is the one the host drew with, so a pipeline of the point size fallback is archived without a class. The host's lookup of that descriptor in the archive is then an archive load: no compile, no specialization. A format or blend factor that the script has no name for (`Src1Alpha`) leaves the line out. The pair is accepted by the rules of the bases above, but the functions need not be the entries that the plan chose: the integer entry `main0_u` of a fragment shader and the `_bp` library of a pulling vertex shader are archived as the host draws them (an entry with function constants, or one the library lacks, is left out). The same vertex descriptor check applies (`StateBase::invalid` and `ExactState::invalid`), so the states that the compiler refuses (62 of 1 676 in Ocarina of Time) stay at run time, where the host compiles them once and keeps them (see "The runtime pipeline cache" in [shader-step.md](shader-step.md#the-runtime-pipeline-cache)). The same descriptor appears once however many keys (debug flags) it was recorded under.
-- The exact pipelines are compiled in batches of their own, one per stream group (`Stream` `group`, `cut::whole`), and so are shards of their own: a change of the list changes the exact batches of the groups it touches and leaves the plain and state bases, about 37 000 of them for Ocarina of Time, in the store. The index (`nxkit_abi::shards`, version 2: the host reads 1 and 2) has a section of exact entries, one per pair and shard (`Ident::Exact`); a pair whose states were cut by the compiler's refusals into several batches has several. The host opens only the exact shards of a pair for a recorded state, and not its base shard (in the real build: 1 614 pipelines in 0.3 s, where the same list through bases took 70 to 75 s). `nxb pso` writes them into its single archive beside the bases and prints `N of M recorded render pipelines added fully specialized`.
-- The host (`nxkit-metal`, `pipeline::cache::specialize`) asks the archive for the unspecialized pipeline of such a state first, with the primitive class of the draw and then without one, and specializes it to the colours. When the archive has none, it compiles the base as before.
-- Checked with Ocarina of Time: `nxb pso` on 11 pairs and 14 recorded states, then the host's prewarm over the same list from that archive: 14 of 14 made by specialization, 0 compiled. With exact pipelines, `nxb pso` on the 487 pairs of the real list (1 426 states as bases, 1 614 exact pipelines, 100 compute pipelines; 62 states refused, 139 MB, 77 batches, 47 s on a loaded machine) and the prewarm over its 1 676 render lines from that file: archive 1 614, compiled 62 (the refused states), 0.3 s; with the mesh and compute lines (`NXKIT_LOOKUP_ALL=1`) 1 828 pipelines in 18.6 s, archive 1 714, compiled 114 (the 62 and the 52 mesh pipelines). `NXKIT_DIAG=stats` or `pipe` says why a prewarm compile missed (`state base not archived ...`), and the ignored test `lookup_of_a_real_app` in `nxkit-gpu` (`pipelines/prewarm.rs`) runs the lookup against an app's shards or one archive file.
-- The build keeps the lists in the new app: a list under the old app's `pipecache` keeps its place, any other goes to `pipecache/id-carried-<n>/pipelines.seen`.
+- The build reads the lists, merged without repeats. It takes `--pipeline-list FILE` if given. Else it takes these lists from the app at the output path (the build replaces that app): `Contents/Resources/nxkit/pipecache/seen-*.list` and `pipecache/id-*/pipelines.seen`. It looks in `~/Library/Caches/nxkit/<title id>/pipecache/` in the same way. The host keeps the cache there when it cannot write the app. It also looks in `$NXKIT_PIPELINE_CACHE_DIR/pipecache/` in the same way. A dry run prints the files it found, and a build prints one `pipeline list:` line for each.
+- Each `R` line whose state is not the plain one (`nxb-archive::seen`) gives one more base in the script, after the plain bases. The base has these parts:
+  - the pair
+  - the vertex descriptor, the primitive class, the sample count, alpha to coverage and ICB support of the state
+  - eight colour attachments that are all `Unspecialized`
+
+  The colour state is not needed, because the host specializes it. A state with other colours is the same base. A pipeline that the point size fallback made (`fallback` is 1) also gets the base without a primitive class.
+- The build adds a base only when the plan accepts its pair by the rules of a plain base. These rules are: same chain, no mesh stage, no function constants, no layer output, no primitive ID, and the functions are in the libraries. The plan uses the pair as the host draws it with stage inputs. It uses the `_b` library and the `entry` of the reflection, also for a vertex shader with a `pull` field. The real Ocarina of Time list showed this: before this rule none of the extras matched, and now 1426 of 1429 states do. The build leaves out a line that does not parse. It also leaves out a line that names a vertex format that the script has no name for (`FloatRg11B10`). The build does not use mesh lines, because the host builds mesh pipelines itself. For Ocarina of Time these are 52 pipelines, about 17 s of compiling at the start, and the largest cost that is left. The build uses the `C` lines (compute pipelines, `C <key> <stem> <entry>`). It adds their libraries to the compute shaders of the archive, after the `C` rows of the manifest (`read_computes_with`, `nxb pso --pipeline-list`). Thus the start loads them. The 100 compute pipelines of Ocarina of Time were in the archive already through its shader map. They are loads now, and the prewarm line counts them as `archive`.
+- The build checks a state before it enters the script (`StateBase::invalid`). These are the rules:
+  - Every attribute that the vertex function reads (the `vertex_inputs` locations of its reflection) needs a layout for its buffer.
+  - That attribute must lie inside the stride (`offset + size <= stride`).
+  - A per vertex or per instance layout needs a stride.
+
+  `applegpu-nt` fails a whole batch on a violation. The game declares some violations, and the host sets them as they are. In Ocarina of Time, attribute 2 is at offset 12 in a stream of stride 8, in 62 of 1487 states. The build leaves out such states and counts them. `nxb pso` prints the first five. The build writes all of them to `<work>/pso/mac/dropped.tsv` and counts them in the archive summary. They compile at run time as before. The build does not check attributes that the function does not read, because the compiler does not check them (`NXB_SEEN_NO_CHECK=1` skips the check).
+- A batch that still fails in the compiler does not fail the archive (`compile_resilient`). The build compiles its plain bases alone. It compiles its states in groups, and cuts each group in halves until it compiles. The build leaves out only the states that the compiler refuses, with the compiler message, in the same list. A batch of plain bases only fails as before.
+- The bases go into the batches like the plain ones, grouped by vertex function. Thus a state is in the shard of its pair, unless a batch of a very large group is cut between them. The streamed archive gives each state to the group of its pair. `nxb pso` takes `--pipeline-list` (repeatable) and has the states in `bases.mtl4-json`.
+- Every `R` line with a fragment stage also gives one **exact** pipeline (`nxb-archive::exact`). This is the descriptor that the host builds for that draw, with all of it set.
+  - The colour attachments are the slots of the line. A slot `_`, or a slot beyond the length of the line, stays at the default of the descriptor. Each slot has its pixel format and write mask. When the slot blends, it also has `blending_state Enabled` with the six factors and operations. A slot without a blend sets only the format (and the mask when it is not `All`).
+  - The vertex descriptor, class, samples, alpha to coverage and ICB support are those of the line. The class is the one that the host drew with. Thus the build archives a pipeline of the point size fallback without a class.
+  - The host lookup of that descriptor in the archive is then an archive load, with no compile and no specialization.
+  - A format or blend factor that the script has no name for (`Src1Alpha`) leaves the line out.
+  - The build accepts the pair by the rules of the bases above. But the functions need not be the entries that the plan chose. The build archives the integer entry `main0_u` of a fragment shader and the `_bp` library of a pulling vertex shader as the host draws them. It leaves out an entry with function constants, or an entry that the library does not have.
+  - The same vertex descriptor check applies (`StateBase::invalid` and `ExactState::invalid`). Thus the states that the compiler refuses (62 of 1 676 in Ocarina of Time) stay at run time. There the host compiles them once and keeps them (see "The runtime pipeline cache" in [shader-step.md](shader-step.md#the-runtime-pipeline-cache)).
+  - The same descriptor appears once, however many keys (debug flags) the host recorded it under.
+- The build compiles the exact pipelines in batches of their own, one for each stream group (`Stream` `group`, `cut::whole`). Thus they are shards of their own. A change of the list changes the exact batches of the groups that it touches. It leaves the plain and state bases in the store, about 37 000 of them for Ocarina of Time. The index (`nxkit_abi::shards`, version 2: the host reads 1 and 2) has a section of exact entries, one for each pair and shard (`Ident::Exact`). The refusals of the compiler can cut the states of a pair into several batches. Such a pair has several entries. For a recorded state, the host opens only the exact shards of a pair, and not its base shard. In the real build this gave 1 614 pipelines in 0.3 s, where the same list through bases took 70 to 75 s. `nxb pso` writes them into its single archive beside the bases and prints `N of M recorded render pipelines added fully specialized`.
+- The host (`nxkit-metal`, `pipeline::cache::specialize`) first asks the archive for the unspecialized pipeline of such a state. It asks with the primitive class of the draw, and then without one. It then specializes the pipeline to the colours. When the archive has none, the host compiles the base as before.
+- Checked with Ocarina of Time:
+  - `nxb pso` on 11 pairs and 14 recorded states, then the host prewarm over the same list from that archive. Specialization made 14 of 14, and 0 were compiled.
+  - With exact pipelines: `nxb pso` on the 487 pairs of the real list gave 1 426 states as bases, 1 614 exact pipelines and 100 compute pipelines. It refused 62 states. The archive had 139 MB in 77 batches and took 47 s on a loaded machine. Then the prewarm ran over its 1 676 render lines from that file. It gave archive 1 614 and compiled 62 (the refused states), in 0.3 s.
+  - With the mesh and compute lines (`NXKIT_LOOKUP_ALL=1`): 1 828 pipelines in 18.6 s, archive 1 714, compiled 114 (the 62 and the 52 mesh pipelines).
+
+  `NXKIT_DIAG=stats` or `pipe` says why a prewarm compile missed (`state base not archived ...`). The ignored test `lookup_of_a_real_app` in `nxkit-gpu` (`pipelines/prewarm.rs`) runs the lookup against the shards of an app or against one archive file.
+- The build keeps the lists in the new app. A list under the `pipecache` of the old app keeps its place. Any other list goes to `pipecache/id-carried-<n>/pipelines.seen`.
 
 ### Where the state of an archive pipeline comes from
 
-The plan (`plan::plan`) and the script (`plan::script_text_with`) give every base the same state: eight colour attachments with every field `Unspecialized`, and nothing else (no vertex descriptor, no topology class, one sample, no alpha to coverage). Nothing in the profile sets it. A pair is left out when its vertex shader has stage inputs and is not a pull shader (`left[2]`), when the fragment shader uses the primitive ID, when the vertex shader writes the layer, when the library has function constants (these go to `rest`), and when it is a mesh shader. `NXKIT_DIAG=stats` of the host says at run time which of these states the archive misses (see [diagnostics.md](diagnostics.md#archive-coverage)).
+The plan (`plan::plan`) and the script (`plan::script_text_with`) give every base the same state: eight colour attachments with every field `Unspecialized`, and nothing else (no vertex descriptor, no topology class, one sample, no alpha to coverage). Nothing in the profile sets it. The plan leaves out a pair in these cases:
+
+- Its vertex shader has stage inputs and is not a pull shader (`left[2]`).
+- The fragment shader uses the primitive ID.
+- The vertex shader writes the layer.
+- The library has function constants (these go to `rest`).
+- It is a mesh shader.
+
+`NXKIT_DIAG=stats` of the host says at run time which of these states the archive misses (see [diagnostics.md](diagnostics.md#archive-coverage)).
 
 ### Pipeline seeds of a title
 
-A title module can name the pipelines its game uses: `pipelines.seeds` beside the module, returned by `BuildHooks::pipeline_seeds` (format in `nxkit-pipestate` `seeds.rs`). A seed is the state of one pipeline as the game set it: the shader keys, the colour targets with format, NVN blend state and write mask, the sample count, alpha to coverage and the NVN vertex attributes and streams that the vertex shader reads. A `D` line names the depth mode of the game. `S` lines name shaders seen in play, and the shader step translates the shaders of the seeds first.
+A title module can name the pipelines its game uses: `pipelines.seeds` beside the module, returned by `BuildHooks::pipeline_seeds` (format in `nxkit-pipestate` `seeds.rs`). A seed is the state of one pipeline as the game set it. It has the shader keys and the colour targets with format, NVN blend state and write mask. It also has the sample count, alpha to coverage, and the NVN vertex attributes and streams that the vertex shader reads. A `D` line names the depth mode of the game. `S` lines name shaders seen in play, and the shader step translates the shaders of the seeds first.
 
 The build resolves a seed into the pipeline a draw of that state makes on the host (`nxb-archive` `seeded.rs`). It uses the facts of the translated shaders (`<key>_b.json`: entry functions, vertex inputs, written colours) and the rules that the host draws with (`nxkit-pipestate` `draw.rs` and `nvn.rs`). The host and the build call the same functions, so a resolved seed is the pipeline the draw asks for. A seed is resolved for the depth mode of the `D` line, or for both modes without one, and for drawing without vertex pulling (the host's default).
 
-- The pairs of the seeds join the archive's pairs, and each group of the streamed archive resolves the seeds of its pairs when its shaders are done and compiles them as exact pipelines. The compute seeds join the compute list.
+- The pairs of the seeds join the pairs of the archive. When the shaders of a group of the streamed archive are done, the group resolves the seeds of its pairs. It compiles them as exact pipelines. The compute seeds join the compute list.
 - The build writes the resolved list without keys to `pipelines/shipped.list` of the app. The host makes it at every start (see shader-step.md, "The runtime pipeline cache").
 - Mesh pipelines are in the shipped list but not in the archive: the host compiles them at the start.
 - A seed has no topology and no ICB flag. It is resolved for triangles without ICB support. Lines, points and ICB draws of a seeded pair are made at run time as before.
 - A seed does not say whether a geometry shader picked the layer. For a vertex shader with a layer entry the seed gives the layered draw too. The archive leaves out pairs whose vertex function writes the layer, so the start compiles these once.
 
-Measured on 2026-11-22 with Octopath Traveler II (v131072, M2 Max), the first 90 s from the start into the title: the shipped list has 762 pipelines from 378 seeds. The first start makes them in 0.5 s (660 archive loads, 98 compiles, 4 that the compiler refuses), and no draw is skipped as pending in 1,680 frames. Without the list (`NXKIT_PIPELINE_CACHE=0`) 107 draws were skipped in 1,380 frames. The second start loads 758 from the archives in 0.3 s.
+Measured on 2026-11-22 with Octopath Traveler II (v131072, M2 Max), for the first 90 s from the start into the title. The shipped list has 762 pipelines from 378 seeds. The first start makes them in 0.5 s (660 archive loads, 98 compiles, 4 that the compiler refuses), and no draw is skipped as pending in 1,680 frames. Without the list (`NXKIT_PIPELINE_CACHE=0`) 107 draws were skipped in 1,380 frames. The second start loads 758 from the archives in 0.3 s.
 
 The seeds of 64 titles were imported once from the old engine (`nxb-seeds import --engine <checkout>`, upstream/main b4588a53): its `pso_manifest.tsv` (`S`, `C`, `R` and `M` rows), `shader_seen.tsv` and the `depth_mode` of `game.tsv`. Only `nxb-seeds` knows the engine's `pso_skey` (`nvn_pso_skey.h`). Its colour formats are `MTLPixelFormat` values and its blend and vertex state NVN values. Rows of passes that the engine merged and of target formats without a name in `nxkit-pipestate` are left out, and the file counts them. The shader keys of the engine and of `nxb-split` are the same hash (`skey` in both). 59 titles of the engine have no title module here, 19 of them with render rows (the importer lists them).
 
@@ -298,7 +349,7 @@ Measured on this Mac (M2 Max, `applegpu-nt -arch applegpu_g14s -j 1`, toolchain 
 | one pipeline with a large vertex function, then 4, then 24 pipelines that share that vertex function | 17.8 s, 26.6 s, 168 s. A vertex function is compiled once for a run (the first pipeline pays for it, 2.9 s for each next one). The cost of a function varies from 0.1 s to more than 15 s |
 | peak memory of a run | 0.5 GB at `-j 1` for these scripts |
 
-The pairs of Ocarina (`shader_pairs.tsv` and `pso_pairs.tsv`, 34,649 different pairs): 16,341 vertex keys and 22,329 fragment keys. Cut by the hash of the vertex key into 128 ranges, a vertex key is always in one batch, so the vertex functions are compiled once (16,341 times). A fragment key is compiled in each batch that holds it, 33,994 times against 22,329 keys, but 22,329 of the pairs have a fragment key of their own, so a change of the cut would save at most a few percent. The libraries of the pairs have 49,620 files with 47,441 different contents. Content-equal pairs are 224 of 34,649 (0.65 %): not worth a second dedupe pass. The remaining cost is the compile of each distinct function and pipeline, about 0.9 s of CPU for each pipeline on this sample. A cold build is bounded by the CPU time (34,650 pipelines at about 0.9 s are 31,000 CPU seconds, 55 minutes at ten busy cores). Tuning batch size or the number of runs does not reduce it. Fewer runs only help when the machine swaps, which `Headroom` already watches.
+The pairs of Ocarina (`shader_pairs.tsv` and `pso_pairs.tsv`, 34,649 different pairs): 16,341 vertex keys and 22,329 fragment keys. The stage cuts the pairs by the hash of the vertex key into 128 ranges. Thus a vertex key is always in one batch, and the vertex functions are compiled once (16,341 times). A fragment key is compiled in each batch that holds it, 33,994 times against 22,329 keys. But 22,329 of the pairs have a fragment key of their own. Thus a change of the cut would save at most a few percent. The libraries of the pairs have 49,620 files with 47,441 different contents. Content-equal pairs are 224 of 34,649 (0.65 %): not worth a second dedupe pass. The remaining cost is the compile of each distinct function and pipeline, about 0.9 s of CPU for each pipeline on this sample. A cold build is bounded by the CPU time (34,650 pipelines at about 0.9 s are 31,000 CPU seconds, 55 minutes at ten busy cores). Tuning batch size or the number of runs does not reduce it. Fewer runs only help when the machine swaps, which `Headroom` already watches.
 
 For the study of the archive back end, refer to [research/backend-survey.md](research/backend-survey.md).
 
@@ -339,9 +390,9 @@ Without the options, nothing changes. The unit tests check the order and the mar
 
 ## The profile of a game
 
-The crate `nxb-profile` (layer dev, W31) holds the profile of a game as typed data: computed values, declared values with a proof for each override, and rules (engine, frame limit, cuts with a reason).
+The crate `nxb-profile` (layer dev, W31) holds the profile of a game as typed data. It has computed values, declared values with a proof for each override, and rules (engine, frame limit, cuts with a reason).
 It has a reader and a writer for a subset of TOML (no TOML crate). It finds problems such as an override without a proof or a cut without a reason.
-The title modules use it for their `profile.toml`. `nxb build` writes a small `game.tsv` into `<work>/profile` from the title module for the shader split; nobody edits that file.
+The title modules use it for their `profile.toml`. For the shader split, `nxb build` writes a small `game.tsv` into `<work>/profile` from the title module. Nobody edits that file.
 
 ## Byte identity for each stage
 

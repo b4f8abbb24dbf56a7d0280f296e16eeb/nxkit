@@ -80,7 +80,7 @@ pub(crate) struct Ren {
     /// The command layout and the timing of this renderer. Only the thread that renders takes it.
     pub(crate) lay: Mutex<Lay>,
     /// Held for a whole render: command generation, processing and the read of the output. The render thread and a
-    /// catch-up render on the game's update thread share the renderer's command buffer; when one generated a new list
+    /// catch-up render on the game's update thread share the renderer's command buffer. When one generated a new list
     /// while the other still processed or read its own, that list came out malformed and its 5 ms block silent, which
     /// clicked.
     pub(crate) render: Mutex<()>,

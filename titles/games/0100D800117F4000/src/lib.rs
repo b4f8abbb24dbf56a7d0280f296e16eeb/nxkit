@@ -9,7 +9,7 @@
 //! shader split settings, the romfs marker and the run settings of the engine's `game.tsv`. The game has no NVN
 //! shaders: its SPIR-V shaders go through the Vulkan shader step of the build. All nine services run on nxkit.
 //!
-//! The shadow pass uses a geometry shader that selects a viewport, which the engine folds into a vertex variant;
+//! The shadow pass uses a geometry shader that selects a viewport, which the engine folds into a vertex variant.
 //! nxkit's Vulkan layer has no such step yet. The module holds the build data.
 //!
 //! The rewrite rules are data in `rules/0100D800117F4000.toml`: the build row of v131072 and the engine's SDK-wide

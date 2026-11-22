@@ -81,7 +81,7 @@ pub(super) fn made(source: Source, wall: Duration) {
     MAX_NS[i].fetch_max(ns, Ordering::Relaxed);
 }
 
-/// Marks the end of frame `n`; under `NXKIT_DIAG=pipe` prints the line every [`EVERY`] frames.
+/// Marks the end of frame `n`. Under `NXKIT_DIAG=pipe`, prints the line every [`EVERY`] frames.
 pub(crate) fn frame_done(n: u64) {
     FRAME.store(n, Ordering::Relaxed);
     if n.is_multiple_of(EVERY) && crate::diag("pipe") {

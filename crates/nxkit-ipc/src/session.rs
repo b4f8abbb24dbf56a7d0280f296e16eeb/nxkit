@@ -117,7 +117,7 @@ impl IpcSession {
     }
 
     /// The Horizon service a new object belongs to. Objects returned by `sm:` are the roots of the services they were
-    /// asked for, so they carry that service's name, not the port's; every other object inherits its parent's.
+    /// asked for, so they carry that service's name, not the port's. Every other object inherits its parent's.
     fn service_of(&self, iface: &Arc<dyn Service>) -> &'static str {
         if self.link.service != crate::SM_PORT {
             return self.link.service;

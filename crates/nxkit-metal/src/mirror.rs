@@ -6,11 +6,11 @@
 //! [`SEGMENT`] (2 MiB). A segment becomes usable (read and write) when it holds a page that the GPU works on, and stays
 //! usable. A maximal run of adjacent usable segments has one no-copy `MTLBuffer` over it ([`GuestMemory`]), so the GPU
 //! address of a mirror byte is the `real_base` of its run plus the offset in the run. When a run grows, or a segment
-//! joins two runs, a new buffer is made over the larger range of the same host memory; the bytes do not move. The old
+//! joins two runs, a new buffer is made over the larger range of the same host memory. The bytes do not move. The old
 //! buffer stays in the residency set until nothing else holds it (a frame in flight, an indirect command buffer), and
 //! is dropped by [`Mirror::ensure`] on the calling thread, never on a completion handler.
 //!
-//! Nothing here knows which pages are members; the caller says which ranges need to be usable.
+//! Nothing here knows which pages are members. The caller says which ranges need to be usable.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -90,8 +90,9 @@ impl MirrorView {
                 len: out.len() as u64,
             });
         }
-        // SAFETY: the segments that hold the range are usable (read and write), so the bytes are mapped; they stay mapped
-        // while the mirror lives, which the host keeps for the whole run; `out` is a separate allocation.
+        // SAFETY: the segments that hold the range are usable (read and write), so the bytes are mapped. They stay
+        // mapped while the mirror lives, and the host keeps the mirror for the whole run. `out` is a separate
+        // allocation.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 (self.host + offset) as *const u8,
@@ -127,7 +128,7 @@ impl MirrorView {
                 len: data.len() as u64,
             });
         }
-        // SAFETY: as for `read`; `data` is a separate allocation.
+        // SAFETY: as for `read`. `data` is a separate allocation.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 data.as_ptr(),
@@ -147,14 +148,14 @@ pub struct Mirror {
     len: u64,
     usable: Arc<Vec<AtomicBool>>,
     runs: Vec<MirrorRun>,
-    /// Buffers that left `runs`; dropped here once nothing else holds them.
+    /// Buffers that left `runs`. They are dropped here when nothing else holds them.
     retired: Vec<Arc<GuestMemory>>,
     /// Counts changes of `runs`.
     generation: u64,
 }
 
-// SAFETY: the pointer names a mapping that lives as long as the mirror; the mirror hands out the address only, and
-// the bytes behind it are the callers' to order.
+// SAFETY: the pointer names a mapping that lives as long as the mirror. The mirror hands out the address only, and the
+// bytes behind it are the callers' to order.
 unsafe impl Send for Mirror {}
 
 impl Mirror {
@@ -166,7 +167,7 @@ impl Mirror {
         if size == 0 {
             return Err(MetalError::Invalid("empty mirror"));
         }
-        // SAFETY: an anonymous private mapping with no access; nothing is read or written through it here.
+        // SAFETY: an anonymous private mapping with no access. Nothing is read or written through it here.
         let p = unsafe {
             mmap(
                 std::ptr::null_mut(),
@@ -307,8 +308,8 @@ impl Mirror {
             }
             let at = NonNull::new((self.host_base() + start) as *mut u8)
                 .ok_or(MetalError::Invalid("mirror run at null"))?;
-            // SAFETY: the range lies in the reservation, whose segments are usable (read and write) and stay mapped for
-            // the life of the mirror, which drops the buffer first; `start` and the length are multiples of the page.
+            // SAFETY: the range lies in the reservation. Its segments are usable (read and write) and stay mapped for
+            // the life of the mirror, which drops the buffer first. `start` and the length are multiples of the page.
             let mem = unsafe { GuestMemory::from_raw_uncommitted(&self.ctx, at, end - start) }?;
             out.new_buffers += 1;
             runs.push(MirrorRun {
@@ -335,7 +336,7 @@ impl Drop for Mirror {
         self.runs.clear();
         self.retired.clear();
         self.ctx.commit_residency();
-        // SAFETY: the mapping is the one `new` made; the buffers over it are gone.
+        // SAFETY: the mapping is the one `new` made. The buffers over it are gone.
         unsafe { munmap(self.host.as_ptr().cast(), self.len as usize) };
     }
 }
@@ -386,7 +387,7 @@ mod tests {
                 .read()
         };
         assert_eq!(seen, 9);
-        // A far segment is a second run; filling the gap joins all.
+        // A far segment is a second run. Filling the gap joins all.
         m.ensure(&[(10 * SEGMENT, 11 * SEGMENT)]).unwrap();
         assert_eq!(m.runs().len(), 2);
         let e = m.ensure(&[(3 * SEGMENT, 10 * SEGMENT)]).unwrap();
@@ -396,7 +397,7 @@ mod tests {
             (m.runs()[0].start, m.runs()[0].end),
             (SEGMENT, 11 * SEGMENT)
         );
-        // A buffer that is held outside stays retired; one that is not is dropped at the next call.
+        // A buffer that is held outside stays retired. One that is not held is dropped at the next call.
         assert!(m.retired() >= 1);
         drop(old);
         m.ensure(&[]).unwrap();

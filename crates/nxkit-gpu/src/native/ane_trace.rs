@@ -7,10 +7,10 @@
 //!
 //! 1. the descriptors of the luma and chroma textures as the game set them, the memory pool they lie in, and where the
 //!    decoder wrote its latest picture: the same pool or not, the same VM object at the same offset (two views of the
-//!    same pages) or not, and whether the first 4 KiB of both are equal;
+//!    same pages) or not, and whether the first 4 KiB of both are equal.
 //! 2. every command of the current frame and the one before that writes the textures or their memory: copies of any
 //!    kind, compute dispatches and draws that bind it as an image or a storage buffer, render passes with it as an
-//!    attachment, and what the dirty tracking knows of CPU writes (the write epoch and the residency of the record);
+//!    attachment, and what the dirty tracking knows of CPU writes (the write epoch and the residency of the record).
 //! 3. the first 64 bytes of each plane as the texture's layout reads them, the same bytes of the decoder's latest
 //!    picture, and the fingerprint of each ([`super::print`]) with the decoded picture it equals, if any.
 //!

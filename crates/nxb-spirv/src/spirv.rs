@@ -330,7 +330,8 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
             _ => out.push(i),
         }
     }
-    // the twins get the set and the marked binding of their image; the entry point lists them where it lists the image
+    // the twins get the set and the marked binding of their image, and the entry point lists them where it lists the
+    // image
     for i in &out {
         if i.op == OP_DECORATE
             && (i.w.get(1) == Some(&DEC_BINDING) || i.w.get(1) == Some(&DEC_SET))

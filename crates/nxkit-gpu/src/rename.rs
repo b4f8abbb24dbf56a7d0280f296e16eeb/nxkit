@@ -10,7 +10,7 @@
 //!    its binding) is a candidate. For each frame in which it is bound, three copies of its bytes are compared: `pre`
 //!    (at the flush of the frame), `post` (after the GPU finished the frame, read in a wait that is honest) and `pre_next`
 //!    (at the flush of the next frame). The words the GPU wrote are those where `post` differs from `pre`. If the CPU
-//!    changed each of them again before the next flush (`pre_next` differs from `post`) the frame is clean; a word that
+//!    changed each of them again before the next flush (`pre_next` differs from `post`) the frame is clean. A word that
 //!    stayed is state that the GPU keeps from frame to frame, and the range is never renamed. After [`LEARN_FRAMES`]
 //!    clean frames the range is renamed. A frame where the GPU wrote nothing neither counts nor resets. A range that
 //!    stays quiet for [`QUIET_LIMIT`] frames is set aside for [`RECHECK_EVERY`] frames. A renamed range is checked
@@ -24,8 +24,8 @@
 //!    `bindless::args::sbuf_word`). A range that a raw global write touched is left out here.
 //! 4. **Write-back** ([`Renamer::after_wait`]). In a CPU wait for the frame (never at bare completion), each word that
 //!    the GPU changed (`end` differs from `start`) goes into guest memory with a compare-and-swap that needs the guest
-//!    word to still hold `start`; a word that the CPU wrote since stays. The slot's frame is also written back before its
-//!    buffer is reused.
+//!    word to still hold `start`. A word that the CPU wrote since stays. The slot's frame is also written back before
+//!    its buffer is reused.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -112,7 +112,7 @@ pub(crate) enum Verdict {
 /// The class of a range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Class {
-    /// Not decided yet; the frames that bind it are judged.
+    /// Not decided yet. The frames that bind it are judged.
     Learning,
     /// Each frame reads a copy of its own.
     Rename,
@@ -120,7 +120,7 @@ pub(crate) enum Class {
     Never,
     /// The GPU wrote nothing for a long time. Not watched until the pause is over.
     Idle,
-    /// Bound only for reading so far; the frames that bind it are judged for CPU writes in flight.
+    /// Bound only for reading so far. The frames that bind it are judged for CPU writes in flight.
     Watch,
     /// Only read by the GPU and written by the CPU in flight: each frame reads a copy of its own, nothing goes back.
     Snapshot,
@@ -178,7 +178,7 @@ pub(crate) struct RenameMap {
 /// The bytes of one frame of a range that is being judged.
 struct Sample {
     fence: u64,
-    /// The flush counter of the frame; the sample is judged at the next flush and dropped if that does not bind it.
+    /// The flush counter of the frame. The sample is judged at the next flush and dropped if that does not bind it.
     frame: u64,
     pre: Vec<u8>,
     /// The bytes after the GPU finished the frame, when they were read before the next flush.

@@ -13,7 +13,7 @@
 //! the `sdk` module (12 implementations of the node area of 62 MB and of the 2 MB alignment of large regions).
 //!
 //! The game loads NRO modules at run time through `nn::ro`. nxkit takes the calls over (`nxkit-svc-system`,
-//! `sdk/ro.rs`); a run of this game has not checked it.
+//! `sdk/ro.rs`). A run of this game has not checked it.
 
 use nxtitle::{
     BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,

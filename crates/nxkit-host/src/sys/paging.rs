@@ -73,7 +73,7 @@ unsafe extern "C" {
 }
 
 /// The fault counters of this process since its start (`TASK_EVENTS_INFO`). The kernel keeps them as 32 bits, so they
-/// wrap; [`per_second`] takes the difference with wrapping.
+/// wrap. [`per_second`] takes the difference with wrapping.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TaskEvents {
     /// Page faults of every kind.
@@ -129,7 +129,7 @@ pub struct SystemVm {
 pub fn system_vm(page: u64) -> Option<SystemVm> {
     let mut v = VmStatistics64::default();
     let mut count = (std::mem::size_of::<VmStatistics64>() / 4) as u32;
-    // SAFETY: `v` is writable for `count` ints. `mach_host_self` returns a send right to the host port; it is not
+    // SAFETY: `v` is writable for `count` ints. `mach_host_self` returns a send right to the host port. It is not
     // released, which leaks one reference per call, as every caller of the function in the SDK does.
     let kr = unsafe {
         host_statistics64(
@@ -158,7 +158,7 @@ pub fn system_vm(page: u64) -> Option<SystemVm> {
 fn sysctl_u32(name: &CStr) -> Option<u32> {
     let mut v: u32 = 0;
     let mut len = std::mem::size_of::<u32>();
-    // SAFETY: `name` is a C string; `v` is writable for `len` bytes. The call writes at most `len` bytes.
+    // SAFETY: `name` is a C string. `v` is writable for `len` bytes. The call writes at most `len` bytes.
     let rc = unsafe {
         sysctlbyname(
             name.as_ptr(),
@@ -172,7 +172,7 @@ fn sysctl_u32(name: &CStr) -> Option<u32> {
 }
 
 /// The rate of a counter between two samples, per second. A counter that went backwards counts as having wrapped
-/// at `wrap` (32 bits for the task counters); with `wrap` 0 it counts as 0.
+/// at `wrap` (32 bits for the task counters). With `wrap` 0, it counts as 0.
 pub fn per_second(before: u64, now: u64, wrap: u64, secs: f64) -> u64 {
     let d = if now >= before {
         now - before

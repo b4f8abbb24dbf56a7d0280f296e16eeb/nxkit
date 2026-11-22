@@ -2,7 +2,7 @@
 //!
 //! The ids never repeat (`nxkit-vk` hands out handles that are never reused), so a lookup of a destroyed object finds
 //! nothing and the command that names it binds nothing. A submit resolves the ids it needs while it encodes, and the
-//! command buffer keeps what it encodes alive; a destroy after the submit is safe.
+//! command buffer keeps what it encodes alive. A destroy after the submit is safe.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

@@ -4,7 +4,7 @@
 //! translated shaders: the entry functions and the vertex inputs, in `<key>_b.json` of the library folder. [`Resolver`]
 //! reads those once per key and resolves seeds with `nxkit_pipestate::seeds::resolve`, so an entry here is the entry
 //! that the host's draw makes. The streamed archive resolves the seeds of a group when its shaders are done
-//! ([`crate::stream`]) and compiles them as exact pipelines; the build writes all of them as the app's shipped list.
+//! ([`crate::stream`]) and compiles them as exact pipelines. The build writes all of them as the app's shipped list.
 //!
 //! The seeds are resolved for the depth mode the seed file names, or for both modes when it names none, and for drawing
 //! without vertex pulling (the host's default).

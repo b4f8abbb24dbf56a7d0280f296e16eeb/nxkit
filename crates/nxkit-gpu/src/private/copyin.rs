@@ -3,7 +3,7 @@
 use super::*;
 
 /// One page of the copy into the mirror: the mirror address, the staging address, and the 64-byte blocks to leave alone
-/// (bit `b % 64` of word `b / 64`; they hold what a frame in flight writes).
+/// (bit `b % 64` of word `b / 64`). These blocks hold what a frame in flight writes.
 pub(crate) type CopyJob = (u64, u64, [u64; 4]);
 
 /// The kernel that copies staged pages into the mirror: one page per 256 threads, 16 bytes each, four times, except the

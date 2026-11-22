@@ -1,6 +1,6 @@
 //! The engine families, then the graphics families, each behind its feature.
 //!
-//! Written by `tools/gen_title_registry.py` from the folders; do not edit.
+//! `tools/gen_title_registry.py` writes this file from the folders. Do not edit it.
 
 use nxtitle::Family;
 

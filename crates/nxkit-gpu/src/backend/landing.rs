@@ -8,7 +8,7 @@
 //! The completion callback of a batch must not wait for a batch (the batch is not reported complete until its callbacks
 //! ran), so the callback only records the fence and wakes the lander. The lander waits for the batches up to that
 //! fence without taking them from `inflight`, so a later CPU wait still finds them. Both go through
-//! `write_counters`, whose clock lock orders the writes; a report is taken by whoever comes first.
+//! `write_counters`, whose clock lock orders the writes. The first of the two to come takes a report.
 //!
 //! Unreal Engine 4.18's `RHIGetRenderQueryResult` polls the timestamp of a report like that. In Octopath Traveler the
 //! render side waited in it after a traveler was confirmed, while the game thread held the frame for a render fence

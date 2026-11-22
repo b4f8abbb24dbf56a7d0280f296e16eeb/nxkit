@@ -4,19 +4,19 @@
 
 ## The backend
 
-`GpuBackend` implements `nxkit_nvn::backend::Backend` over `Gpu` and the present path of `nxkit-metal`. The host makes it with `GpuBackend::new(&ctx, guest_memory, &GpuSettings)` and installs it with `nxkit_rt::nvn::install`. `GpuSettings` has the shader folder, the pipeline archive or its shards, the thread count, the render scale (2.0 by default, so a 1080p game renders at 4K), the encoder thread, the overlap, the GOB order, the runtime cache, the pipeline bases and specialization and the loading screen of the start. The host fills it from `game.json` and the `NXKIT_*` snapshot (W27).
+`GpuBackend` implements `nxkit_nvn::backend::Backend` over `Gpu` and the present path of `nxkit-metal`. The host makes it with `GpuBackend::new(&ctx, guest_memory, &GpuSettings)` and installs it with `nxkit_rt::nvn::install`. `GpuSettings` has the shader folder, the pipeline archive or its shards, the thread count and the render scale (2.0 by default, so a 1080p game renders at 4K). It also has the encoder thread, the overlap, the GOB order and the runtime cache. Last, it has the pipeline bases and specialization and the loading screen of the start. The host fills it from `game.json` and the `NXKIT_*` snapshot (W27).
 
 A frame goes through these steps:
 
 1. `Backend::submit` gets the commands of a recording. The walker (`walk/`) reads the command words of the guest and adds one `DrawDetail` per draw to the `FrameDetail` of the frame.
-2. `nvnQueuePresentTexture` or a CPU wait flushes the frame. So does a CPU event signal that releases held submits with at least 64 draws, dispatches and copies (`FlushReason::Release`; `NXKIT_RELEASE_FLUSH=0` turns it off, `NXKIT_RELEASE_FLUSH_MIN` sets the 64): a game that is serial per frame signals the event when its main work is recorded and presents some ms later, and the GPU would idle until then. The release flush runs no held op, its number is the fence of the released submits (a fence of a held queue is made again when its op runs), and the present flushes what comes after. `nvnQueueFlush` flushes the frame too, 50 ms later, when no other flush took along the submits that came before it (`FlushReason::Queue`, `nxkit-rt` `nvn/qflush.rs`): on the console flushed work runs by itself, and a game may poll a report or an event of it with no present and no wait (Unreal Engine 4.18's `RHIGetRenderQueryResult`). The queue flush runs no held op either. `NXKIT_DIAG=frame` prints the flushes by reason with the mean time from the start of the flush to the first commit and from there to the GPU start. `Backend::flush_frame` takes the detail, checks that it holds as many draws, clears and dispatches as the frame, runs `encode_frame` and applies the `EncodeReport` to the resource table. `encode_frame` streams the command buffers: a frame with at least 8 passes gets a small lead chunk (one eighth of the weight), and the first command buffer (uploads) and the lead chunk are committed as soon as they are encoded, so the GPU starts while the other chunks are still encoded (`Batch::stream_prefix`, one more commit boundary of about 0.2 ms; `NXKIT_STREAM_COMMIT=0` turns it off; not with `NXKIT_PRIVATE=1`, which cuts at its own signals). A count that differs is logged and the frame is encoded without detail.
+2. `nvnQueuePresentTexture` or a CPU wait flushes the frame. A CPU event signal also flushes the frame when it releases held submits with at least 64 draws, dispatches and copies (`FlushReason::Release`). `NXKIT_RELEASE_FLUSH=0` turns this flush off, and `NXKIT_RELEASE_FLUSH_MIN` sets the 64. A game that is serial per frame signals the event when its main work is recorded, and it presents some ms later. Without this flush, the GPU would idle until then. The release flush runs no held op. Its number is the fence of the released submits (a fence of a held queue is made again when its op runs). The present flushes what comes after. `nvnQueueFlush` flushes the frame too, 50 ms later, when no other flush took along the submits that came before it (`FlushReason::Queue`, `nxkit-rt` `nvn/qflush.rs`). On the console, flushed work runs by itself. A game may poll a report or an event of it with no present and no wait (Unreal Engine 4.18's `RHIGetRenderQueryResult`). The queue flush runs no held op either. `NXKIT_DIAG=frame` prints the flushes by reason. It also prints the mean time from the start of the flush to the first commit, and from there to the GPU start. `Backend::flush_frame` takes the detail and checks that it holds as many draws, clears and dispatches as the frame. Then it runs `encode_frame` and applies the `EncodeReport` to the resource table. `encode_frame` streams the command buffers. A frame with at least 8 passes gets a small lead chunk (one eighth of the weight). The first command buffer (uploads) and the lead chunk are committed as soon as they are encoded. So the GPU starts while the other chunks are still encoded (`Batch::stream_prefix`, one more commit boundary of about 0.2 ms). `NXKIT_STREAM_COMMIT=0` turns it off. It is also off with `NXKIT_PRIVATE=1`, which cuts at its own signals. A count that differs is logged and the frame is encoded without detail.
 3. `Backend::present` takes the texture that the game presented and puts it in a queue of at most three entries. It calls `Pacer::game_frame_ready`.
-4. The display link calls the `Pacer` on each tick. The `Pacer` is the `TickSink` of the backend. For a tick that shows a frame, `tick` takes the queued texture, draws it into the drawable with a full-screen triangle (`blit.rs`, nearest sampling, with an sRGB variant) and presents the drawable at `target_presentation_timestamp`. A tick that holds or misses drops the drawable.
+4. The display link calls the `Pacer` on each tick. The `Pacer` is the `TickSink` of the backend. For a tick that shows a frame, `tick` takes the queued texture. It draws the texture into the drawable with a full-screen triangle (`blit.rs`, nearest sampling, with an sRGB variant). Then it presents the drawable at `target_presentation_timestamp`. A tick that holds or misses drops the drawable.
 5. `Backend::acquire` blocks while three frames are queued. `Backend::wait_fence` waits for the last batch of the encoder.
 
 The blit is a second command buffer on the queue. Its first command is `WaitForEarlierPasses`, which orders it after the passes of the frame.
 
-Memory pool calls (`Backend::register_pool`, `unregister_pool`, `map_pool_window`, `unmap_pool_window`) do not wait for an encode. The snapshot set of the pools (`GuestPoolSet`) has a lock of its own and changes at once; the pool bookkeeping of `Gpu` (copy-back pools and windows, raw global memory pools) lives under the lock of `Gpu`, which an encode holds for about 10 ms. A call that finds that lock taken puts its op into a queue (`backend/poolops.rs`) and returns; every lock of `Gpu` in the backend (`GpuBackend::lock_gpu`) applies the queue first, in order, and a call that gets the lock applies the queue before its own op. So the ops of a thread reach `Gpu` in the order of the calls, and an op that returned before a flush is applied before that frame is encoded. The range check that can fail runs before the op is made, so `register_pool` still returns its error at the call. Ocarina of Time makes and finalizes about 10 pools per frame; its render thread spent about 16 % of its time waiting in `nvnMemoryPoolInitialize` for an encode. `NXKIT_DIAG=pools` counts the ops applied at once and the ops queued (one run: 3 % queued).
+Memory pool calls (`Backend::register_pool`, `unregister_pool`, `map_pool_window`, `unmap_pool_window`) do not wait for an encode. The snapshot set of the pools (`GuestPoolSet`) has a lock of its own and changes at once. The pool bookkeeping of `Gpu` (copy-back pools and windows, raw global memory pools) lives under the lock of `Gpu`. An encode holds this lock for about 10 ms. A call that finds that lock taken puts its op into a queue (`backend/poolops.rs`) and returns. Every lock of `Gpu` in the backend (`GpuBackend::lock_gpu`) applies the queue first, in order. A call that gets the lock applies the queue before its own op. So the ops of a thread reach `Gpu` in the order of the calls. An op that returned before a flush is applied before that frame is encoded. The range check that can fail runs before the op is made, so `register_pool` still returns its error at the call. Ocarina of Time makes and finalizes about 10 pools per frame. Its render thread spent about 16 % of its time waiting in `nvnMemoryPoolInitialize` for an encode. `NXKIT_DIAG=pools` counts the ops applied at once and the ops queued (one run: 3 % queued).
 
 ```rust
 let mut gpu = Gpu::with_config(&ctx, guest_memory, GpuConfig { shader_dir, threads, archive, ..GpuConfig::default() })?;
@@ -30,22 +30,22 @@ let stats = gpu.wait()?;                     // GPU time of the last frame
 
 `Gpu::new(&ctx, guest)` uses `GpuConfig::default()`. `Gpu::metrics()` gives the `Metrics` of `nxkit-metal` with CPU encode time and GPU time of every command buffer (R16). `Gpu::reload_shaders` forgets programs and ICBs.
 
-`encode_frame` returns an `EncodeReport`. The caller owns the resource table, so the caller applies the report: `ResourceTable::synced` for each id in `deswizzled`, `gpu_wrote` for each id in `gpu_wrote`, and `synced` for each id in `copied_back` after `wait`. The counters are in `report.stats` (`EncodeStats`). A command that was not encoded is counted by reason in `stats.skipped` (`Skip`), so a missing feature is a number and not a silent hole (R15).
+`encode_frame` returns an `EncodeReport`. The caller owns the resource table, so the caller applies the report. It calls `ResourceTable::synced` for each id in `deswizzled` and `gpu_wrote` for each id in `gpu_wrote`. After `wait`, it calls `synced` for each id in `copied_back`. The counters are in `report.stats` (`EncodeStats`). The encoder counts a command that it did not encode by reason in `stats.skipped` (`Skip`). So a missing feature is a number and not a silent hole (R15).
 
 ## What the recorder supplies: `FrameDetail`
 
-`Frame` holds what the analysis needs and not what a draw binds. `nxkit_gpu::detail::FrameDetail` carries the rest. It has one `DrawDetail` for each `Cmd::Draw` (program keys, blend, depth and stencil, raster state, topology, vertex attributes and streams, index buffer, uniform buffers, texture handles, viewport, scissor, blend colour and stencil reference), one entry for each clear, copy and dispatch, and the runs of draws that came from a reused recording. The walker of the backend fills it from the recordings. It is a second pass over the command words, next to the recording that the front end made for the frame analysis.
+`Frame` holds what the analysis needs and not what a draw binds. `nxkit_gpu::detail::FrameDetail` carries the rest. It has one `DrawDetail` for each `Cmd::Draw` (program keys, blend, depth and stencil, raster state, topology, vertex attributes and streams, index buffer, uniform buffers, texture handles, viewport, scissor, blend colour and stencil reference) and one entry for each clear, copy and dispatch. It also has the runs of draws that came from a reused recording. The walker of the backend fills it from the recordings. It is a second pass over the command words, next to the recording that the front end made for the frame analysis.
 
 ## From NVN state to Metal
 
 1. `translate.rs` maps blend, depth, stencil, raster, topology, samplers and vertex formats. The enum values come from `nvn.h` (listed in `THIRD_PARTY.md`).
 2. `format_map.rs` is the one table from NVN formats to Metal formats. A format that Metal lacks maps to a wider one or to a uint format that a copy kernel fills. The row says which.
 3. `programs.rs` loads the Metal library of a shader hash and its `_b.json` reflection from the shader directory (R1). The reflection gives the entry name, the binding list and the compute threadgroup size.
-4. `pipelines/mod.rs` builds a `RenderPipeline` for the translated state and keeps it in the `PipelineCache`. The key is a hash of the program keys, the colour formats with blend and write mask, the vertex layout, the topology class, the sample count and alpha-to-coverage. Two draws with the same translated state share one pipeline, whatever their NVN state was. Depth and stencil are separate objects that Metal binds per draw.
+4. `pipelines/mod.rs` builds a `RenderPipeline` for the translated state and keeps it in the `PipelineCache`. The key is a hash of the program keys, the colour formats with blend and write mask and the vertex layout. The hash also includes the topology class, the sample count and alpha-to-coverage. Two draws with the same translated state share one pipeline, whatever their NVN state was. Depth and stencil are separate objects that Metal binds per draw.
 
 ### Archive coverage
 
-`Pipelines` asks the archive of the build first (`PipelineCache::render_traced`), then compiles. `pipelines/coverage.rs` counts the answer for each run: archive hits, misses with the compile time, and, with `NXKIT_DIAG=stats`, `health` or `pipe`, why each miss missed (`PipelineCache::explain_miss`). The numbers are in the `stats` report and the reason `pipeline.archive-miss` is in the health report. Refer to [diagnostics.md](diagnostics.md#archive-coverage). The cache does not write or learn pipelines at run time: everything has to be in the archive when the game starts. The archive is not read whole: `GpuSettings::archive_shards` names the folder of the batch archives and the index, and the cache opens a shard for the first pipeline in it (`NXKIT_SHARD_LRU` open at most). See docs/shader-step.md, "The pipeline archive as shards".
+`Pipelines` asks the archive of the build first (`PipelineCache::render_traced`), then compiles. `pipelines/coverage.rs` counts the answer for each run: archive hits and misses with the compile time. With `NXKIT_DIAG=stats`, `health` or `pipe`, it also counts why each miss missed (`PipelineCache::explain_miss`). The numbers are in the `stats` report and the reason `pipeline.archive-miss` is in the health report. Refer to [diagnostics.md](diagnostics.md#archive-coverage). The cache does not write or learn pipelines at run time: everything has to be in the archive when the game starts. The cache does not read the archive whole. `GpuSettings::archive_shards` names the folder of the batch archives and the index. The cache opens a shard for the first pipeline in it (`NXKIT_SHARD_LRU` open at most). See docs/shader-step.md, "The pipeline archive as shards".
 
 ### Specialization, background builds and the runtime cache
 
@@ -53,18 +53,18 @@ Plans: [plans/pipelines-at-build-time.md](plans/pipelines-at-build-time.md), [pl
 
 - **Specialization.** The archive holds one unspecialized base for each shader pair. Metal 4 turns a base into a pipeline for a colour state (formats, blend, write mask) without a compile (`nxkit-metal` `pipeline/cache/specialize.rs`). A base of a point-size vertex function is made without a primitive class. `NXKIT_PIPELINE_SPECIALIZE=0` never specializes. A base that the archive lacks is compiled only with `NXKIT_PIPELINE_BASES=1` (off: one base per vertex layout was as rare as its pipelines, measured on one title, and its compile took 0.1 to 10 s where the full compile took 1 to 6 ms).
 - **Background builds.** A missing pipeline builds on threads (half the cores, 2 to 8, `NXKIT_PIPELINE_THREADS`) at user-initiated QoS (`NXKIT_PIPELINE_QOS`). A draw of the latest frame takes the job first. The draw is left out until the pipeline is ready (`skip.pending`). `NXKIT_PIPELINE_ASYNC=0` builds in the encode. `NXKIT_DIAG=pipe` shows the backlog.
-- **Runtime cache and prewarm.** `pipelines/record.rs` captures every pipeline into `rt-*.mtl4archive` files and writes the descriptions into `pipelines.seen`. `prewarm.rs` makes the list before the first frame (budget 20 s, `NXKIT_PIPELINE_PREWARM_WAIT`): exact pipelines of the build's archive and the `rt-` archives are loads, what no archive has is compiled (`RenderPipelineDesc::persist`, since the serializer does not capture a specialization) and the runtime archive is written when the last worker is done, before the start reports. Details: [shader-step.md](shader-step.md) "The runtime pipeline cache". Assumption not yet checked: that the serializer writes only the new pipelines on each flush.
-- **Vertex pulling.** A vertex shader with a `pull` field in its `_b.json` draws through its `_bp` library. The encoder fills a `dm_vlayout` block (for 16 streams the GPU address, stride and divisor, and 16 attribute words) and binds it at buffer 16; the pipelines have no vertex layout, so one archived base per pair serves every layout. It is off unless `NXKIT_PULL=1`; otherwise `stage_in` stays. `NXKIT_DIAG=pipe` counts pulled and `stage_in` draws. Built and tested; not yet measured in a game.
+- **Runtime cache and prewarm.** `pipelines/record.rs` captures every pipeline into `rt-*.mtl4archive` files and writes the descriptions into `pipelines.seen`. `prewarm.rs` makes the list before the first frame (budget 20 s, `NXKIT_PIPELINE_PREWARM_WAIT`). Exact pipelines of the build's archive and the `rt-` archives are loads. What no archive has is compiled (`RenderPipelineDesc::persist`, since the serializer does not capture a specialization). The runtime archive is written when the last worker is done, before the start reports. Details: [shader-step.md](shader-step.md) "The runtime pipeline cache". Assumption not yet checked: that the serializer writes only the new pipelines on each flush.
+- **Vertex pulling.** A vertex shader with a `pull` field in its `_b.json` draws through its `_bp` library. The encoder fills a `dm_vlayout` block (for 16 streams the GPU address, stride and divisor, and 16 attribute words) and binds it at buffer 16. The pipelines have no vertex layout, so one archived base per pair serves every layout. It is off unless `NXKIT_PULL=1`. Otherwise `stage_in` stays. `NXKIT_DIAG=pipe` counts pulled and `stage_in` draws. It is built and tested, but not yet measured in a game.
 
 ## Bindless textures and buffers
 
-**One copy per batch slot.** The CPU changes the tables while earlier frames may still run on the GPU (`BATCHES_IN_FLIGHT` = 3 batches), so a table in one place would let a frame read an element that a later frame cleared or rewrote. The host keeps a master of each table (`tex_mirror`, `samp_mirror`: the non-zero resource ID of each element, with `n`) and one copy of both tables for each batch slot. `publish`, `clear_texture`, `release_gone` and the `n` raises write the master only and note the ID in a log (`bindless/changes.rs`). Each slot has a cursor into the log. After the batch ring has waited for the previous batch of the slot (`BatchRing::begin`) and the frame has made its last write to the master, `Bindless::sync(slot)` copies only the elements noted since that slot last synced, and `n` when it changed; a slot that fell behind a cut log (1 Mi entries) gets its whole table. The log keeps only what the slowest slot has not taken, a few hundred entries in the steady state. `Bindless::pools(slot)` gives the addresses that the argument buffers of the frame carry. The bitmap `seen` is shared by all copies: shaders only set bits in it, they never read it for a lookup. The copies cost 3 times the table: 8 MiB for the texture table (2^20 elements) and 32 KiB for the sampler table (4096 elements) each, 24 MiB in all, of which only the touched pages are resident.
+**One copy per batch slot.** The CPU changes the tables while earlier frames may still run on the GPU (`BATCHES_IN_FLIGHT` = 3 batches). So with a table in one place, a frame could read an element that a later frame cleared or rewrote. The host keeps a master of each table (`tex_mirror`, `samp_mirror`: the non-zero resource ID of each element, with `n`) and one copy of both tables for each batch slot. `publish`, `clear_texture`, `release_gone` and the `n` raises write the master only and note the ID in a log (`bindless/changes.rs`). Each slot has a cursor into the log. First, the batch ring waits for the previous batch of the slot (`BatchRing::begin`), and the frame makes its last write to the master. Then `Bindless::sync(slot)` copies only the elements noted since that slot last synced, and `n` when it changed. A slot that fell behind a cut log (1 Mi entries) gets its whole table. The log keeps only what the slowest slot has not taken, a few hundred entries in the steady state. `Bindless::pools(slot)` gives the addresses that the argument buffers of the frame carry. All copies share the bitmap `seen`. Shaders only set bits in it and never read it for a lookup. The copies cost 3 times the table. Each copy has 8 MiB for the texture table (2^20 elements) and 32 KiB for the sampler table (4096 elements). That is 24 MiB in all, and only the touched pages of it are resident.
 
-An argument buffer that a recorded ICB keeps holds the address of the table of the slot that built it. An ICB whose draws have a `tex_pool` or `samp_pool` binding is therefore kept once per slot (`icbs.rs`, key of recording and table address) and replays only in a frame of the same slot; an ICB without such a binding is shared.
+An argument buffer that a recorded ICB keeps holds the address of the table of the slot that built it. An ICB whose draws have a `tex_pool` or `samp_pool` binding is therefore kept once per slot (`icbs.rs`, key of recording and table address). It replays only in a frame of the same slot. An ICB without such a binding is shared.
 
 A translated shader has one argument buffer per stage at `[[buffer(0)]]`. Member `arg_id` is at byte `8 * arg_id` and holds a GPU address or a resource ID. The encoder writes into it:
 
-- A `cbuf` binding gets the GPU address of the uniform buffer in guest memory (R3). A buffer that the guest rewrote in the same frame is copied into the per-batch `Scratch` first, because the frame is encoded after the guest wrote all versions. Every other buffer is bound by its guest address.
+- A `cbuf` binding gets the GPU address of the uniform buffer in guest memory (R3). The encoder first copies a buffer that the guest rewrote in the same frame into the per-batch `Scratch`. The reason is that the frame is encoded after the guest wrote all versions. Every other buffer is bound by its guest address.
 - A `tex` binding gets the resource ID of the texture view that the handle names (`texture_id | sampler_id << 20`). A `tex` binding with `reg` 128 or more reads separate texture `reg - 128` (`nvnCommandBufferBindSeparateTexture`). A `samp` binding gets the resource ID of the separate sampler in slot `reg` (`nvnCommandBufferBindSeparateSampler`), from the sampler table. Without one it takes the sampler of the combined handle in that slot. A `samp_tex` binding gets the sampler of the combined handle.
 - A `tex_pool` or `samp_pool` binding gets the address of a host table that maps descriptor ids to resource IDs. The encoder writes the entries of every handle that the frame uses, the textures that shaders read through the table and every registered sampler (see "The pool tables" below).
 - A `drvcb` binding gets the driver constant block: the combined texture handles, the base instance and, for compute, the dispatch size and the uniform buffers.
@@ -73,69 +73,71 @@ No bind call runs for each texture. Vertex streams are bound with `SetBuffer` at
 
 ## One ICB for a reused recording (R17)
 
-`RecCache::icb_candidates` names the recordings that are stable. A run of draws from such a recording is encoded once into an `IndirectCommandBuffer` and executed with `ExecuteIcb` in later frames. A run qualifies when it has two draws or more, its viewport, scissor, stencil reference and blend colour are the same for all draws, and it binds no uniform buffer that the guest rewrote. The ICB holds pipeline, argument buffers, vertex buffers, depth stencil, bias, clip, winding, fill mode and the draws. The encoder sets viewport, scissor, stencil reference and blend colour outside the ICB. The signature of an ICB is a hash of the draw details, the resolved resource IDs and the targets. A different signature builds the ICB again. `recording_dropped` removes it. The state after an `ExecuteIcb` is treated as undefined, so the encoder sets its state again.
+`RecCache::icb_candidates` names the recordings that are stable. A run of draws from such a recording is encoded once into an `IndirectCommandBuffer` and executed with `ExecuteIcb` in later frames. A run qualifies when it has two draws or more and binds no uniform buffer that the guest rewrote. Its viewport, scissor, stencil reference and blend colour must also be the same for all draws. The ICB holds pipeline, argument buffers, vertex buffers, depth stencil, bias, clip, winding, fill mode and the draws. The encoder sets viewport, scissor, stencil reference and blend colour outside the ICB. The signature of an ICB is a hash of the draw details, the resolved resource IDs and the targets. A different signature builds the ICB again. `recording_dropped` removes it. The state after an `ExecuteIcb` is treated as undefined, so the encoder sets its state again.
 
 ## Mesh and indirect draws
 
-The walker details every draw kind but transform feedback and `DrawTexture`. `DrawArgs` has the indirect address, the index buffer, the count buffer, the maximum and the stride of each kind. A mesh draw names its task, mesh and fragment shaders in `ProgramRef` and binds the buffers of the task and mesh stages (banks 3 and 4 of the walker, the slots of the tessellation stages that the recorder gives NVN2 stages 6 and 7) and the textures of the bank they share. A `BindProgram` with stage bit 6 or 7 sets the task or mesh slot. The task and mesh stages read the addresses of their storage buffers from the c0 tables at 0x670 and 0x770 (`mesh::storage_table`, called from the driver block fill).
+The walker details every draw kind but transform feedback and `DrawTexture`. `DrawArgs` has the indirect address, the index buffer, the count buffer, the maximum and the stride of each kind. A mesh draw names its task, mesh and fragment shaders in `ProgramRef`. It binds the buffers of the task and mesh stages (banks 3 and 4 of the walker, the slots of the tessellation stages that the recorder gives NVN2 stages 6 and 7) and the textures of the bank they share. A `BindProgram` with stage bit 6 or 7 sets the task or mesh slot. The task and mesh stages read the addresses of their storage buffers from the c0 tables at 0x670 and 0x770 (`mesh::storage_table`, called from the driver block fill).
 
 - `DrawArraysIndirect` and `DrawElementsIndirect` draw with Metal's indirect draws straight from guest memory. NVN's argument records have the layouts of `MTLDrawPrimitivesIndirectArguments` and `MTLDrawIndexedPrimitivesIndirectArguments`.
-- `MultiDraw{Arrays,Elements}IndirectCount` and `DrawMeshTasksIndirect` go through a compute pre-pass (`indirect.rs`) before the render pass. It copies the records of a multi-draw, zeros past the GPU-written count, and turns the `{count, first}` of an indirect mesh draw into Metal's `{x, y, z}` grid with the first workgroup after it. The render pass draws from the copies. The CPU never waits for the GPU. An ICB would need the same kernel and GPU encoding of the whole draw state, so the pre-pass is the simpler choice. A multi-draw copies at most 4096 draws.
+- `MultiDraw{Arrays,Elements}IndirectCount` and `DrawMeshTasksIndirect` go through a compute pre-pass (`indirect.rs`) before the render pass. It copies the records of a multi-draw and zeros past the GPU-written count. It also turns the `{count, first}` of an indirect mesh draw into Metal's `{x, y, z}` grid, with the first workgroup after it. The render pass draws from the copies. The CPU never waits for the GPU. An ICB would need the same kernel and GPU encoding of the whole draw state, so the pre-pass is the simpler choice. A multi-draw copies at most 4096 draws.
 - A mesh draw runs a Metal mesh pipeline (`Pipelines::mesh`, built in the background like a render pipeline, `skip.pending` until it is ready). The task shader is the object function, the mesh shader the mesh function. Metal needs a fragment function, so a program without a pixel shader gets an empty one and draws depth only. The mesh stage shares the argument table of the vertex stage and the object stage has its own. The first workgroup of the draw is at buffer 29 of the stage that starts the grid.
 - Without a task shader the grid is the mesh grid, at most 1024 threadgroups wide. A larger draw is cut into grids of 1024 with their own first workgroup (at most 64 grids). An indirect draw without a task shader gets 16 grids from the pre-pass, and those past the count are empty.
-- A render pass with an indirect or mesh draw waits for the earlier dispatches, copies and fragment work before its vertex, object and mesh stages, because the barrier planner follows textures only.
+- A render pass with an indirect or mesh draw waits for the earlier dispatches, copies and fragment work before its vertex, object and mesh stages. The reason is that the barrier planner follows textures only.
 
-`EncodeStats::kinds` counts these draws by class, encoded and skipped by reason, with the Metal draws they became, the pre-passes and their records, and what was clamped (`NXKIT_DIAG=mesh`).
+`EncodeStats::kinds` counts these draws by class, encoded and skipped by reason. It also counts the Metal draws they became, the pre-passes and their records, and what was clamped (`NXKIT_DIAG=mesh`).
 
 ## GPU counters and render conditions (`queries`)
 
 NVN has no query objects. A game resets a counter of a queue (`nvnCommandBufferResetCounter`), draws, and has the GPU write the counter into a 16-byte `NVNcounterData` (`nvnCommandBufferReportCounter`: the 64-bit counter, then the 64-bit GPU time in report ticks). An occlusion test reports samples passed before and after its boxes, at `addr` and `addr + 16`, and `SetRenderEnableConditional` compares the two counters later (`nxkit_nvn::rendercond`).
 
-- The front end (`nxkit_nvn::counters`) cuts the commands of each queue that uses a counter into slots, which end at every reset and report of the queue. `Frame::counters` holds the command ranges of the slots and, for each report, the slots it sums: the slots of its queue since the last reset of its counter in the frame, or since the start of the frame. A report across frames thus starts again at 0 in each frame; the begin and end reports of a test are in one frame.
-- `queries::prepare` gives every render pass with draws of a slot that counts samples one offset per slot in a zeroed visibility result buffer (a small pool of shared buffers). No two passes share an offset, so the passes of the parallel command buffers never add to the same 8 bytes. The pass gets the buffer with `MTLVisibilityResultTypeAccumulate` (`CommandBuffer::begin_render_pass_counted`) and each draw sets the offset of its slot (`RenderCommand::SetVisibility`, `MTLVisibilityResultModeCounting`); a draw of no slot turns counting off. A recording run with a counted draw is drawn one by one, not as an ICB.
-- The encoder counts the draws it encoded per slot. A slot with a draw that was not encoded (a pipeline still compiling, a lost pass) is not counted, so its reports do not land and a condition does not hide an object because its boxes were not drawn.
+- The front end (`nxkit_nvn::counters`) cuts the commands of each queue that uses a counter into slots. A slot ends at every reset and report of the queue. `Frame::counters` holds the command ranges of the slots. For each report, it also holds the slots that the report sums. These are the slots of its queue since the last reset of its counter in the frame, or since the start of the frame. A report across frames thus starts again at 0 in each frame. The begin and end reports of a test are in one frame.
+- `queries::prepare` gives every render pass with draws of a slot that counts samples one offset per slot in a zeroed visibility result buffer (a small pool of shared buffers). No two passes share an offset, so the passes of the parallel command buffers never add to the same 8 bytes. The pass gets the buffer with `MTLVisibilityResultTypeAccumulate` (`CommandBuffer::begin_render_pass_counted`). Each draw sets the offset of its slot (`RenderCommand::SetVisibility`, `MTLVisibilityResultModeCounting`). A draw of no slot turns counting off. A recording run with a counted draw is drawn one by one, not as an ICB.
+- The encoder counts the draws it encoded per slot. The encoder does not count a slot with a draw that it did not encode (a pipeline still compiling, a lost pass). So the reports of the slot do not land, and a condition does not hide an object because its boxes were not drawn.
 - Vertices (`INPUT_VERTICES`, `VERTEX_SHADER_INVOCATIONS`) and primitives (`INPUT_PRIMITIVES`, `CLIPPER_INPUT_PRIMITIVES`, `PRIMITIVES_GENERATED`) are added up on the CPU from the arguments and topology of the draws of the slots (vertex shader invocations without the post-transform cache). An indirect or mesh draw makes the slot unknown. The other counter types (the invocations of the other stages, tessellation and geometry primitives, transform feedback, zcull) are unknown.
-- When the GPU finished the frame (`GpuBackend::write_counters`, at the wait for its fence), every report whose slots were all counted gets its `NVNcounterData` in guest memory (counter and the GPU end time of its own fence) and lands in `nxkit_nvn::counters::Landed` with the sequence number of the report. All 16 bytes must lie in guest memory (`queries::write_report`), the same check that the timestamp and `ReportValue` writes get. `ReportValue` writes its 32-bit value zero-extended as the counter, as the GPU writes the payload of a four-word report.
-- A report right after a reset of its counter in the frame, with no draw in between (the begin report of a test), is 0 and known when it is recorded.
-- A render condition reads a counter once landed: the value of the report the table names when it landed, else the last value that landed at the address (the report of an earlier frame: one frame of latency), else the last value that landed at the same place of the report in an earlier frame (its queue and its number among the reports of the queue in the frame: a game that moves its query memory every frame reports the same tests in the same order), else the condition is unknown and renders. `NXKIT_RENDERCOND_STALE=addr` drops the place, `NXKIT_RENDERCOND_STALE=0` both fallbacks, `NXKIT_COUNTERS=0` turns the emulation off (every GPU counter unknown again, as before). `NXKIT_DIAG=rendercond` counts the conditions that read landed and stale counters, the reports by counter type, and what the backend wrote.
+- When the GPU finished the frame (`GpuBackend::write_counters`, at the wait for its fence), every report whose slots were all counted gets its `NVNcounterData` in guest memory (counter and the GPU end time of its own fence). The report then lands in `nxkit_nvn::counters::Landed` with the sequence number of the report. All 16 bytes must lie in guest memory (`queries::write_report`), the same check that the timestamp and `ReportValue` writes get. `ReportValue` writes its 32-bit value zero-extended as the counter, as the GPU writes the payload of a four-word report.
+- A report can come right after a reset of its counter in the frame, with no draw in between (the begin report of a test). Such a report is 0 and known when it is recorded.
+- A render condition reads a counter once landed. It takes the value of the report that the table names when it landed. Else it takes the last value that landed at the address (the report of an earlier frame: one frame of latency). Else it takes the last value that landed at the same place of the report in an earlier frame (its queue and its number among the reports of the queue in the frame: a game that moves its query memory every frame reports the same tests in the same order). Else the condition is unknown and renders. `NXKIT_RENDERCOND_STALE=addr` drops the place, and `NXKIT_RENDERCOND_STALE=0` drops both fallbacks. `NXKIT_COUNTERS=0` turns the emulation off (every GPU counter unknown again, as before). `NXKIT_DIAG=rendercond` counts the conditions that read landed and stale counters, the reports by counter type, and what the backend wrote.
 
 ### The time of a report
 
 - A tick of the time in a report depends on the console (`Platform::report_ticks_from_ns`). On the Switch it is 625/384 ns (614.4 MHz). On the Switch 2 it is a system tick, 32 ns (31.25 MHz), and `nvnDeviceGetTimestampInNanoseconds` multiplies by 32. The host takes the console from the `sdk` module at load (`nxkit_abi::platform`). There is no setting per game.
-- A report carries the times of its own batch. The batch of a frame (fence) is kept until the GPU finished it. A `TIMESTAMP_TOP` (kind 0x10) then gets the GPU start of that batch, every other timestamp its GPU end. Frames that finish in one wait each get their own times, so the difference between the reports of two frames is the time between their batches.
+- A report carries the times of its own batch. The batch of a frame (fence) is kept until the GPU finished it. A `TIMESTAMP_TOP` (kind 0x10) then gets the GPU start of that batch, and every other timestamp gets its GPU end. Frames that finish in one wait each get their own times. So the difference between the reports of two frames is the time between their batches.
 - A time is never 0 and never goes back. The host keeps the last time written. A batch without GPU work (an empty frame) takes it, and a batch that starts before the end of the one before it (overlap) starts there. Within a frame, `TIMESTAMP_TOP` is at most `TIMESTAMP`.
 - The base is the host clock that Metal reports GPU times on (`mach_absolute_time`). It is the base of the system tick and of `nvnDeviceGetCurrentTimestampInNanoseconds`, so a game can compare a report with the current time.
 - The times are the start and end of the whole batch. A report in the middle of a frame has the times of the frame, not of its position.
-- The reports are written in the host wait that drains the frame, with the clock lock held, so a wait that returns for a fence has the reports of that fence in guest memory. With the overlap on, a wait for the newest frame returns when the frame before it is done: a game that reads the reports of the newest frame sees the old values.
+- The host writes the reports in the wait that drains the frame, with the clock lock held. So a wait that returns for a fence has the reports of that fence in guest memory. With the overlap on, a wait for the newest frame returns when the frame before it is done. So a game that reads the reports of the newest frame sees the old values.
 - `NXKIT_DIAG=gputs` prints each report written and each read of `nvnDeviceGetTimestampInNanoseconds` (`docs/diagnostics.md`).
 
-The counter type numbers (`SAMPLES_PASSED` 1, the statistics 2 to 0xf, `TIMESTAMP_TOP` 0x10) follow the order of `NVNcounterType`; the per-type counts of `NXKIT_DIAG=rendercond` show which ones a game reports.
+The counter type numbers (`SAMPLES_PASSED` 1, the statistics 2 to 0xf, `TIMESTAMP_TOP` 0x10) follow the order of `NVNcounterType`. The per-type counts of `NXKIT_DIAG=rendercond` show which ones a game reports.
 
 ### GPU event signals (`backend/events.rs`)
 
-On the console the GPU writes the counter of an event (`nvnCommandBufferSignalEvent`) when it reaches the signal, after the
-work before it is done, and a game polls the counter (`nvnEventGetValue`) to know that the results of that work are ready.
-Before, a GPU signal reached only the queue gate of the runtime (`Gate::ran`), never the word in guest memory, so a poll saw
-only the CPU's signals.
+On the console, the GPU writes the counter of an event (`nvnCommandBufferSignalEvent`) when it reaches the signal, after
+the work before it is done. A game polls the counter (`nvnEventGetValue`) to know that the results of that work are
+ready. Before, a GPU signal reached only the queue gate of the runtime (`Gate::ran`), never the word in guest memory. So
+a poll saw only the CPU's signals.
 
-- The walk turns each signal into an event report among the reports of the frame (`REPORT_EVENT_WRITE`, `REPORT_EVENT_ADD`)
-  with the host address of the counter word, read from the `NVNevent` when the walk reads the command (the console binds the
-  address when the command is recorded). Templates of reused recordings carry them like the other reports.
-- The work of a held submit goes into the frame, and to the walk, only when the gate runs it, so a signal in held work is
+- The walk turns each signal into an event report among the reports of the frame (`REPORT_EVENT_WRITE`,
+  `REPORT_EVENT_ADD`). The report has the host address of the counter word, read from the `NVNevent` when the walk reads
+  the command (the console binds the address when the command is recorded). Templates of reused recordings carry them
+  like the other reports.
+- The work of a held submit goes into the frame, and to the walk, only when the gate runs it. So a signal in held work is
   written only after that work ran and the GPU finished it.
-- `EventSignals::hold` keeps the signals of a frame and hooks the completion of its batch (`SubmittedBatch::on_complete`),
-  after the completion of the private GPU memory; a frame without a batch is written at once. The completion of a frame writes
-  its signals and those of every older frame, in the order of the frames and of the commands, before a wait for the batch
-  returns. ADD adds with an atomic compare-and-swap, every other mode writes the value with one. The thread is marked internal,
-  as the writer of the counter reports, so under `NXKIT_PRIVATE` the page tracker serves the write without a wait.
-- The order with CPU signals: the completion is the time the CPU sees the GPU reach the signal, so a CPU signal before it is
-  older and the GPU value wins, as on the console when the GPU executes the signal after the CPU wrote. Only a wait that
-  returned before the frame was done (the early wait of `NXKIT_PRIVATE=1`, the overlap) tells the CPU that the GPU passed the
-  signal when it did not. A CPU signal after such a wait marks its word with the newest fence a wait returned for, and a GPU
-  write from a frame up to that fence is dropped; a GPU add is still added (both adds count in either order). The mark costs
-  two loads when no wait returned early.
-- The gate keeps its own counters (`Gate::events`): it orders the queues on the CPU timeline, when the work goes into the
-  frame, which is before the GPU ran it.
+- `EventSignals::hold` keeps the signals of a frame and hooks the completion of its batch
+  (`SubmittedBatch::on_complete`), after the completion of the private GPU memory. A frame without a batch is written at
+  once. The completion of a frame writes its signals and those of every older frame before a wait for the batch returns.
+  It writes them in the order of the frames and of the commands. ADD adds with an atomic compare-and-swap, and every
+  other mode writes the value with one. The thread is marked internal, as the writer of the counter reports, so under
+  `NXKIT_PRIVATE` the page tracker serves the write without a wait.
+- The order with CPU signals: the completion is the time the CPU sees the GPU reach the signal. So a CPU signal before it
+  is older and the GPU value wins. This is as on the console when the GPU executes the signal after the CPU wrote. Only a
+  wait that returned before the frame was done (the early wait of `NXKIT_PRIVATE=1`, the overlap) tells the CPU that the
+  GPU passed the signal when it did not. A CPU signal after such a wait marks its word with the newest fence a wait
+  returned for. Then a GPU write from a frame up to that fence is dropped. A GPU add is still added (both adds count in
+  either order). The mark costs two loads when no wait returned early.
+- The gate keeps its own counters (`Gate::events`). It orders the queues on the CPU timeline, when the work goes into
+  the frame, which is before the GPU ran it.
 - A frame without event signals costs a scan of its reports. `NXKIT_DIAG=events` counts the writes, adds, dropped writes and
   words outside guest memory per completion.
 - Limits: a signal with the location `TOP` is written at the end of the frame too (later than on the console, never earlier).
@@ -146,7 +148,7 @@ only the CPU's signals.
 
 ## Barriers only where data flows (R19)
 
-`barriers.rs` tracks, for each texture, the stages that wrote it and the stages that read it. Before a pass it emits one `Dependency` only when the pass reads something that an earlier pass wrote, or writes something that an earlier pass wrote or read. The `after` stages are the stages of the earlier writers and the `before` stage is the first stage that needs the data (fragment for a render pass that samples in the fragment stage). A pass that touches nothing that an earlier pass touched gets no barrier. The state carries over to the next frame, so the first pass of a frame waits for the last writer of the previous one. `EncodeStats` has `barriers_emitted` and `barriers_avoided`.
+`barriers.rs` tracks, for each texture, the stages that wrote it and the stages that read it. Before a pass, it emits one `Dependency` only in two cases. In the first case, the pass reads something that an earlier pass wrote. In the second case, the pass writes something that an earlier pass wrote or read. The `after` stages are the stages of the earlier writers and the `before` stage is the first stage that needs the data (fragment for a render pass that samples in the fragment stage). A pass that touches nothing that an earlier pass touched gets no barrier. The state carries over to the next frame, so the first pass of a frame waits for the last writer of the previous one. `EncodeStats` has `barriers_emitted` and `barriers_avoided`.
 
 ## Tile memory
 
@@ -166,7 +168,7 @@ A texture is scaled when all of these hold.
 - A render pass had the texture as an attachment, in this frame or an earlier one. The game creates its targets at output size and renders into them, so every texture rendered into becomes scaled.
 - No CPU read of the texture has been seen. A CPU read pins the texture at its own size for good, because guest memory holds the unscaled bytes.
 
-A texture that the game only uploads is never an attachment and keeps its size. Viewports, scissors and copy regions between scaled targets scale with the factor. A copy between a scaled and an unscaled texture is not encoded and counts as `Skip::Copy`. A texture copy whose destination box has another size than the source box (`nvnCommandBufferCopyTextureToTexture` with two region sizes) stretches the source onto it with a host kernel in the copy pass (`passes/scale.rs`): destination texel `d` takes the source at `(d + 0.5) * src_size / dst_size`, the nearest texel, or with `NVN_COPY_FLAGS_LINEAR_FILTER_BIT` (bit 0 of `CopyDetail::flags`) a bilinear mix clamped to the source box. Integer formats always take the nearest texel. Depth, stencil, compressed and 3D textures, a source a shader cannot read and a destination it cannot write (`shader_write`) are refused with a reason (`DIAG copy`, `skip.copy`). The health report counts the layers it stretched as `copy.scaled` and `copy.scaled-linear`. `NVN_COPY_FLAGS_MIRROR_X_BIT` and `MIRROR_Y_BIT` (4 and 8) reverse the source within the region on the same kernel. A mirrored copy of an equal size that the kernel refuses is a blit without the mirror (`copy.mirror-lost`). A stretched or mirrored copy within one backing texture is refused only when source and destination share texels. A texture that becomes scaled is created again and its old contents are lost.
+A texture that the game only uploads is never an attachment and keeps its size. Viewports, scissors and copy regions between scaled targets scale with the factor. A copy between a scaled and an unscaled texture is not encoded and counts as `Skip::Copy`. A texture copy can have a destination box of another size than the source box (`nvnCommandBufferCopyTextureToTexture` with two region sizes). Such a copy stretches the source onto the destination with a host kernel in the copy pass (`passes/scale.rs`). Destination texel `d` takes the source at `(d + 0.5) * src_size / dst_size`. It takes the nearest texel, or, with `NVN_COPY_FLAGS_LINEAR_FILTER_BIT` (bit 0 of `CopyDetail::flags`), a bilinear mix clamped to the source box. Integer formats always take the nearest texel. Depth, stencil, compressed and 3D textures, a source a shader cannot read and a destination it cannot write (`shader_write`) are refused with a reason (`DIAG copy`, `skip.copy`). The health report counts the layers it stretched as `copy.scaled` and `copy.scaled-linear`. `NVN_COPY_FLAGS_MIRROR_X_BIT` and `MIRROR_Y_BIT` (4 and 8) reverse the source within the region on the same kernel. A mirrored copy of an equal size that the kernel refuses is a blit without the mirror (`copy.mirror-lost`). A stretched or mirrored copy within one backing texture is refused only when source and destination share texels. A texture that becomes scaled is created again and its old contents are lost.
 
 ### Shaders at a render scale
 
@@ -177,29 +179,29 @@ When every factor of a stage is 1 (always so at `scale` 1), the stage binds the 
 Limits:
 
 - Only the pixel position, integer coordinates and size queries are converted. `uv = gl_FragCoord.xy * invSize` works, as the position is divided and the constant is a native size. A size that the shader gets by another path (a uniform the game wrote from the size of a scaled target, a compute thread id) stays native or scaled as it is.
-- A texture that is not a 2D texture, an array of textures, a bindless handle (`tex_ubo`, pools) and a combined handle that the shader reads at run time keep scale 1. The shader then sees the scaled texture with native coordinates.
-- Image bindings are filled (see "Storage images and raw global memory"). The translator scales image loads, stores and atomics, and entry `rscale` of an `img` binding is the scale of its texture. A store of a native coordinate writes one texel of each `scale` by `scale` block. Dispatch sizes that the game computes from the native size then cover only part of a scaled image. A rule that scales the grid when every written image has the same factor can use the image binds of the detail now, but there is no `scalegrid` knob yet.
+- These keep scale 1: a texture that is not a 2D texture, an array of textures and a bindless handle (`tex_ubo`, pools). A combined handle that the shader reads at run time also keeps scale 1. The shader then sees the scaled texture with native coordinates.
+- Image bindings are filled (see "Storage images and raw global memory"). The translator scales image loads, stores and atomics, and entry `rscale` of an `img` binding is the scale of its texture. A store of a native coordinate writes one texel of each `scale` by `scale` block. Dispatch sizes that the game computes from the native size then cover only part of a scaled image. A rule could scale the grid when every written image has the same factor. Such a rule can use the image binds of the detail now, but there is no `scalegrid` knob yet.
 - A copy-back and an upload of a scaled texture keep their limits (see above).
 
 ## Textures
 
-`textures/mod.rs` makes one Metal texture for each `TexId` and keeps it while its description stays the same. A texture in `GuestNewer` state, or a new texture in `InSync` state, is deswizzled from guest memory by the `Deswizzler` in the first command buffer before the frame uses it. A scaled texture whose guest copy is newer cannot take that upload, because the deswizzle writes the guest layout at the native size. See "Guest writes to a scaled texture" below. Render targets stay in Metal (R4). `Gpu::encode_frame` copies a texture back to guest memory with the `Swizzler` only when a `CpuRead` command names it and the GPU wrote it, in this frame or before. A scaled, compressed or widened texture is not copied back. A texture that the kernel cannot write is deswizzled into a staging buffer first and copied into the texture with a blit (`upload/buffered.rs`): a compressed texture (BC, ASTC), because Metal cannot copy an integer texture into a compressed one, and a `Depth16Unorm`, `Depth32Float` or `Stencil8` texture, which has no integer view and no shader write (the shadow map). A 3D level goes in whole, with all its depth slices. `Depth32Float_Stencil8` has no upload. One buffer holds all levels of a texture, each at a 256 byte aligned offset, and `upload/staging.rs` pools the buffers (a buffer is free when only the pool holds it, up to 8 buffers, sizes rounded to a power of two up to 4 MiB). The CPU does not clear them, because the kernel writes every byte that the copy reads.
+`textures/mod.rs` makes one Metal texture for each `TexId` and keeps it while its description stays the same. The `Deswizzler` deswizzles a texture in `GuestNewer` state, or a new texture in `InSync` state, from guest memory. It does this in the first command buffer before the frame uses it. A scaled texture whose guest copy is newer cannot take that upload, because the deswizzle writes the guest layout at the native size. See "Guest writes to a scaled texture" below. Render targets stay in Metal (R4). `Gpu::encode_frame` copies a texture back to guest memory with the `Swizzler` only when a `CpuRead` command names it. The GPU must also have written it, in this frame or before. A scaled, compressed or widened texture is not copied back. A texture that the kernel cannot write is first deswizzled into a staging buffer, and then a blit copies it into the texture (`upload/buffered.rs`). This applies to a compressed texture (BC, ASTC), because Metal cannot copy an integer texture into a compressed one. It also applies to a `Depth16Unorm`, `Depth32Float` or `Stencil8` texture, which has no integer view and no shader write (the shadow map). A 3D level goes in whole, with all its depth slices. `Depth32Float_Stencil8` has no upload. One buffer holds all levels of a texture, each at a 256 byte aligned offset. `upload/staging.rs` pools the buffers (a buffer is free when only the pool holds it, up to 8 buffers, sizes rounded to a power of two up to 4 MiB). The CPU does not clear them, because the kernel writes every byte that the copy reads.
 
-A game that encodes block compressed textures on the GPU renders into them through a view of an unsigned integer format of the block size (agl's BC4 encoder renders a 64x64x64 BC4 texture plane by plane through an `RGBA16Uint` view). Metal can neither render into nor make an uncompressed view of a compressed texture, so such a colour attachment renders into a block shadow (`textures/blocks.rs`): a 2D texture of the view format with one texel per block, kept per texture, level, layer or depth plane and view format. After the pass `encode/blocks.rs` copies the shadow into the blocks of the compressed texture through a buffer, and before a pass that loads the attachment the other way. The barrier plan counts the blit stage as a writer of a compressed attachment, and a compressed texture is never a render target and never scaled. An attachment view of a compressed texture is never made.
+A game can encode block compressed textures on the GPU. It renders into them through a view of an unsigned integer format of the block size (agl's BC4 encoder renders a 64x64x64 BC4 texture plane by plane through an `RGBA16Uint` view). Metal can neither render into a compressed texture nor make an uncompressed view of it. So such a colour attachment renders into a block shadow (`textures/blocks.rs`). The block shadow is a 2D texture of the view format with one texel per block. It is kept per texture, level, layer or depth plane and view format. After the pass, `encode/blocks.rs` copies the shadow into the blocks of the compressed texture through a buffer. Before a pass that loads the attachment, it copies the other way. The barrier plan counts the blit stage as a writer of a compressed attachment. A compressed texture is never a render target and never scaled. An attachment view of a compressed texture is never made.
 
 ### Textures of sparse virtual pools (`upload/sparse.rs`)
 
-A virtual memory pool that the game maps page by page (Octopath Traveler, Unreal Engine 4.18, gives each streamed texture a pool of its own, makes the sparse texture in it before any mapping and maps its mip tail and later its higher mips from a 4 MB physical pool) has guest GPU addresses of its own: the top 128 GiB of the window of guest addresses, `0xE0_0000_0000` to `1 << 40` (`virtual_window`). The guest memory takes the window from its start, so the two cannot meet while it is under 128 GiB, and Metal never hands out an address in the window. No buffer covers these addresses. Pages remapped under the no-copy buffer of a physical pool do not reach the GPU (see `docs/nxkit-host.md`, "Guest memory"), so the host does not alias them: the flush attaches the page tables of the virtual pools to its pool snapshot (`PoolSnapshot::with_vpools`), and `Transfer::source` gathers the bytes of such a texture on the CPU from the physical pages the table names (through the pool buffers, so the mirror of `NXKIT_PRIVATE=1` applies; an unmapped page reads as 0) into a buffer of its own and deswizzles from there. When it uploads is the usual residency: a mapping request in the range of the texture or a CPU write to a physical page behind it makes the record `GuestNewer` in the front end. Unreal Engine 4.18 fills the pages of a new mapping with the CPU after the request and flushes nothing, because its physical pool is not CPU cached. So each mapping request starts a watch on its physical pages (`nxkit-rt`, `nvn/ctx/vwatch.rs`): every flush hashes them, and a change makes the textures over the virtual range `GuestNewer` again. A watch ends when its pages kept the same non-zero bytes for 120 flushes, after 3600 flushes, or when the range is unmapped or mapped again. Without it, Octopath Traveler sampled the higher mips of its streamed textures as zeros: the cloud texture of its sun's light function went black, so the sun lit almost nothing, and the colour grading of the town, which turns its darkest tones red, coloured the whole scene. A copy-back of such a texture is refused (`Skip::Transfer`). `NXKIT_DIAG=upload` prints `DIAG upload sparse` for every one, with the mapped, unmapped and missing bytes.
+A virtual memory pool that the game maps page by page has guest GPU addresses of its own. Octopath Traveler (Unreal Engine 4.18) gives each streamed texture a pool of its own and makes the sparse texture in it before any mapping. Then it maps its mip tail, and later its higher mips, from a 4 MB physical pool. The addresses of such a pool are the top 128 GiB of the window of guest addresses, `0xE0_0000_0000` to `1 << 40` (`virtual_window`). The guest memory takes the window from its start, so the two cannot meet while it is under 128 GiB. Metal never hands out an address in the window. No buffer covers these addresses. Pages remapped under the no-copy buffer of a physical pool do not reach the GPU (see `docs/nxkit-host.md`, "Guest memory"), so the host does not alias them. The flush attaches the page tables of the virtual pools to its pool snapshot (`PoolSnapshot::with_vpools`). `Transfer::source` gathers the bytes of such a texture on the CPU from the physical pages that the table names. It reads them through the pool buffers, so the mirror of `NXKIT_PRIVATE=1` applies, and an unmapped page reads as 0. It gathers the bytes into a buffer of its own and deswizzles from there. The time of the upload is the usual residency. A mapping request in the range of the texture makes the record `GuestNewer` in the front end. A CPU write to a physical page behind it does the same. Unreal Engine 4.18 fills the pages of a new mapping with the CPU after the request and flushes nothing. The reason is that its physical pool is not CPU cached. So each mapping request starts a watch on its physical pages (`nxkit-rt`, `nvn/ctx/vwatch.rs`). Every flush hashes them, and a change makes the textures over the virtual range `GuestNewer` again. A watch ends after 3600 flushes, or when its pages kept the same non-zero bytes for 120 flushes. It also ends when the range is unmapped or mapped again. Without the watch, Octopath Traveler sampled the higher mips of its streamed textures as zeros. The cloud texture of its sun's light function went black, so the sun lit almost nothing. The colour grading of the town, which turns its darkest tones red, coloured the whole scene. A copy-back of such a texture is refused (`Skip::Transfer`). `NXKIT_DIAG=upload` prints `DIAG upload sparse` for every one, with the mapped, unmapped and missing bytes.
 
-A sparse texture (`NVN_TEXTURE_FLAGS_SPARSE`, in any pool) pads its tiled levels to whole 64 KiB tiles and its layers to whole tiles (`nxkit_nvn::layout`), which the block-linear rules of `nxkit_metal` do not know. `upload::surface` therefore hands the kernels a `LevelTable` (the offset and width in GOBs of each level, and the layer stride, from `TextureDesc::level_offset`, `level_gobs` and the layout) whenever the guest layout differs from the rules; read with the rules, every row of blocks after the first slid sideways by the padding (Octopath Traveler: the panels of its language notice, 400x288 BC textures padded from 25 to 32 GOBs, and its traveler portraits). `NXKIT_DIAG=upload` prints `DIAG upload layout` for every sparse texture and every texture whose levels differ.
+A sparse texture (`NVN_TEXTURE_FLAGS_SPARSE`, in any pool) pads its tiled levels to whole 64 KiB tiles and its layers to whole tiles (`nxkit_nvn::layout`). The block-linear rules of `nxkit_metal` do not know this padding. `upload::surface` therefore hands the kernels a `LevelTable` (the offset and width in GOBs of each level, and the layer stride, from `TextureDesc::level_offset`, `level_gobs` and the layout) whenever the guest layout differs from the rules. When the kernels read with the rules, every row of blocks after the first slid sideways by the padding (Octopath Traveler: the panels of its language notice, 400x288 BC textures padded from 25 to 32 GOBs, and its traveler portraits). `NXKIT_DIAG=upload` prints `DIAG upload layout` for every sparse texture and every texture whose levels differ.
 
 ### Texture buffers (`textures/describe.rs`)
 
-The translator turns a 1D fetch from a texture buffer (`NVN_TEXTURE_TARGET_BUFFER`) into a 2D read at `(x & 0x3FFF, x >> 14)` of a `texture2d<float>`. The store therefore makes a texture buffer of `n` texels a 2D texture of rows of 16384 texels (`buffer_rows`: `min(n, 16384)` wide, `ceil(n / 16384)` high), with rows `16384 * bytes per texel` apart (`row_pitch`). When the alignment allows, it lies over the guest bytes (`Texture::over_guest`, as a pitch-linear texture), so it sees every CPU and GPU write without an upload; otherwise it is copied in every frame that uses it, its full rows and its short last row in two copies (`upload::linear_parts`), so no copy reads past the buffer. A buffer of 32-bit integers is made in the float format of the same bits (R32, RG32 and RGBA32 Uint and Sint to Float): the shaders declare every fetched texture as `float` and use the raw bits, as the hardware's fetch does. Its views keep that format. Octopath Traveler binds such buffers (5 to 983040 texels) to its post-processing passes; before, every frame refused 14 of them (`tex.format-unsupported`) and the slots read the null texture.
+The translator turns a 1D fetch from a texture buffer (`NVN_TEXTURE_TARGET_BUFFER`) into a 2D read at `(x & 0x3FFF, x >> 14)` of a `texture2d<float>`. The store therefore makes a texture buffer of `n` texels a 2D texture of rows of 16384 texels (`buffer_rows`: `min(n, 16384)` wide, `ceil(n / 16384)` high), with rows `16384 * bytes per texel` apart (`row_pitch`). When the alignment allows, it lies over the guest bytes (`Texture::over_guest`, as a pitch-linear texture). So it sees every CPU and GPU write without an upload. Otherwise it is copied in every frame that uses it. Its full rows and its short last row go in two copies (`upload::linear_parts`), so no copy reads past the buffer. A buffer of 32-bit integers is made in the float format of the same bits (R32, RG32 and RGBA32 Uint and Sint to Float). The reason is that the shaders declare every fetched texture as `float` and use the raw bits, as the hardware's fetch does. Its views keep that format. Octopath Traveler binds such buffers (5 to 983040 texels) to its post-processing passes. Before this change, every frame refused 14 of them (`tex.format-unsupported`), and the slots read the null texture.
 
 ### Geometry shaders that only pick the layer
 
-The encoder has no geometry stage. Unreal Engine builds its 32x32x32 colour-grading LUT with a vertex shader, one instance per depth plane, and a geometry shader that copies the triangle and writes the plane into `gl_Layer`; drawn without the geometry stage every instance landed in plane 0, and the tone mapper read a wrong LUT (Octopath Traveler's boot logos on a pink background). The walker keeps a geometry shader whose reflection allows that (`walk::programs::Kind::Geometry`: at most 3 vertices out of one invocation) in `ProgramRef::geometry`; when the vertex shader has the translator's layer entry (`entry_layer`, `main0_l`, which writes the integer output component that carries the layer as `[[render_target_array_index]]`), the draw runs that entry instead (`pipelines::render::layered`, its pipelines keyed apart) and its pass is layered over the depth planes of its 3D colour attachments, which then start at plane 0 (`encode::setup::layers_of`, `CommandBuffer::layer_next_pass`). Other geometry shaders, and layered draws into attachments that are not 3D colour targets, stay as before and are counted as `walk.stage-ignored`.
+The encoder has no geometry stage. Unreal Engine builds its 32x32x32 colour-grading LUT with a vertex shader, one instance per depth plane, and a geometry shader. The geometry shader copies the triangle and writes the plane into `gl_Layer`. Without the geometry stage, every instance landed in plane 0, and the tone mapper read a wrong LUT (Octopath Traveler's boot logos on a pink background). The walker keeps a geometry shader whose reflection allows that (`walk::programs::Kind::Geometry`: at most 3 vertices out of one invocation) in `ProgramRef::geometry`. The vertex shader can have the translator's layer entry (`entry_layer`, `main0_l`, which writes the integer output component that carries the layer as `[[render_target_array_index]]`). Then the draw runs that entry instead (`pipelines::render::layered`, its pipelines keyed apart). Its pass is layered over the depth planes of its 3D colour attachments, which then start at plane 0 (`encode::setup::layers_of`, `CommandBuffer::layer_next_pass`). Other geometry shaders, and layered draws into attachments that are not 3D colour targets, stay as before and are counted as `walk.stage-ignored`.
 
 ### The depth mode of the device
 
@@ -207,55 +209,55 @@ NVN maps the clip depth -1 to 1 onto the depth range by default (`NVN_DEPTH_MODE
 ends the base vertex entry with `z = (z + w) / 2`. A game that calls `nvnDeviceSetDepthMode(NEAR_IS_ZERO)` (Unreal
 Engine 4 does) writes a clip depth of 0 to 1 that must stay as it is. The translator emits that form too: `main0_z`,
 `main0_lz` for the layer entry and `main0_z` of a mesh shader (`entry_z`, `entry_layer_z` in `_b.json`).
-`Backend::device_modes` passes the mode to `Gpu::set_depth_zero_to_one`; `Pipelines` then picks those entries
-(`pipelines::render::vertex_entry`), and their pipeline keys get the suffix `:z` (a mesh key a flag), so the keys of
-the default mode stay. A function without such an entry (a pulling `_bp` library) keeps the conversion and counts
-`pipe.depth-mode-ignored`. Octopath Traveler read `0.5 + z / 2` as its scene depth: every pixel had the same circle
-of confusion and the whole picture was blurred. The archive step learns the mode from the pipeline list of the runs
+`Backend::device_modes` passes the mode to `Gpu::set_depth_zero_to_one`. `Pipelines` then picks those entries
+(`pipelines::render::vertex_entry`), and their pipeline keys get the suffix `:z` (a mesh key a flag). So the keys of the
+default mode stay. A function without such an entry (a pulling `_bp` library) keeps the conversion and counts
+`pipe.depth-mode-ignored`. Octopath Traveler read `0.5 + z / 2` as its scene depth: every pixel had the same circle of
+confusion and the whole picture was blurred. The archive step learns the mode from the pipeline list of the runs
 (`nxb_archive::plan::keeps_depth`) and plans the `main0_z` bases then.
 
 A depth and stencil clear (`nvnCommandBufferClearDepthStencil`) clears depth only with its depth mask and stencil only
 with its stencil mask (`nxkit_nvn::frame::ClearKeeps`). A clear of one part starts the pass with a clear of that part
-and a load of the other (separate Metal load actions), and the part it keeps counts as read for the store of the pass
+and a load of the other (separate Metal load actions). The part that it keeps counts as read for the store of the pass
 before. Unreal Engine 4 clears the stencil alone between its lights and its translucency.
 
 ### Pitch-linear textures over guest memory
 
-On the console the GPU samples a pitch-linear texture (`NVN_TEXTURE_FLAGS_LINEAR`) straight from its memory pool, so a CPU write into the pool reaches the texture without `nvnMemoryPoolFlushMappedRange` or `nvnTextureWriteTexels`. Games rely on it: Super Mario Bros. Wonder rasterizes the glyphs of its menus on the CPU into a 2048x8192 R8 atlas (stride 2048) in a CPU-visible pool as they are first needed and never tells the GPU. The front end saw no write, the record stayed `InSync` after the first upload, and every glyph drawn after it stayed empty ("utzer   en" for "Nutzer wählen"; `NXKIT_DIAG=stale` printed `changed, residency InSync needs upload false` for the atlas). Its four 64x1 RGBA16F sky ramps and a 256x256 sRGB texture are linear textures of the same kind.
+On the console, the GPU samples a pitch-linear texture (`NVN_TEXTURE_FLAGS_LINEAR`) straight from its memory pool. So a CPU write into the pool reaches the texture without `nvnMemoryPoolFlushMappedRange` or `nvnTextureWriteTexels`. Games rely on it. Super Mario Bros. Wonder rasterizes the glyphs of its menus on the CPU when it first needs them, and it never tells the GPU. The glyphs go into a 2048x8192 R8 atlas (stride 2048) in a CPU-visible pool. The front end saw no write, and the record stayed `InSync` after the first upload. Every glyph drawn after it stayed empty ("utzer   en" for "Nutzer wählen"). `NXKIT_DIAG=stale` printed `changed, residency InSync needs upload false` for the atlas. Its four 64x1 RGBA16F sky ramps and a 256x256 sRGB texture are linear textures of the same kind.
 
-The store makes such a texture over the guest bytes themselves (`TextureStore::place_of`, `Texture::over_guest`: `newTextureWithDescriptor:offset:bytesPerRow:` on the no-copy buffer of the pool), so it takes no upload, costs no memory and sees every CPU write, as on the console. The texture lies in place when it is a 2D texture of one level and one layer, unscaled, not widened, not an attachment, without image atomics, of a format with a linear layout in Metal (not compressed, depth or stencil), with its first byte and stride on `minimumLinearTextureAlignmentForPixelFormat` (16 bytes on Apple M-series GPUs) and all its rows inside one pool buffer. `Res::in_place` holds the real GPU address of the first byte and the stride; a pool that gets another buffer makes the texture again. The texture does not join the residency set, its buffer is in it. Views (the atlas is sampled with the swizzle 1, 1, 1, R) are views of the texture as usual. The upload loop marks a `GuestNewer` record of an in-place texture as synced without a copy; fresh-zero never clears one; a GPU write into one (a copy destination, an image store) lands in guest memory, so the copy-back counts it as copied back without a pass.
+The store makes such a texture over the guest bytes themselves (`TextureStore::place_of`, `Texture::over_guest`: `newTextureWithDescriptor:offset:bytesPerRow:` on the no-copy buffer of the pool). So it takes no upload, costs no memory and sees every CPU write, as on the console. The texture lies in place only when all of these are true. It is a 2D texture of one level and one layer. It is unscaled, not widened, not an attachment and without image atomics. Its format has a linear layout in Metal (not compressed, depth or stencil). Its first byte and stride are on `minimumLinearTextureAlignmentForPixelFormat` (16 bytes on Apple M-series GPUs). All its rows are inside one pool buffer. `Res::in_place` holds the real GPU address of the first byte and the stride. A pool that gets another buffer makes the texture again. The texture does not join the residency set, but its buffer is in it. Views (the atlas is sampled with the swizzle 1, 1, 1, R) are views of the texture as usual. The upload loop marks a `GuestNewer` record of an in-place texture as synced without a copy. Fresh-zero never clears an in-place texture. A GPU write into one (a copy destination, an image store) lands in guest memory. So the copy-back counts it as copied back without a pass.
 
-A pitch-linear texture that cannot lie in place keeps a copy (`Res::reupload`): it is uploaded in every frame that uses it, unless the GPU wrote it last. That is the case with `NXKIT_PRIVATE=1` (the pages a frame writes live in a mirror that changes per frame), with an alignment Metal refuses, for a linear attachment (its copy-back stays as before) and with `NXKIT_TEX_INPLACE=0`. Block-linear textures keep the old rule: the CPU writes them through `nvnTextureWriteTexels` or a flush, and hashing or protecting the pages of every texture in a CPU-visible pool would cost every frame. `NXKIT_DIAG=upload` prints `DIAG upload in place <id> <format> WxH at <addr> stride <n>` for the first textures made in place; `EncodeStats::textures_in_place` counts them.
+A pitch-linear texture that cannot lie in place keeps a copy (`Res::reupload`). It is uploaded in every frame that uses it, unless the GPU wrote it last. That is the case with `NXKIT_PRIVATE=1` (the pages a frame writes live in a mirror that changes per frame), with an alignment Metal refuses, for a linear attachment (its copy-back stays as before) and with `NXKIT_TEX_INPLACE=0`. Block-linear textures keep the old rule: the CPU writes them through `nvnTextureWriteTexels` or a flush. To hash or protect the pages of every texture in a CPU-visible pool would cost time in every frame. `NXKIT_DIAG=upload` prints `DIAG upload in place <id> <format> WxH at <addr> stride <n>` for the first textures made in place. `EncodeStats::textures_in_place` counts them.
 
 ### Guest writes to a scaled texture
 
 When the CPU writes a texture that the GPU renders at the scaled size (`Residency::GuestNewer` and `Res::scaled`), the data takes two steps (`scaled.rs`, called from the upload loop of `encode_frame_inner`).
 
-1. The plain upload (`Transfer::upload`) deswizzles all levels and layers into a staging texture of the native size. The staging textures come from a pool by `TextureDesc`. A texture goes back to the pool when its frame is submitted. It is handed out again after `BATCHES_IN_FLIGHT` frames, when the batch ring has waited for the batch that used it, and it is dropped after 240 frames without use. A texture that the CPU writes every frame therefore makes no new Metal texture.
-2. One compute pass at the end of the first command buffer waits for the earlier passes (`WaitForEarlierPasses`) and runs `nxkit_metal::Resampler` for each level and layer: a linear filter for colour formats that a shader reads as floats, the nearest texel for integer formats. The pass writes the scaled texture with compute stages, and the barrier planner is seeded the same way as for the plain upload (`Stages::DISPATCH | Stages::BLIT`).
+1. The plain upload (`Transfer::upload`) deswizzles all levels and layers into a staging texture of the native size. The staging textures come from a pool by `TextureDesc`. A texture goes back to the pool when its frame is submitted. It is handed out again after `BATCHES_IN_FLIGHT` frames, when the batch ring has waited for the batch that used it. It is dropped after 240 frames without use. A texture that the CPU writes every frame therefore makes no new Metal texture.
+2. One compute pass at the end of the first command buffer waits for the earlier passes (`WaitForEarlierPasses`) and runs `nxkit_metal::Resampler` for each level and layer. It uses a linear filter for colour formats that a shader reads as floats, and the nearest texel for integer formats. The pass writes the scaled texture with compute stages, and the barrier planner is seeded the same way as for the plain upload (`Stages::DISPATCH | Stages::BLIT`).
 
 The whole texture is scaled, not only the part the CPU wrote, because the resource table does not say which levels changed. The kernel needs a target with `shader_write` and a 2D or 2D array kind. Depth, stencil, compressed, 3D and shared-exponent formats have none, so a CPU write to such a scaled texture is still lost (`upload.scaled-lost`). A texture that became scaled this frame and is only `InSync` is not uploaded: it starts empty, as before.
 
 A scaled upload counts as `uploads` and `scaled_uploads` (`upload.scaled` in the report). It is not a loss.
 
-The store also keeps a texture at the native size when the CPU writes it much more often than the GPU renders into it (`Heat` in `textures/mod.rs`). For each texture it counts the frames with a newer guest copy (`writes`) and the frames with an attachment use (`renders`) while the scale is not 1. When `writes >= 8` and `writes / 4 >= renders`, the texture is native for good, until the game creates it again. Then it takes the plain upload and no scale. This is a heuristic, not a fact about the game: the numbers are a first guess, and `textures_kept_native` counts the decisions. A texture that is written and rendered in about every frame stays scaled.
+The store also keeps a texture at the native size when the CPU writes it much more often than the GPU renders into it (`Heat` in `textures/mod.rs`). While the scale is not 1, it counts for each texture the frames with a newer guest copy (`writes`). It also counts the frames with an attachment use (`renders`). When `writes >= 8` and `writes / 4 >= renders`, the texture is native for good, until the game creates it again. Then it takes the plain upload and no scale. This is a heuristic, not a fact about the game: the numbers are a first guess, and `textures_kept_native` counts the decisions. A texture that is written and rendered in about every frame stays scaled.
 
 ### Copy-back of render targets (`copyback.rs`)
 
-A texture that a frame writes is copied back into guest memory at the end of the frame only when the CPU may read it: its storage lies in a memory pool without `NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS` (0x1). The encoder keeps the pools with their flags (`Backend::register_pool`) and, since `nvnMemoryPoolMapVirtual`, the virtual windows (`Backend::map_pool_window`, `unmap_pool_window`).
+A texture that a frame writes is copied back into guest memory at the end of the frame only when the CPU may read it. That is, its storage lies in a memory pool without `NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS` (0x1). The encoder keeps the pools with their flags (`Backend::register_pool`) and, since `nvnMemoryPoolMapVirtual`, the virtual windows (`Backend::map_pool_window`, `unmap_pool_window`).
 
-A game builds its render target heap as a virtual pool (`VIRTUAL | CPU_NO_ACCESS`) mapped onto a physical pool (in Ocarina of Time flags 0x18c: `PHYSICAL | COMPRESSIBLE | GPU_NO_ACCESS | CPU_CACHED`). Both name the same bytes at the same addresses here. Textures are created through the virtual pool, so its flags are what the game may do with them. Before the window was registered only the physical pool was known, its flags lack `CPU_NO_ACCESS`, and about 18 textures (53 MB, about 2 ms of GPU time) were copied back each frame that nothing reads. A window is registered with the flags of its virtual pool for exactly the mapped range (`phys + poff`, `size`) and is newer than the physical pool, so it wins for those addresses. It is dropped when the range is unmapped (a request without a physical pool) or the virtual pool is finalised; a physical pool is never touched by that.
+A game builds its render target heap as a virtual pool (`VIRTUAL | CPU_NO_ACCESS`) mapped onto a physical pool (in Ocarina of Time flags 0x18c: `PHYSICAL | COMPRESSIBLE | GPU_NO_ACCESS | CPU_CACHED`). Both name the same bytes at the same addresses here. Textures are created through the virtual pool, so its flags are what the game may do with them. Before the window was registered, only the physical pool was known, and its flags lack `CPU_NO_ACCESS`. So about 18 textures (53 MB, about 2 ms of GPU time) that nothing reads were copied back each frame. A window is registered with the flags of its virtual pool for exactly the mapped range (`phys + poff`, `size`). It is newer than the physical pool, so it wins for those addresses. It is dropped when the range is unmapped (a request without a physical pool) or the virtual pool is finalised. That never touches a physical pool.
 
 Decision for a GPU-written texture (`CopyBack::why`, in this order):
 
 1. `NXKIT_COPYBACK=0`, a frame-local texture, a texture the game presents, and every format that is not plain colour (depth, stencil, block compressed) are not copied back (`off`, `frame-local`, `presented`, `format`).
 2. No pool holds the whole storage: not copied back (`no-pool`).
 3. The newest pool that holds all of it has `CPU_NO_ACCESS`: not copied back (`window-cpu-no-access` for a virtual window, `pool-cpu-no-access` otherwise).
-4. Else, if the storage straddles several windows, none holds it whole, the windows without CPU access together cover every byte and no window the CPU may read touches it: not copied back (`window-cpu-no-access`).
+4. Else, it is not copied back (`window-cpu-no-access`) when all of these are true: the storage straddles several windows, and none holds it whole. The windows without CPU access together cover every byte. No window that the CPU may read touches it.
 5. Else, if the texture has `NVN_TEXTURE_FLAGS_COMPRESSIBLE` (0x8) and pools with `NVN_MEMORY_POOL_FLAGS_COMPRESSIBLE` (0x80) hold all of its storage, it is not copied back (`compressed`). The console stores such a texture with the compression of the GPU. Its bytes mean nothing to the CPU without the compression tags, so a game does not read them with the CPU. Unreal Engine 4 games keep their render targets in one pool without `CPU_NO_ACCESS` (Octopath Traveler: flags 0xe2, `CPU_UNCACHED | GPU_CACHED | SHADER_CODE | COMPRESSIBLE`). Before this rule, Octopath Traveler copied back about 40 render targets (105 MB, 2.3 ms of GPU time) in each frame.
-6. Else it is copied back (`copied`), also when the pool it lies in has `GPU_NO_ACCESS` or `COMPRESSIBLE`. `GPU_NO_ACCESS` says that the GPU does not use that pool itself, not that the CPU cannot read it, and the CPU can read a physical pool through its `CPU_CACHED` mapping: a copy-back that is not needed costs GPU time, one that is missing loses what the game reads.
+6. Else it is copied back (`copied`), also when the pool it lies in has `GPU_NO_ACCESS` or `COMPRESSIBLE`. `GPU_NO_ACCESS` says that the GPU does not use that pool itself. It does not say that the CPU cannot read it, and the CPU can read a physical pool through its `CPU_CACHED` mapping. A copy-back that is not needed costs GPU time, but a missing one loses what the game reads.
 
-`NXKIT_DIAG=copyback` prints `DIAG copyback decision <TexId> fmt .. WxH texture flags .. at .. size ..: <reason> (pool flags ..)` for the first decision of each texture and for each change of it (at most 1200 textures), and `DIAG copyback decisions: copied N, ..` with the textures counted by their latest reason before each summary line.
+`NXKIT_DIAG=copyback` prints `DIAG copyback decision <TexId> fmt .. WxH texture flags .. at .. size ..: <reason> (pool flags ..)` for the first decision of each texture and for each change of it (at most 1200 textures). Before each summary line, it prints `DIAG copyback decisions: copied N, ..` with the textures counted by their latest reason.
 
 ## Storage images and raw global memory
 
@@ -266,17 +268,17 @@ The walker follows `BindImage` into `State::image` (the slot layout of the textu
 The reflection gives an `img` member its slot (`reg`), its type, its access (`access::read`, `write` or `read_write` in `msl_type`), an `atomic` flag and `rscale`. `images.rs` pairs the two for each stage that has image binds:
 
 1. Before the textures of the frame are made, `images::uses` finds the texture of each image. They count as used and not memoryless, and a texture with atomics gets `Use::atomic` for good (`TextureStore` remembers it).
-2. After the handles are resolved, `images::resolve` makes one view for each (handle, declared type, atomic code) with `TextureStore::image_view`: one level (the base level of the descriptor), the layers of the descriptor, no swizzle, in the declared type (`texture2d`, `texture2d_array`, `texture3d`). The resource ID goes into `Env::images`; `fill_args` writes it. An image that cannot be bound (nothing bound, a texture a shader cannot write, a view Metal refuses) writes resource ID 0 and counts `bind.img-unbound`.
-3. Atomics. Metal runs texture atomics only on `R32Uint` and `R32Sint` textures made with the atomic usage. `nxkit_metal::Texture::new` gives that usage to every shader-writable texture of those formats. With `TextureDesc::shader_atomic`, a 4 byte colour 2D or 2D array texture of another format (RGBA8, BGRA8, RG16, R32F, RGB10A2, ...) is stored as `R32Uint`, and its own format is a view over it, so rendering, sampling and the guest bytes see the same data. `Texture::atomic_view` gives the `R32Uint` or, for a shader that declares `int`, `R32Sint` view. The texture is made again, and its contents are lost, when the first atomic image use is found; a texture that atomics ran on stays atomic.
+2. After the handles are resolved, `images::resolve` makes one view for each (handle, declared type, atomic code) with `TextureStore::image_view`. The view has one level (the base level of the descriptor) and the layers of the descriptor, with no swizzle, in the declared type (`texture2d`, `texture2d_array`, `texture3d`). The resource ID goes into `Env::images`. `fill_args` writes it. An image that cannot be bound (nothing bound, a texture a shader cannot write, a view Metal refuses) writes resource ID 0 and counts `bind.img-unbound`.
+3. Atomics. Metal runs texture atomics only on `R32Uint` and `R32Sint` textures made with the atomic usage. `nxkit_metal::Texture::new` gives that usage to every shader-writable texture of those formats. With `TextureDesc::shader_atomic`, a 4 byte colour 2D or 2D array texture of another format (RGBA8, BGRA8, RG16, R32F, RGB10A2, ...) is stored as `R32Uint`. Its own format is a view over it, so rendering, sampling and the guest bytes see the same data. `Texture::atomic_view` gives the `R32Uint` or, for a shader that declares `int`, `R32Sint` view. The texture is made again, and its contents are lost, when the first atomic image use is found. A texture that atomics ran on stays atomic.
 4. Barriers and write tracking. A dispatch already lists every bound image as written (`Cmd::Dispatch::writes`). A draw does not, so `images::pass_images` collects, for each render pass, the textures its draws write (an image whose shader access is not `read`, or that has atomics) and read through images. The barrier planner treats them as writes and reads of the pass, and `gpu_wrote` and the copy-back dirty set include them (`EncodeReport::gpu_wrote`).
 
 ### `gmem_map` and `gmem_log`
 
-A shader that reads a guest pointer from memory has no storage buffer for it. The translator searches the table of the memory pools and accesses `address + delta` through a physical pointer, and each store sets a bit in a write log.
+A shader that reads a guest pointer from memory has no storage buffer for it. The translator searches the table of the memory pools and accesses `address + delta` through a physical pointer. Each store sets a bit in a write log.
 
-The table has 8192 entries of 32 bytes, sorted by start and disjoint: start (u64), end (u64, exclusive), delta (u64), a hint (u32), 4 bytes of padding. Entry 0 is empty, unused entries start at `!0`. A pool that overlaps an earlier one keeps its part past the end of the earlier one. The hint of entry `chunk & 8191` is `chunk << 13 | entry index` for each 2 MiB chunk (`chunk = address >> 21`) that lies wholly inside an entry, 0 for none. The delta is the Metal GPU address of the guest memory buffer minus the guest GPU address, from the `AddressMap`: 0 in nxkit, where the GPU address of the game is the Metal address. The pools are those of `register_memory_pool`. The host keeps every registered pool until its removal arrives (a removal takes the oldest registration with that start), also when pools overlap or share a start, and the table is their union. The table is built again, into a new buffer that the batches keep alive, when one comes or goes. A pool beyond entry 8191 is left out and counted (`gmem.pools-over`), and so is a pool that the pool snapshot does not resolve (`gmem.pool-unresolved`); raw loads into either read 0.
+The table has 8192 entries of 32 bytes, sorted by start and disjoint. An entry has a start (u64), an end (u64, exclusive), a delta (u64), a hint (u32) and 4 bytes of padding. Entry 0 is empty, unused entries start at `!0`. A pool that overlaps an earlier one keeps its part past the end of the earlier one. The hint of entry `chunk & 8191` is `chunk << 13 | entry index` for each 2 MiB chunk (`chunk = address >> 21`) that lies wholly inside an entry, 0 for none. The delta is the Metal GPU address of the guest memory buffer minus the guest GPU address, from the `AddressMap`. It is 0 in nxkit, where the GPU address of the game is the Metal address. The pools are those of `register_memory_pool`. The host keeps every registered pool until its removal arrives (a removal takes the oldest registration with that start), also when pools overlap or share a start. The table is their union. The table is built again, into a new buffer that the batches keep alive, when one comes or goes. A pool beyond entry 8191 is left out and counted (`gmem.pools-over`). The same applies to a pool that the pool snapshot does not resolve (`gmem.pool-unresolved`). Raw loads into either read 0.
 
-The log is a bitmap of 8192 bits (1024 bytes): bit `i` of word `i / 32` is set by a store through entry `i`. Each draw or dispatch with a `gmem_log` binding takes a zeroed log from a ring of 1024 logs per batch slot (`gmem.logs-shared` counts the draws past that; they share the last log). When the batch ring gives the slot out again, the GPU is done with it: `Gmem::learn` reads the logs against the table that the batch bound, clears them and adds the pools to `Gpu::gmem_written_pools`. A pool is large, and the log does not say where in it a store landed, so the host does not mark textures from it. Guest memory is the buffer itself, so a store reaches it at once, and a CPU read sees it after the fence.
+The log is a bitmap of 8192 bits (1024 bytes): bit `i` of word `i / 32` is set by a store through entry `i`. Each draw or dispatch with a `gmem_log` binding takes a zeroed log from a ring of 1024 logs per batch slot (`gmem.logs-shared` counts the draws past that, and they share the last log). When the batch ring gives the slot out again, the GPU is done with it. Then `Gmem::learn` reads the logs against the table that the batch bound. It clears them and adds the pools to `Gpu::gmem_written_pools`. A pool is large, and the log does not say where in it a store landed, so the host does not mark textures from it. Guest memory is the buffer itself, so a store reaches it at once, and a CPU read sees it after the fence.
 
 The bindings are counted as `bind.img`, `bind.gmem-map` and `bind.gmem-log` (not losses). `NXKIT_DIAG=gmem` prints the table size, the registrations, those that overlap an earlier one, those left out and each pool learned.
 
@@ -290,64 +292,65 @@ A shader that indexes the whole ID range of the driver pool has a `tex_pool` or 
 | 8 | `seen` (u64): the GPU address of a bitmap |
 | 16 + 8 * id | the resource ID of the texture or sampler of the descriptor `id` |
 
-A read clamps its index to `n`. A texture read first calls `dm_pool_mark`: it sets bit `id & 31` of word `id >> 5` of the bitmap that `seen` names (with an atomic OR, and only when the bit is clear). There is no null check, so `seen` of both tables is always the address of a bitmap: 131072 bytes for the texture ids and 512 bytes for the sampler ids. Generated code never marks a sampler read; the second bitmap only makes the address valid. The host never sets a bit.
+A read clamps its index to `n`. A texture read first calls `dm_pool_mark`: it sets bit `id & 31` of word `id >> 5` of the bitmap that `seen` names (with an atomic OR, and only when the bit is clear). There is no null check, so `seen` of both tables is always the address of a bitmap. The bitmap has 131072 bytes for the texture ids and 512 bytes for the sampler ids. Generated code never marks a sampler read. The second bitmap only makes the address valid. The host never sets a bit.
 
-`n` of the texture table is the highest ID of the texture pools that the game made. It is not the highest ID the host filled: a read above it would clamp to a lower ID and mark that one, and the host would never learn of the ID the shader wanted. The elements that the host has not filled hold 0, the null texture. `n` of the sampler table is the highest registered sampler ID. Neither shrinks.
+`n` of the texture table is the highest ID of the texture pools that the game made. It is not the highest ID the host filled. A read above that ID would clamp to a lower ID and mark that one. Then the host would never learn of the ID the shader wanted. The elements that the host has not filled hold 0, the null texture. `n` of the sampler table is the highest registered sampler ID. Neither shrinks.
 
-**The wanted set.** Once a frame, before the handles are resolved, the encoder reads the words of the texture bitmap up to the highest ID of the pools (`Bindless::wanted`, `bindless/marks.rs`). Two generations of bits are kept: `current`, the bits set since the last sweep, and `previous`, the bits that the last sweep took. An ID is wanted while it is in either. Every 60 frames the sweep copies `current` to `previous` and clears the bits it copied with an atomic AND (`DataBuffer::fetch_and_u32`). A bit that a shader sets at the same time is not lost: the AND clears only the bits that were read, and a bit that was cleared is set again by the next read, because the shader tests it first. An ID that no shader reads leaves after two sweeps.
+**The wanted set.** The encoder reads the words of the texture bitmap up to the highest ID of the pools (`Bindless::wanted`, `bindless/marks.rs`). It does this once a frame, before the handles are resolved. Two generations of bits are kept: `current`, the bits set since the last sweep, and `previous`, the bits that the last sweep took. An ID is wanted while it is in either. Every 60 frames the sweep copies `current` to `previous` and clears the bits it copied with an atomic AND (`DataBuffer::fetch_and_u32`). A bit that a shader sets at the same time is not lost. The AND clears only the bits that were read. The next read sets a cleared bit again, because the shader tests it first. An ID that no shader reads leaves after two sweeps.
 
-**The fill.** When a draw or dispatch of the frame has a program with a `tex_pool` binding, the encoder resolves every wanted ID after the bound handles: the slot of the descriptor, the record of its texture, `TextureStore::ensure` and `TextureStore::view`, the same steps as for a bound handle. It writes the resource ID of the view into the element and keeps the view in `Handles::keep`. The Metal texture is uploaded like any texture of the frame. The sampler table is not touched by a mark. An ID that has no slot or whose texture is dead gets the element 0 and counts `pool.unresolved`. ID 0 is the unbound slot and is skipped.
+**The fill.** A draw or dispatch of the frame can have a program with a `tex_pool` binding. Then the encoder resolves every wanted ID after the bound handles. It uses the same steps as for a bound handle: the slot of the descriptor, the record of its texture, `TextureStore::ensure` and `TextureStore::view`. It writes the resource ID of the view into the element and keeps the view in `Handles::keep`. The Metal texture is uploaded like any texture of the frame. The sampler table is not touched by a mark. An ID that has no slot or whose texture is dead gets the element 0 and counts `pool.unresolved`. ID 0 is the unbound slot and is skipped.
 
-A shader that reads an ID for the first time sets its bit in that frame and reads the old element (the null texture, or what the ID held before). The host sees the bit in the next frame, so the ID shows its texture one frame later. With the encoder thread the snapshot of a frame carries the slots of the IDs that were wanted when the front end captured it, so a new ID can take one frame more. The pool path makes the view of the descriptor and does not fit it to the type the shader declares (a cube read as 2D); Metal reads a texture of another type as one fixed value.
+A shader that reads an ID for the first time sets its bit in that frame and reads the old element (the null texture, or what the ID held before). The host sees the bit in the next frame, so the ID shows its texture one frame later. With the encoder thread, the snapshot of a frame carries the slots of the IDs that were wanted when the front end captured it. So a new ID can take one frame more. The pool path makes the view of the descriptor and does not fit it to the type the shader declares (a cube read as 2D). Metal reads a texture of another type as one fixed value.
 
 **The samplers.** A sampler read is not marked, so the host fills every registered sampler. `Descriptors::sampler_epoch` changes when `register_sampler` sets a slot. When it is newer than the epoch the table holds, the encoder makes each sampler with `Bindless::sampler` (one Metal sampler for each distinct header) and writes its element. A texture registration does not change the counter.
 
-**The lifetime.** No element may hold the resource ID of a view or texture that is gone. The store drops and replaces Metal textures when it evicts, supersedes or remakes them (`end_frame`, `ensure`, `invalidate`), and a view lives as long as the generation of its Metal texture (`trim_views`). The table remembers, for each element that is not 0, the `TexId` and the store generation behind it. `Gpu::pool_release` writes 0 into every element whose texture has no entry in the store or has another generation, and forgets it. It runs at the start of the pool step and again after `trim_views`, so the command buffers of the frame never read a dropped texture. A wanted ID is filled again by the next frame. The rule covers the elements that a bound handle published too.
+**The lifetime.** No element may hold the resource ID of a view or texture that is gone. The store drops and replaces Metal textures when it evicts, supersedes or remakes them (`end_frame`, `ensure`, `invalidate`). A view lives as long as the generation of its Metal texture (`trim_views`). The table remembers, for each element that is not 0, the `TexId` and the store generation behind it. `Gpu::pool_release` writes 0 into every element whose texture has no entry in the store or has another generation, and forgets it. It runs at the start of the pool step and again after `trim_views`, so the command buffers of the frame never read a dropped texture. A wanted ID is filled again by the next frame. The rule covers the elements that a bound handle published too.
 
 The counters are `bind.tex-pool` and `bind.samp-pool` (a binding written into an argument buffer), `pool.wanted` (the wanted IDs of a frame with a pool binding), `pool.filled` (elements written because of a mark), `pool.unresolved` and `pool.cleared`. `tex_htab` and `samp_htab` (a table of guest handles) are still refused.
 
 ## Renamed storage ranges under the overlap (`rename`)
 
-With the overlap on (`NXKIT_OVERLAP=1`, `overlap` in `game.json`) the CPU writes the data of frame N+1 while frame N runs on the GPU. The uniform buffers and the read-only storage buffers of a frame read a copy that the walk takes. A storage buffer that a shader writes cannot be copied that way, and two small ranges of a game are written by both sides: a word that a compute shader adds into (a compare-and-swap loop) and that the CPU reads and resets to 0 after its wait, and a block of coefficients that the CPU initialises in full every frame and that compute shaders accumulate into. With the overlap alone the CPU's writes for the next frame met the sums of the frame before. The host gives each frame a copy of such ranges, found by watching the game, so that no word that the GPU wrote lives on into the next frame. Nothing below runs, and nothing is allocated, with the overlap off.
+With the overlap on (`NXKIT_OVERLAP=1`, `overlap` in `game.json`) the CPU writes the data of frame N+1 while frame N runs on the GPU. The uniform buffers and the read-only storage buffers of a frame read a copy that the walk takes. A storage buffer that a shader writes cannot be copied that way. Both sides write two small ranges of a game. The first is a word that a compute shader adds into (a compare-and-swap loop), and that the CPU reads and resets to 0 after its wait. The second is a block of coefficients that the CPU initialises in full every frame, and that compute shaders accumulate into. With the overlap alone, the CPU's writes for the next frame met the sums of the frame before. The host gives each frame a copy of such ranges, found by watching the game. So no word that the GPU wrote lives on into the next frame. Nothing below runs, and nothing is allocated, with the overlap off.
 
-**Learning** (`rename::Learn`). A range that is bound as a storage buffer that its shader may write (`rw` of the binding; `Renamer::note_rw` looks at it when the frame is encoded) and is at most 64 KiB is a candidate, one per start address. For each frame that binds it, the host keeps three copies of its bytes: `pre` at the flush of the frame (on the CPU thread, in `flush_frame`), `post` after the GPU finished that frame, and `pre_next` at the flush of the next frame. The words that the GPU wrote are those where `post` differs from `pre`. The frame is clean when `pre_next` differs from `post` in each of them (the CPU wrote them again), dirty when one of them stayed (state that the GPU keeps), and quiet when the GPU wrote nothing. A range becomes `Rename` after 8 clean frames, and `Never` after one dirty frame. A quiet frame neither counts nor resets. After 32 quiet frames in a row the range rests for 300 frames and is learned again. Only one flush in 16 (one in 120 after 300 flushes in which no candidate with a new address appeared and no range changed its class, until one does) takes `pre` (and the flush after it takes `pre_next`), so only one wait in 16 is a full one. The game allocates some of its storage ranges from rings, so addresses come and go and learning never ends for them; a candidate that no frame binds for 60 frames (a renamed one: 3000, a `Never` one: 600) is forgotten.
+**Learning** (`rename::Learn`). A range is a candidate when it is at most 64 KiB and is bound as a storage buffer that its shader may write (`rw` of the binding, which `Renamer::note_rw` looks at when the frame is encoded). There is one candidate per start address. For each frame that binds it, the host keeps three copies of its bytes. `pre` is taken at the flush of the frame (on the CPU thread, in `flush_frame`). `post` is taken after the GPU finished that frame. `pre_next` is taken at the flush of the next frame. The words that the GPU wrote are those where `post` differs from `pre`. The frame is clean when `pre_next` differs from `post` in each of them (the CPU wrote them again). It is dirty when one of them stayed (state that the GPU keeps). It is quiet when the GPU wrote nothing. A range becomes `Rename` after 8 clean frames, and `Never` after one dirty frame. A quiet frame neither counts nor resets. After 32 quiet frames in a row the range rests for 300 frames and is learned again. Only one flush in 16 takes `pre`, and the flush after it takes `pre_next`. After 300 quiet flushes, this is one flush in 120, until a change comes. A quiet flush is one in which no candidate with a new address appeared and no range changed its class. So only one wait in 16 is a full one. The game allocates some of its storage ranges from rings, so addresses come and go and learning never ends for them. A candidate that no frame binds for 60 frames (a renamed one: 3000, a `Never` one: 600) is forgotten.
 
-`post` is read in a CPU wait, when the GPU has finished the newest flushed frame and no later flush has happened (`Renamer::after_wait`); a frame for which that is not so is not judged. In the frame that takes `pre` the wait is a full wait (`Renamer::honest`): with the one-frame overlap the wait for the newest frame returns while that frame still runs, and `post` would be read too early. The ranges that are judged in that frame are bound to guest memory as before. A renamed range is checked again every 300 frames at the next such frame (the frame is bound to guest memory with a full wait; a renamed range is renamed in every other frame); a dirty frame turns it into `Never`. The line `DIAG overlap rename <addr> <size> Rename|Never after <n> frames` is printed once for each decision.
+`post` is read in a CPU wait, when the GPU has finished the newest flushed frame and no later flush has happened (`Renamer::after_wait`). A frame for which that is not so is not judged. In the frame that takes `pre`, the wait is a full wait (`Renamer::honest`). With the one-frame overlap, the wait for the newest frame returns while that frame still runs, and `post` would be read too early. The ranges that are judged in that frame are bound to guest memory as before. A renamed range is checked again every 300 frames at the next such frame. That frame is bound to guest memory with a full wait, and a renamed range is renamed in every other frame. A dirty frame turns it into `Never`. The line `DIAG overlap rename <addr> <size> Rename|Never after <n> frames` is printed once for each decision.
 
-**Capture** (`Renamer::at_flush`, from `flush_frame` on the CPU thread, before the frame goes to the encoder). Each `Rename` range that the frame binds has its guest bytes copied into the `Capture` of the frame (`FrameDetail::rename`): the `start` bytes. The range is left out of the frame (bound to guest memory as before, counted in `overlap.rename-excluded`) when a copy or fill, a vertex, index or indirect buffer or a uniform buffer overlaps it (`rename::plan`), when a storage binding reaches out of it (a binding inside it is fine), or when it overlaps another renamed range.
+**Capture** (`Renamer::at_flush`, from `flush_frame` on the CPU thread, before the frame goes to the encoder). Each `Rename` range that the frame binds has its guest bytes copied into the `Capture` of the frame (`FrameDetail::rename`): the `start` bytes. The range is left out of the frame (bound to guest memory as before, counted in `overlap.rename-excluded`) in three cases. A copy or fill, a vertex, index or indirect buffer or a uniform buffer overlaps it (`rename::plan`). A storage binding reaches out of it (a binding inside it is fine). Or it overlaps another renamed range.
 
-**Binding** (`Renamer::begin_slot`, from `encode_frame` after the batch ring waited for the slot). The `start` bytes go into a shared buffer that belongs to the batch slot of the frame, one per slot like the pool tables. It is made when needed, grows, and is kept alive by the batch. A range that lies in a pool that raw global writes touched (`Gmem::learned`) is left out here, because a shader can store through a raw pointer to any place of it. Every storage binding of the frame that lies inside a renamed range, read-only or not, in every stage, reads the copy at the same offset: `RenameMap::resolve` in `bindless::args::sbuf_word`, the one place where a storage buffer's guest address becomes a GPU address. The signature of an ICB includes the copy address of each storage binding, so a recording that binds a renamed range is encoded again when its slot changes.
+**Binding** (`Renamer::begin_slot`, from `encode_frame` after the batch ring waited for the slot). The `start` bytes go into a shared buffer that belongs to the batch slot of the frame, one per slot like the pool tables. It is made when needed, grows, and is kept alive by the batch. A range that lies in a pool that raw global writes touched (`Gmem::learned`) is left out here. The reason is that a shader can store through a raw pointer to any place of it. Every storage binding of the frame that lies inside a renamed range reads the copy at the same offset. This applies to read-only bindings and to others, in every stage. `RenameMap::resolve` in `bindless::args::sbuf_word` does this: it is the one place where a storage buffer's guest address becomes a GPU address. The signature of an ICB includes the copy address of each storage binding. So a recording that binds a renamed range is encoded again when its slot changes.
 
-**Write-back** (`Renamer::after_wait`). Only in a CPU wait, and only for the frames up to the fence that the wait returned for: after `finish_batches` in the two waits of the overlap and in `drain` of a wait or of `wait_idle`, and in a wait that finds the fence done already. The frames that a wait covers are written back in the order of their fences. For each word that the GPU changed (the copy after the GPU differs from `start`) the host swaps it into guest memory with an atomic compare-and-swap (`GuestSpace::compare_exchange_u32`, `rename::decide_word`) that needs the word to still hold `start`. A word that the CPU wrote since the flush stays (`overlap.writeback-skipped`). A word that still holds what the write-back of the frame before wrote takes the new end value if a CPU wait lies between the flushes of the two frames, and otherwise the old value plus what this frame added (read as `f32`): on the console the GPU of the second frame adds onto the sum of the first when the CPU has not read and reset it in between, and a game that waits for only every second frame (so one wait covers two frames) reads both sums. This is how the CPU reads the sum of the frame it waited for and resets it. It is never done at bare completion of a batch: the CPU's reset would be overwritten and the next frame would count the sum twice. The `drain` that the encoder thread makes for a copy-back is not a CPU wait and writes nothing back. A frame whose slot is taken again before a wait asked for it is written back first, in `begin_slot`.
+**Write-back** (`Renamer::after_wait`). The write-back runs only in a CPU wait, and only for the frames up to the fence that the wait returned for. It runs after `finish_batches` in the two waits of the overlap and in `drain` of a wait or of `wait_idle`. It also runs in a wait that finds the fence done already. The frames that a wait covers are written back in the order of their fences. For each word that the GPU changed (the copy after the GPU differs from `start`), the host swaps it into guest memory with an atomic compare-and-swap (`GuestSpace::compare_exchange_u32`, `rename::decide_word`). The swap needs the word to still hold `start`. A word that the CPU wrote since the flush stays (`overlap.writeback-skipped`). A word can still hold what the write-back of the frame before wrote. If a CPU wait lies between the flushes of the two frames, the word takes the new end value. Otherwise it takes the old value plus what this frame added (read as `f32`). On the console, the GPU of the second frame adds onto the sum of the first when the CPU has not read and reset it in between. A game that waits for only every second frame (so one wait covers two frames) reads both sums. This is how the CPU reads the sum of the frame it waited for and resets it. It is never done at bare completion of a batch: the CPU's reset would be overwritten and the next frame would count the sum twice. The `drain` that the encoder thread makes for a copy-back is not a CPU wait and writes nothing back. A frame whose slot is taken again before a wait asked for it is written back first, in `begin_slot`.
 
-**Snapshots** (class `Snapshot`). A storage buffer that no shader of any frame writes (no `rw` binding in any stage; it is also not a copy or fill destination, and not in a pool that raw global stores touched) and that is at most 1 MiB is watched (class `Watch`). In the frame that is judged (one in 16, a full wait) the host takes its bytes at the flush (`pre`), at the start of the wait for the frame (`atwait`, `Renamer::before_wait`) and when the GPU is done (`post`). Words that differ between `pre` and `atwait` and stay until `post` are CPU writes while the frame ran. One judged frame with such words makes the range a `Snapshot`. A range that the CPU writes only in some frames (while the player moves) is not given up for a quiet judged frame: it is judged at every judged flush, and only after 30 quiet ones it rests for 120 flushes. Per-frame instance data that the CPU rewrites for the next frame is the case. A snapshot gets the same capture at the flush, the same slot buffer and the same redirection of every storage binding as a renamed range, and no write-back. It is left out of a frame when it exceeds 1 MiB or the snapshots of the frame exceed 8 MiB together (`overlap.snapshot-over-budget`, `overlap.snapshot-bytes` counts the bytes copied). If a shader is found to write it (a binding with `rw`, found at the encode of the frame, which then binds the guest range), a copy or fill writes it, or a pool with raw global stores holds it, it becomes `Never` at once. The bytes that the judged ranges of one flush read are limited to 16 MiB.
+**Snapshots** (class `Snapshot`). The host watches a storage buffer (class `Watch`) when it is at most 1 MiB and no shader of any frame writes it. That is, it has no `rw` binding in any stage and it is not a copy or fill destination. It is also not in a pool that raw global stores touched. In the frame that is judged (one in 16, a full wait), the host takes its bytes three times. It takes them at the flush (`pre`), at the start of the wait for the frame (`atwait`, `Renamer::before_wait`) and when the GPU is done (`post`). Words that differ between `pre` and `atwait` and stay until `post` are CPU writes while the frame ran. One judged frame with such words makes the range a `Snapshot`. The CPU can write a range only in some frames (while the player moves). The host does not give up such a range for a quiet judged frame. It judges the range at every judged flush, and only after 30 quiet ones does the range rest for 120 flushes. Per-frame instance data that the CPU rewrites for the next frame is the case. A snapshot gets the same capture at the flush, the same slot buffer and the same redirection of every storage binding as a renamed range. It gets no write-back. It is left out of a frame when it exceeds 1 MiB or the snapshots of the frame exceed 8 MiB together (`overlap.snapshot-over-budget`, and `overlap.snapshot-bytes` counts the bytes copied). It becomes `Never` at once when a shader is found to write it (a binding with `rw`, found at the encode of the frame, which then binds the guest range). The same applies when a copy or fill writes it, or when a pool with raw global stores holds it. The bytes that the judged ranges of one flush read are limited to 16 MiB.
 
-**Classes by binding** (`rename::Key`). The game allocates some of its storage ranges from rings, so a range has a new address every few frames while its binding stays the same. A class is therefore also kept for the binding: the program key, the stage and slot, and the size rounded up to 256 bytes (the masks are relative to the start of the range). When a range gets a class (`Rename`, `Snapshot`, `Merge`, `Conflict`), the keys of the bindings that bound it learn it (a range that is `Never` for its own reasons, such as a pool with raw stores, teaches nothing; a snapshot binding that a shader is found to write becomes `Never` for its key). At the flush every binding of the frame is looked at (`State::bindings`, the same few hundred buffers dropped by a small table): a range that is not known and whose key has a class gets that class at once (`State::adopt`), with the masks of the key, and is not judged for 600 flushes; a new address of a known key needs no learning frame. A key is taught `Never` only after 30 quiet judged frames; a new address of such a key is judged at the next judged flush and, if the CPU writes it, becomes `Merge` at once and teaches the key. If several keys bind one range it gets what all of them need: a snapshot binding asks for nothing, a `Never` key does not override, a merge and a renamed range cannot be combined and the range becomes a `Conflict` (the frame waits in full, `overlap.key-disagree`). The flush sends the encoder only the bindings that it could not place (`FrameDetail::rename_check`): new addresses of unknown keys, and bindings of a range that was only read whose key the encoder has not found read-only yet (`State::rw_known`). `note_rw` then costs a few lookups in a frame. Judging a range at its address remains how a key is learned. A range of a settled class that passed the check against other uses (copies, uniform, vertex, index and indirect buffers) in 8 flushes in a row is not checked again except once in 60 flushes.
+**Classes by binding** (`rename::Key`). The game allocates some of its storage ranges from rings, so a range has a new address every few frames while its binding stays the same. A class is therefore also kept for the binding: the program key, the stage and slot, and the size rounded up to 256 bytes (the masks are relative to the start of the range). When a range gets a class (`Rename`, `Snapshot`, `Merge`, `Conflict`), the keys of the bindings that bound it learn it. A range that is `Never` for its own reasons, such as a pool with raw stores, teaches nothing. A snapshot binding that a shader is found to write becomes `Never` for its key. At the flush, the host looks at every binding of the frame (`State::bindings`, the same few hundred buffers dropped by a small table). A range that is not known and whose key has a class gets that class at once (`State::adopt`), with the masks of the key. It is not judged for 600 flushes. A new address of a known key needs no learning frame. A key is taught `Never` only after 30 quiet judged frames. A new address of such a key is judged at the next judged flush. If the CPU writes it, it becomes `Merge` at once and teaches the key. If several keys bind one range, the range gets what all of them need. A snapshot binding asks for nothing, and a `Never` key does not override. A merge and a renamed range cannot be combined, and the range becomes a `Conflict` (the frame waits in full, `overlap.key-disagree`). The flush sends the encoder only the bindings that it could not place (`FrameDetail::rename_check`). These are new addresses of unknown keys, and bindings of a range that was only read whose key the encoder has not found read-only yet (`State::rw_known`). `note_rw` then costs a few lookups in a frame. Judging a range at its address remains how a key is learned. A range of a settled class can pass the check against other uses (copies, uniform, vertex, index and indirect buffers) in 8 flushes in a row. After that, it is checked only once in 60 flushes.
 
-**Merge ranges** (class `Merge`) and **conflicts** (class `Conflict`). A written range that the CPU also writes while a frame runs is judged on a copy (see below) on the judged frames for two sets of words, kept as bit masks over the judged frames: `C`, the words that the CPU wrote in flight, and `G`, the words that the GPU wrote. One probed frame with a CPU write in flight makes the range a `Merge` range (also when the GPU wrote nothing in that frame: the copy still keeps the frame's data from the CPU's next writes). A merge range stays one: its masks only grow, whatever later frames show. Its words fall in three sets: `R = C and G` (both write: the CPU rewrites the word every frame and the GPU then writes it, and the CPU may read the result, like a sum), `P = G and not C` (only the GPU writes: state that persists from frame to frame) and `C and not G` (only the CPU writes). A frame that binds a merge range reads and writes a copy in its batch slot (`rename::merge`, `overlap.merge-ranges`): at the flush the CPU thread captures only the words of `C`, packed, with the masks; on the GPU, a pass before the first pass of the frame (`nxkit_merge_in`, in the first command buffer) copies the guest range into the copy and lays the captured words of `C` over it; every storage binding of the range reads the copy; a pass after the last pass (`nxkit_merge_out`, in the last command buffer) writes the words of `P` from the copy into guest memory, so the state in `P` carries from frame to frame on the GPU and no word of the CPU is overwritten. The words of `R` are written back by the host in the wait that covers the frame, with the compare-and-swap and the accumulate rule of a renamed range (the guest word must still hold the captured value), so the CPU sees the GPU's value one frame late, as for a sum. A range with `R` empty is the earlier merge range, one with `P` empty the earlier renamed range; the renamed class (`Rename`) that is learned from the bytes at two flushes remains as the cheap case of a word that the CPU re-initialises between two frames, with the whole range captured. Both passes have a barrier from all earlier work and one for all later work. Words in neither mask are copied in and not written back. A merge range whose masks grow in more than 3 later judged frames is not understood: it becomes a `Conflict` (`overlap.merge-conflict`, counted once), and the wait for a frame that binds it is a full one. What cannot be seen: an `R` word that the CPU writes in flight after the GPU wrote it in the same frame looks like one written before; its GPU value is dropped. Ranges must be multiples of 4 bytes. If a range lies in a pool with raw global stores it becomes `Never` at once. The knob `conflictwait` makes every frame that binds a written range with CPU writes in flight (`Never`, `Merge` or `Conflict`) wait in full, to check whether such a range causes a defect.
+**Merge ranges** (class `Merge`) and **conflicts** (class `Conflict`). The host judges a written range that the CPU also writes while a frame runs. It judges the range on a copy (see below), on the judged frames. It judges two sets of words, kept as bit masks over the judged frames. `C` is the words that the CPU wrote in flight, and `G` is the words that the GPU wrote. One probed frame with a CPU write in flight makes the range a `Merge` range. This is also so when the GPU wrote nothing in that frame: the copy still keeps the frame's data from the CPU's next writes. A merge range stays one: its masks only grow, whatever later frames show. Its words fall in three sets. In `R = C and G`, both write. The CPU rewrites the word every frame and the GPU then writes it, and the CPU may read the result, like a sum. In `P = G and not C`, only the GPU writes: this is state that persists from frame to frame. In `C and not G`, only the CPU writes. A frame that binds a merge range reads and writes a copy in its batch slot (`rename::merge`, `overlap.merge-ranges`). At the flush, the CPU thread captures only the words of `C`, packed, with the masks. On the GPU, a pass before the first pass of the frame (`nxkit_merge_in`, in the first command buffer) copies the guest range into the copy. It lays the captured words of `C` over it. Every storage binding of the range reads the copy. A pass after the last pass (`nxkit_merge_out`, in the last command buffer) writes the words of `P` from the copy into guest memory. So the state in `P` carries from frame to frame on the GPU, and no word of the CPU is overwritten. The host writes back the words of `R` in the wait that covers the frame, with the compare-and-swap and the accumulate rule of a renamed range. The guest word must still hold the captured value. So the CPU sees the GPU's value one frame late, as for a sum. A range with `R` empty is the earlier merge range, and one with `P` empty is the earlier renamed range. The renamed class (`Rename`) that is learned from the bytes at two flushes remains as the cheap case, with the whole range captured. That is the case of a word that the CPU re-initialises between two frames. Both passes have a barrier from all earlier work and one for all later work. Words in neither mask are copied in and not written back. A merge range whose masks grow in more than 3 later judged frames is not understood. It becomes a `Conflict` (`overlap.merge-conflict`, counted once), and the wait for a frame that binds it is a full one. What cannot be seen: an `R` word that the CPU writes in flight after the GPU wrote it in the same frame looks like one written before. Its GPU value is dropped. Ranges must be multiples of 4 bytes. If a range lies in a pool with raw global stores, it becomes `Never` at once. The knob `conflictwait` makes every frame that binds a written range with CPU writes in flight (`Never`, `Merge` or `Conflict`) wait in full. This checks whether such a range causes a defect.
 
-**Judging a written range on a copy** (`Kind::Probe`). In a frame that is judged, a written range that is learned or checked (`Never`, `Merge`) is bound to a copy as well, so the GPU does not write guest memory while the CPU may: `nxkit_merge_in` fills the copy and a second copy of the start state from guest memory (empty `C` mask), and at the end of the frame `nxkit_probe_out` writes back every word where the copy differs from the start copy, as the GPU would have. After the GPU is done the host reads both copies: `G` is the words where they differ. `C` is the words where guest memory at the start of the wait differs from `pre` (only the CPU could write guest memory since the flush), except words that hold what the GPU wrote (a frame can end before the wait begins). A probe that gets no copy (another use of the range in the frame, a raw global pool) judges nothing and forces no full wait. The masks are the union over probed frames. Ranges must be multiples of 4 bytes. If a range lies in a pool with raw global stores it becomes `Never` at once. The knob `conflictwait` makes every frame that binds a written range with CPU writes in flight (`Never`, `Merge` or `Conflict`) wait in full, to check whether such a range causes a defect.
+**Judging a written range on a copy** (`Kind::Probe`). In a frame that is judged, a written range that is learned or checked (`Never`, `Merge`) is bound to a copy as well. So the GPU does not write guest memory while the CPU may. `nxkit_merge_in` fills the copy and a second copy of the start state from guest memory (empty `C` mask). At the end of the frame, `nxkit_probe_out` writes back every word where the copy differs from the start copy, as the GPU would have. After the GPU is done, the host reads both copies: `G` is the words where they differ. `C` is the words where guest memory at the start of the wait differs from `pre` (only the CPU could write guest memory since the flush), except words that hold what the GPU wrote (a frame can end before the wait begins). A probe that gets no copy (another use of the range in the frame, a raw global pool) judges nothing and forces no full wait. The masks are the union over probed frames. Ranges must be multiples of 4 bytes. If a range lies in a pool with raw global stores, it becomes `Never` at once. The knob `conflictwait` makes every frame that binds a written range with CPU writes in flight (`Never`, `Merge` or `Conflict`) wait in full. This checks whether such a range causes a defect.
 
-What the host cannot know: a game that writes its re-initialisation of a renamed range between its wait and the next flush gets the write-back of the frame before it in the middle (the swap needs the word to still hold `start`, and a word that the CPU zeroed holds the same value as `start`); the frame that follows then starts from the sum. A game that reads the range in a place other than after its wait, or a shader that reaches the range through raw global memory in a pool that was not yet seen to be written, is not seen either. The counters are `overlap.renamed`, `overlap.writeback-words`, `overlap.writeback-skipped` and `overlap.rename-excluded` (`docs/diagnostics.md`).
+What the host cannot know: a game can write its re-initialisation of a renamed range between its wait and the next flush. Then it gets the write-back of the frame before it in the middle (the swap needs the word to still hold `start`, and a word that the CPU zeroed holds the same value as `start`). The frame that follows then starts from the sum. The host also does not see a game that reads the range in a place other than after its wait. It also does not see a shader that reaches the range through raw global memory in a pool that was not yet seen to be written. The counters are `overlap.renamed`, `overlap.writeback-words`, `overlap.writeback-skipped` and `overlap.rename-excluded` (`docs/diagnostics.md`).
 
 ## Private GPU memory, step 1: tracking (`NXKIT_PRIVATE=track`)
 
-With the overlap, the CPU writes the data of frame N + 1 while frame N runs, and the learned copies of `rename` do not
-cover every range that both sides touch. A GPU-private copy of the guest pages that the GPU writes would remove the race
-at its root: the GPU would work on the copy, the CPU would write guest memory, and the host would move bytes between the
-two in queue order. Step 1 builds no copy. It measures what the dirty tracking that such a copy needs would cost and how
-often the CPU touches a page while a frame that writes it is on the GPU. `NXKIT_PRIVATE=track` turns it on; unset, the
-code is not reached: no signal handler is installed, no page is protected, and a guest memory access costs one extra
-load in `nxkit-abi`.
+With the overlap, the CPU writes the data of frame N + 1 while frame N runs. The learned copies of `rename` do not cover
+every range that both sides touch. A GPU-private copy of the guest pages that the GPU writes would remove the race at
+its root. The GPU would work on the copy, the CPU would write guest memory, and the host would move bytes between the
+two in queue order. Step 1 builds no copy. It measures what the dirty tracking that such a copy needs would cost. It
+also measures how often the CPU touches a page while a frame that writes it is on the GPU. `NXKIT_PRIVATE=track` turns
+it on. When it is unset, the code is not reached. No signal handler is installed, no page is protected, and a guest
+memory access costs one extra load in `nxkit-abi`.
 
 **Pages.** The host page is 16 KiB, so the tracker (`nxkit-metal/src/pages.rs`) holds one atomic word per 16 KiB of guest
 memory. A page is free (not tracked), clean (read only), dirty (read and write) or tagged with a frame (no access).
 
-**At the flush of each frame** (`private::at_flush`, on the CPU thread) the host computes the pages the frame may write:
-the storage buffer bindings of draws and dispatches whose shader may write them (the encoder reflects each program once
-and tells the host; a program it has not reflected yet counts as writing, and so does a binding of a task or mesh
-stage), the destinations of buffer copies and fills, and the pools that shaders wrote through raw pointers
-(`Gmem::learned`, the whole pool). A single range above 256 MiB or a frame above 1 GiB is left out and counted. Then:
+**At the flush of each frame** (`private::at_flush`, on the CPU thread), the host computes the pages the frame may
+write. These are the storage buffer bindings of draws and dispatches whose shader may write them, and the destinations
+of buffer copies and fills. They are also the pools that shaders wrote through raw pointers (`Gmem::learned`, the whole
+pool). The encoder reflects each program once and tells the host. A program that it has not reflected yet counts as
+writing, and so does a binding of a task or mesh stage. A single range above 256 MiB or a frame above 1 GiB is left out
+and counted. Then:
 
 1. The pages that the CPU dirtied since the last flush go back to clean and read only (the state first, the protection
    second, so a store in between is either in guest memory already or faults again).
@@ -359,286 +362,310 @@ stage), the destinations of buffer copies and fills, and the pools that shaders 
 **Faults.** The handler (`SIGBUS` and `SIGSEGV`, chained before the crash report) tells a read from a write by the write
 bit of the exception syndrome, and acts on atomics only, plus `mprotect`:
 
-- write to a clean page: the page is dirty, logged for the next flush, opened read and write;
-- write to a page tagged with a frame that is not complete: counted as a **write in flight** with its program counter,
-  then dirty and opened;
-- read of such a page: counted as a **read in flight** with its program counter and opened read only (its tag stays, so a
-  later write is seen);
-- anything else (a race with a flush or a completion) is opened and counted as other.
+- Write to a clean page: the page is dirty, logged for the next flush, and opened read and write.
+- Write to a page tagged with a frame that is not complete: counted as a **write in flight** with its program counter,
+  then dirty and opened.
+- Read of such a page: counted as a **read in flight** with its program counter and opened read only (its tag stays, so a
+  later write is seen).
+- Anything else (a race with a flush or a completion) is opened and counted as other.
 
-Guest memory is the truth in this step: the handler never copies and never waits. That is what makes it safe to protect
-a page against all access: the CPU reads the same bytes it would have read, a little later by the cost of the fault.
+Guest memory is the truth in this step: the handler never copies and never waits. That makes it safe to protect a page
+against all access. The CPU reads the same bytes it would have read, a little later by the cost of the fault.
 
 **Threads and system calls.** A thread that the host marked internal (the encoder thread, the code that writes counter
 reports) is counted apart from the game's. A fault cannot hold a system call back: `read(2)` into a page without access
 returns `EFAULT`. `nxkit_abi::guest::with_slice` and `with_slice_mut` (the paths that hand guest bytes to a system call)
-and the permission changes of `nxkit-hos` (`protect`, `release`, `remap`, `drop_view`) call `before_host_access` first,
-which opens the tracked pages in the range (`with_slice_mut` marks them dirty; a permission change or a release makes
-them free). A system call that gets a guest pointer by another way is not covered.
+call `before_host_access` first. The permission changes of `nxkit-hos` (`protect`, `release`, `remap`, `drop_view`) also
+call it first. It opens the tracked pages in the range. `with_slice_mut` marks them dirty, and a permission change or a
+release makes them free. A system call that gets a guest pointer by another way is not covered.
 
-**What the counters say, and their limits.** `DIAG private` (see `docs/diagnostics.md`) prints every 300 frames the
-tracked pages and MiB, the pages a frame may write, the faults per frame by kind and by origin (guest code, host code,
-internal threads), the time in the handler, the pages dirtied per frame, the `mprotect` calls, and the top 10 program
-counters for writes in flight, reads in flight and writes to clean pages.
+**What the counters say, and their limits.** Every 300 frames, `DIAG private` (see `docs/diagnostics.md`) prints the
+tracked pages and MiB and the pages a frame may write. It prints the faults per frame by kind and by origin (guest code,
+host code, internal threads). It also prints the time in the handler, the pages dirtied per frame and the `mprotect`
+calls. Last, it prints the top 10 program counters for writes in flight, reads in flight and writes to clean pages.
 
 - "In flight" means: between the flush of the frame and the completion of its batch. With the encoder thread, that
   includes the time before the frame is encoded. With the honest wait, the game waits for the fence before it touches
-  the pages and the counts are near zero; with the overlap they are the accesses a private copy would have to order.
-- Only the first access to a protected page is seen. A page opened by a read in flight does not show the second read; a
+  the pages and the counts are near zero. With the overlap, they are the accesses a private copy would have to order.
+- Only the first access to a protected page is seen. A page opened by a read in flight does not show the second read. A
   page opened by a write does not show the stores after it. The count is of pages touched, not of accesses.
-- The program counter is the faulting instruction, which may be a `memset` or `memcpy` of the host or the game; the
+- The program counter is the faulting instruction, which may be a `memset` or `memcpy` of the host or the game. The
   caller is not listed.
 - A page becomes tracked when a frame binds it as a possible write, and stays tracked. A program that the encoder had
-  not reflected when its first frame was flushed makes its read-only bindings tracked until the end of the run, so the
+  not reflected when its first frame was flushed makes its read-only bindings tracked until the end of the run. So the
   tracked MiB is an upper bound.
 - A frame whose batch is not reported complete (an encode that failed) is released when 24 newer frames wait.
 - The frame number is kept in 28 bits (29 in step 1 before the mirror took a bit for "fresh").
 
 ## Private GPU memory, step 2: the mirror (`NXKIT_PRIVATE=1`)
 
-Step 2 gives the GPU its own copy of the guest pages that it works on, so that the CPU's writes for the next frame cannot
-race with the frame on the GPU. It changes no fence: the waits are the honest ones, the overlap and the renamer are off
-(`overlap::on()` is false, the `overlap` knob and `NXKIT_OVERLAP` are ignored), and the picture and the frame rate must be
-those of a run without the variable. What it proves is the mirror, the redirection of every GPU access, the copy of the
-CPU's writes into the mirror in queue order, and the copy of the GPU's results back on a CPU access. Step 3 can then answer
-a fence at the flush. Unset, nothing here runs. A value other than `track` and `1` leaves it off.
+Step 2 gives the GPU its own copy of the guest pages that it works on. Thus the CPU's writes for the next frame cannot
+race with the frame on the GPU. It changes no fence: the waits are the honest ones, and the overlap and the renamer are
+off (`overlap::on()` is false, the `overlap` knob and `NXKIT_OVERLAP` are ignored). The picture and the frame rate must
+be those of a run without the variable. It proves the mirror and the redirection of every GPU access. It also proves the
+copy of the CPU's writes into the mirror in queue order, and the copy of the GPU's results back on a CPU access. Step 3
+can then answer a fence at the flush. Unset, nothing here runs. A value other than `track` and `1` leaves it off.
 
-**The mirror** (`nxkit-metal/src/mirror.rs`). A host reservation as large as guest memory (an anonymous mapping without
-access, no physical memory); byte `o` of guest memory has its mirror byte at `reservation + o`. The reservation is cut into
-segments of 2 MiB. A segment becomes readable and writable when it holds a member page and stays so. Each maximal run of
-adjacent usable segments has one no-copy `MTLBuffer` (`GuestMemory::from_raw_uncommitted`), so the GPU address of a mirror
-byte is the real base of its run plus the offset in the run. When a run grows or two runs join, a new buffer is made over the
-larger range of the same host memory (the bytes do not move). The old buffer joins the retired list and stays in the
-residency set while a frame in flight, a cached ICB or the overlay of a frame holds it; `Mirror::ensure` drops it on the CPU
-thread, never in a completion handler, and commits the residency set when it drops one. The encoder commits the residency set
-before it submits a frame that uses a new buffer, as for the pools. The mirror of OoT should be 100 to 130 MiB of runs.
+**The mirror** (`nxkit-metal/src/mirror.rs`). It is a host reservation as large as guest memory (an anonymous mapping
+without access, no physical memory). Byte `o` of guest memory has its mirror byte at `reservation + o`. The reservation
+is cut into segments of 2 MiB. A segment becomes readable and writable when it holds a member page and stays so. Each
+maximal run of adjacent usable segments has one no-copy `MTLBuffer` (`GuestMemory::from_raw_uncommitted`). So the GPU
+address of a mirror byte is the real base of its run plus the offset in the run. When a run grows or two runs join, a
+new buffer is made over the larger range of the same host memory (the bytes do not move). The old buffer joins the
+retired list. It stays in the residency set while a frame in flight, a cached ICB or the overlay of a frame holds it.
+`Mirror::ensure` drops it on the CPU thread, never in a completion handler. It commits the residency set when it drops
+one. The encoder commits the residency set before it submits a frame that uses a new buffer, as for the pools. The
+mirror of OoT should be 100 to 130 MiB of runs.
 
 **Members.** A page is a member from the flush that first needs it. The pages that a frame may write (step 1: storage
 bindings a shader may write or that are not yet known read only, buffer copy and fill destinations, texture to buffer
-destinations, pools that shaders wrote through raw pointers) are members. So is every page of a binding that touches a member
-(`private::closure`, two rounds): uniform and storage ranges, vertex streams (the extent an arrays draw reaches, 1 MiB for an
-indexed draw), indices, indirect arguments, the count word of a multi-draw, the source of a buffer copy (1 MiB for the buffer of
-a buffer to texture copy), the indirect group counts of a dispatch. A mirror binding must be contiguous and current, so a range
-that touches a member becomes whole; the closure adds at most 256 MiB per flush. A range above 256 MiB and the part of a frame
-above 1 GiB are not made members (counted). A page stays a member until the game releases or re-protects its memory
-(`before_host_access` frees it, after copying the page from the mirror).
+destinations, pools that shaders wrote through raw pointers) are members. So is every page of a binding that touches a
+member (`private::closure`, two rounds). These bindings are uniform and storage ranges, vertex streams (the extent an
+arrays draw reaches, 1 MiB for an indexed draw), indices, indirect arguments and the count word of a multi-draw. They
+are also the source of a buffer copy (1 MiB for the buffer of a buffer to texture copy) and the indirect group counts of
+a dispatch. A mirror binding must be contiguous and current, so a range that touches a member becomes whole. The closure
+adds at most 256 MiB per flush. A range above 256 MiB and the part of a frame above 1 GiB are not made members
+(counted). A page stays a member until the game releases or re-protects its memory (`before_host_access` frees it, after
+copying the page from the mirror).
 
 **At the flush** (`private::at_flush`, then `Pages::flush_mirrored`, on the CPU thread):
 
 1. The segments that hold the members are made usable.
-2. A page that becomes a member goes read only and its guest bytes are copied into the mirror (the protection first, so a
-   store after it faults and is staged below or at the next flush). A page that raw stores wrote and that a frame in flight
-   may still write in guest memory makes the flush wait for the frames in flight once (`enter waits`).
+2. A page that becomes a member goes read only and its guest bytes are copied into the mirror (the protection first, so
+   a store after it faults and is staged below or at the next flush). A page can be one that raw stores wrote and that a
+   frame in flight may still write in guest memory. Such a page makes the flush wait for the frames in flight once
+   (`enter waits`).
 3. The pages that the CPU wrote since the last flush (write faults on read only pages) go back to read only, then their bytes
    are copied into a staging buffer (`Sink`, a pool of shared buffers that a buffer returns to when its frame is complete).
 4. The pages of the written ranges are tagged with the frame and lose all access. A page that was staged is tagged fresh
    (guest memory holds the bytes the frame starts from). A page that the CPU wrote between 3 and 4 is staged again.
 5. The pool snapshot of the frame gets an overlay (`pools/overlay.rs`): the member bitmap, the mirror runs, and the staged pages.
 
-**On the GPU.** The first command buffer of the frame starts with a compute pass (`nxkit_private_in`, `private::encode_copy_in`)
-that copies each staged page from the staging buffer into the mirror, with a barrier from all earlier work (the frame before still reads and writes the
-mirror) and one for all later work. It comes before the texture uploads, which may read member pages. The bytes for frame N + 1
-land after frame N.
+**On the GPU.** The first command buffer of the frame starts with a compute pass (`nxkit_private_in`,
+`private::encode_copy_in`). This pass copies each staged page from the staging buffer into the mirror. It has a barrier
+from all earlier work (the frame before still reads and writes the mirror) and one for all later work. It comes before
+the texture uploads, which may read member pages. The bytes for frame N + 1 land after frame N.
 
-**Every site that turns a guest address into a GPU address** asks the overlay first, because `PoolSnapshot::resolve_start` and
-`resolve` do. A range whose pages are all members resolves to the mirror: the `Loc` has the run, the offset in the run's buffer,
-the real address and the room to the end of the run. A range that starts on a member page and reaches past the members, or one
-that starts outside and reaches into them, is counted (`partial resolves`) and gives guest memory; the closure should make it
-impossible. The sites:
+**Every site that turns a guest address into a GPU address** asks the overlay first, because
+`PoolSnapshot::resolve_start` and `resolve` do. A range whose pages are all members resolves to the mirror. Its `Loc`
+has the run, the offset in the run's buffer, the real address and the room to the end of the run. A range can start on a
+member page and reach past the members, or start outside and reach into them. Such a range is counted
+(`partial resolves`) and gives guest memory. The closure should make it impossible. The sites:
 
-- `bindless/args.rs` `locate`, used by `ubo_words` and `sbuf_word`: uniform buffers and storage buffers (the walk's snapshot of
-  a range is used where there is one; the walker takes none for a range that a frame wrote, `walk/ext/uniform.rs`).
+- `bindless/args.rs` `locate`, used by `ubo_words` and `sbuf_word`: uniform buffers and storage buffers (the walk's
+  snapshot of a range is used where there is one, but the walker takes none for a range that a frame wrote,
+  `walk/ext/uniform.rs`).
 - `geometry.rs` `stream_loc`, `index_loc`, `word_loc`, `indirect_args`, `index_room`, and through them `indirect.rs`,
   `passes/indirect_dispatch.rs`, the multi-draw count and the indirect draws.
 - `passes/buffers.rs` `real` (buffer copy and fill source and destination) and `passes/copy.rs` through `upload::locate` (the
   buffer side of texture and buffer copies).
 - `pools.rs` `locate` (also as `upload::locate`) for every texture upload source and the scaled uploads: the buffer of the mirror run and the offset.
 - `draws.rs` and `draws/pull_diag.rs` `pull::layout` (vertex pulling: the stream bases).
-- `icbs.rs`: `icb_buffer` gets the buffer of a run (`PoolRefs::take` keeps it alive with the ICB), and the signature of an ICB hashes the
-  mirror addresses of its uniform, storage, vertex and index bindings, so an ICB made over a run's buffer is built again when the run
-  grew.
-- `gmem.rs` `resolve_all`: the table of raw global memory splits every pool at its member pages: a member piece has the delta of its
-  mirror run, the rest the delta of guest memory. The table is built again when the members or the runs change (the third part
-  of its stamp is the overlay generation). The c0 tables of compute and mesh stages hold guest addresses that shaders look up
-  in this table, so they reach the mirror too.
-- CPU reads that feed the frame (`Shared::read_guest`): the 8-bit indices that are widened, the pulled indices of `NXKIT_DIAG=pull`,
-  the `ubo` and `ubodump` diagnostics read member pages from the staged bytes or the mirror, and the rest from guest memory.
+- `icbs.rs`: `icb_buffer` gets the buffer of a run (`PoolRefs::take` keeps it alive with the ICB). The signature of an
+  ICB hashes the mirror addresses of its uniform, storage, vertex and index bindings. So an ICB made over a run's buffer
+  is built again when the run grew.
+- `gmem.rs` `resolve_all`: the table of raw global memory splits every pool at its member pages. A member piece has the
+  delta of its mirror run, and the rest has the delta of guest memory. The table is built again when the members or the
+  runs change (the third part of its stamp is the overlay generation). The c0 tables of compute and mesh stages hold
+  guest addresses that shaders look up in this table, so they reach the mirror too.
+- CPU reads that feed the frame (`Shared::read_guest`): the 8-bit indices that are widened, the pulled indices of
+  `NXKIT_DIAG=pull`, and the `ubo` and `ubodump` diagnostics. They read member pages from the staged bytes or the
+  mirror, and the rest from guest memory.
 
 **What a CPU access does** (`nxkit-metal/src/pages.rs`, `serve_mirrored`). A page tagged with a frame holds stale guest
 bytes. The signal handler (on atomics, `mprotect`, `memcpy` and the wake word) serves a fault on it:
 
-- the frame is complete: the thread claims the page (a `sync` state), opens it, copies the page from the mirror (about 1 µs),
-  and the page is clean (read) or dirty (write); the instruction runs again. Other threads that fault meanwhile sleep on the wake
-  word and run their access again;
-- the frame is in flight (the batch is not reported complete): a game thread sleeps on the wake word until the completion
-  callback of the batch reports it (`SubmittedBatch::on_complete`, before the waiters of the batch wake), then copies. This is
-  option (a) of the plan: the wait is for the whole batch, whichever pass writes the page. A write in flight is served the same
-  way (wait, copy the page from the mirror, let the write land on the GPU's bytes), so the write is not lost and the GPU's
-  bytes are not overwritten with stale ones. A wait that lasts 4 s copies anyway and is counted;
-- a thread that the host marked internal (the encoder thread, the thread that writes counter reports, the game thread inside
-  `flush_sync`) never waits. It gets the page open for reading: copied from the mirror unless the page is fresh (then guest memory
-  is right). The completion of the frame takes the access away again. The encoder reads member pages through the overlay
-  instead (`Shared::read_guest`, `Overlay::read`: staged bytes, else the mirror), so it does not fault; the internal open is the
-  safety net, and counted (`internal opens`).
+- The frame is complete: the thread claims the page (a `sync` state), opens it and copies the page from the mirror
+  (about 1 µs). The page is clean (read) or dirty (write), and the instruction runs again. Other threads that fault
+  meanwhile sleep on the wake word and run their access again.
+- The frame is in flight (the batch is not reported complete): a game thread sleeps on the wake word until the
+  completion callback of the batch reports it (`SubmittedBatch::on_complete`, before the waiters of the batch wake).
+  Then it copies. This is option (a) of the plan: the wait is for the whole batch, whichever pass writes the page. A
+  write in flight is served the same way (wait, copy the page from the mirror, let the write land on the GPU's bytes).
+  So the write is not lost and the GPU's bytes are not overwritten with stale ones. A wait that lasts 4 s copies anyway
+  and is counted.
+- A thread that the host marked internal (the encoder thread, the thread that writes counter reports, the game thread
+  inside `flush_sync`) never waits. It gets the page open for reading: copied from the mirror unless the page is fresh
+  (then guest memory is right). The completion of the frame takes the access away again. The encoder reads member pages
+  through the overlay instead (`Shared::read_guest`, `Overlay::read`: staged bytes, else the mirror), so it does not
+  fault. The internal open is the safety net, and it is counted (`internal opens`).
 
 A page that the CPU writes while it is clean or synced goes dirty and is staged at the next flush. System calls that read or
 write guest pages (`with_slice`, `with_slice_mut`, permission changes) go through `before_host_access`, which brings the pages
 up to date first (for a system call in the host, which may wait for a writer).
 
-**The knob `privpoison`** overwrites the guest bytes of the pages a frame writes with a quiet NaN (`0x7fc00000`) when they are
-handed to the GPU. The CPU never sees it, because its access copies the page from the mirror first; a GPU path that still reads
-guest memory shows it as NaN in the picture where something was missed. The overwrite opens the page for a moment: a CPU store in
-that instant is lost, so use it for finding sites only.
+**The knob `privpoison`** overwrites the guest bytes of the pages a frame writes with a quiet NaN (`0x7fc00000`) when
+they are handed to the GPU. The CPU never sees it, because its access copies the page from the mirror first. A GPU path
+that still reads guest memory shows it as NaN in the picture where something was missed. The overwrite opens the page
+for a moment: a CPU store in that instant is lost, so use it for finding sites only.
 
-**Counters** (`NXKIT_DIAG=private`, every 300 frames, `DIAG private mirror`): the mirror's MiB and runs and the buffers that wait
-to be dropped; the pages staged per frame (and the ones the CPU wrote again after they were staged), the pages the copy-in pass
-moved and lost, the pages copied from the mirror into guest memory (and how many by a fault of guest code), the pages the closure
-added, the waits for a writer (count, milliseconds per frame, timeouts), the accesses of internal threads, the waits at the
-flush, the partial resolves and whether the poison is on. The fault lines of step 1 follow, with the faults that copied a page
+**Counters** (`NXKIT_DIAG=private`, every 300 frames, `DIAG private mirror`). The report shows the mirror's MiB and runs
+and the buffers that wait to be dropped. It shows the pages staged per frame (and the ones the CPU wrote again after
+they were staged) and the pages the copy-in pass moved and lost. It shows the pages copied from the mirror into guest
+memory (and how many by a fault of guest code) and the pages the closure added. It shows the waits for a writer (count,
+milliseconds per frame, timeouts) and the accesses of internal threads. It also shows the waits at the flush, the
+partial resolves and whether the poison is on. The fault lines of step 1 follow, with the faults that copied a page
 counted as other.
 
-**Bisecting knobs.** `privnoubo`, `privnosbuf`, `privnostream`, `privnoupload`, `privnogmem` and `privnocopy` (read every frame)
-bind one class of resolves to guest memory instead of the mirror (the overlay holds a class mask; `PoolSnapshot::resolve_c` and
-`resolve_start_c` honour it). Guest memory is stale for the pages a frame wrote, so while any of them is on the tracker copies
-every page of a completed frame back into guest memory at the batch completion (`Pages::set_eager_sync`), which makes guest
-memory current and the knob isolate "mirror against guest" for that class. A page that the GPU did not write already equals the
-mirror in the honest-wait mode, so a defect that stays with the knob on is not in that class. `privlatestage` stages the pages
-the CPU wrote between the flush and the commit of the first command buffer a second time (`Pages::flush_late`) and copies them
-in at the end of that buffer, to test whether CPU writes after the flush are the defect. The write counters of the report split
-the first write of each member page by where the newest frame is (done or before the next flush, between flush and commit,
-after commit and before done; "before the flush" and "after done" cannot be told apart for a game that waits) and list the top
-program counters of the middle class.
+**Bisecting knobs.** `privnoubo`, `privnosbuf`, `privnostream`, `privnoupload`, `privnogmem` and `privnocopy` (read
+every frame) bind one class of resolves to guest memory instead of the mirror (the overlay holds a class mask, and
+`PoolSnapshot::resolve_c` and `resolve_start_c` honour it). Guest memory is stale for the pages a frame wrote. So while
+any of them is on, the tracker copies every page of a completed frame back into guest memory at the batch completion
+(`Pages::set_eager_sync`). This makes guest memory current, and the knob isolates "mirror against guest" for that class.
+In the honest-wait mode, a page that the GPU did not write already equals the mirror. So a defect that stays with the
+knob on is not in that class. `privlatestage` stages a second time the pages that the CPU wrote between the flush and
+the commit of the first command buffer (`Pages::flush_late`). It copies them in at the end of that buffer. This tests
+whether CPU writes after the flush are the defect. The write counters of the report split the first write of each member
+page by where the newest frame is. The classes are: done or before the next flush, between flush and commit, and after
+commit and before done. "Before the flush" and "after done" cannot be told apart for a game that waits. The counters
+also list the top program counters of the middle class.
 
 **What step 2 does not cover.**
 
-- The texture copy-back (`copyback.rs`) and the native replacements (`native`, the ANE offload) still use guest memory; a member
-  page that one of them reads or writes is stale or lost there. The counter reports and the guest range of a copied-back texture
-  keep going through the host's writes after the batch, which are plain CPU writes (dirty pages) for a member page.
-- Textures are Metal textures; only their upload sources redirect.
+- The texture copy-back (`copyback.rs`) and the native replacements (`native`, the ANE offload) still use guest memory.
+  A member page that one of them reads or writes is stale or lost there. The counter reports and the guest range of a
+  copied-back texture keep going through the host's writes after the batch. These are plain CPU writes (dirty pages) for
+  a member page.
+- Textures are Metal textures. Only their upload sources redirect.
 - A CPU access that reaches the page while another thread copies it can read half a page. The copy runs for about a
-  microsecond with the page open; threads that fault in that time sleep and retry, but a thread whose access began before the page
-  opened is not held back.
+  microsecond with the page open. Threads that fault in that time sleep and retry, but a thread whose access began
+  before the page opened is not held back.
 - A page that was staged for a frame that is never encoded (an encode that failed) is not copied into the mirror.
 - The frame number and the table keep the limits of step 1 (28 bits, 24 frames of runs).
 
 ## Private GPU memory, step 3: fences at the flush (`NXKIT_PRIVATE=1`)
 
-With the mirror in place the CPU's writes for frame N + 1 cannot reach frame N on the GPU, so a wait for the fence of frame N
-does not have to wait for the GPU. Step 3 answers it at the flush. The overlap and the renamer stay off.
+With the mirror in place, the CPU's writes for frame N + 1 cannot reach frame N on the GPU. So a wait for the fence of
+frame N does not have to wait for the GPU. Step 3 answers it at the flush. The overlap and the renamer stay off.
 
 **The wait** (`GpuBackend::wait_fence`, `wait_early`). A wait for fence N returns when the flush of N has run
-(`captured`, set after `private::at_flush`): the CPU's writes are in the staging buffer, the pages the frame may write have no
-access, and the walk has taken what it takes. It does not wait for the encoder thread or the GPU. Still bounded: the wait for
-fence N also waits until the frame `BATCHES_IN_FLIGHT` (3) before it is done, which keeps the batch ring, the staging buffers
-and `MAX_PENDING` presents from running away. A wait that finds the fence done answers `AlreadyDone` as before. Every answer
-also writes the counter and timestamp reports of the frames the GPU has finished (`harvest`, no wait), so the reports are as
-fresh as the GPU allows, not later than before; the report of the frame that was just flushed is not there yet (the game
-reads the report of the frame before, as with the overlap).
+(`captured`, set after `private::at_flush`). Then the CPU's writes are in the staging buffer, the pages the frame may
+write have no access, and the walk has taken what it takes. It does not wait for the encoder thread or the GPU. The wait
+is still bounded. The wait for fence N also waits until the frame `BATCHES_IN_FLIGHT` (3) before it is done. This keeps
+the batch ring, the staging buffers and `MAX_PENDING` presents from running away. A wait that finds the fence done
+answers `AlreadyDone` as before. Every answer also writes the counter and timestamp reports of the frames the GPU has
+finished (`harvest`, no wait). So the reports are as fresh as the GPU allows, not later than before. The report of the
+frame that was just flushed is not there yet (the game reads the report of the frame before, as with the overlap).
 
 Waits that stay full (`DIAG private fences`, `full waits`):
 
 - `privhonest` (knob): the behaviour of step 2, for comparing.
-- copy-back: a frame that copied textures back to CPU memory (`copied_recent`, `copied_fence`) and the `COPYBACK_SPAN` (3)
-  frames after it; the copy-back is not guarded yet (step 5).
-- `idle GPU`: `nvnQueueFinish` and the other `wait_idle` callers, and the drain at a flush that makes a page a member while a
-  frame in flight may still write it in guest memory.
+- copy-back: a frame that copied textures back to CPU memory (`copied_recent`, `copied_fence`) and the `COPYBACK_SPAN`
+  (3) frames after it. The copy-back is not guarded yet (step 5).
+- `idle GPU`: `nvnQueueFinish` and the other `wait_idle` callers. It also covers the drain at a flush that makes a page
+  a member while a frame in flight may still write it in guest memory.
 - `flush not finished`: a fence that is not captured yet.
 
-**Copies of what the CPU may still write.** With early fences the CPU also writes the data of frame N + 1 into pages that are
-not members, while frame N reads them from guest memory. The walk (`walk/mod.rs`) therefore takes the copies it takes with the
-overlap (every bound uniform buffer, and the storage buffers that draws only read) when `NXKIT_PRIVATE=1` answers early, as of
-the submit of the commands; a range whose pages are all members is not copied (the mirror holds the bytes of the flush), unless an
-inline update changed it. `nosnap` and `nosnapsbuf` still turn them off.
+**Copies of what the CPU may still write.** With early fences, the CPU also writes the data of frame N + 1 into pages
+that are not members. At the same time, frame N reads them from guest memory. The walk (`walk/mod.rs`) therefore takes
+the copies it takes with the overlap (every bound uniform buffer, and the storage buffers that draws only read) when
+`NXKIT_PRIVATE=1` answers early, as of the submit of the commands. A range whose pages are all members is not copied
+(the mirror holds the bytes of the flush), unless an inline update changed it. `nosnap` and `nosnapsbuf` still turn them
+off.
 
-**What belongs to a frame: the boundary.** The rule is: *the flush is the boundary for all data the frame reads through the
-mirror*, except for submits that the flush ran before the CPU signalled what they wait for.
+**What belongs to a frame: the boundary.** The rule is: *the flush is the boundary for all data the frame reads through
+the mirror*. The exception is submits that the flush ran before the CPU signalled what they wait for.
 
-- The pages the CPU wrote before the flush are staged at the flush and copied into the mirror at the start of the frame. A
-  write after the flush is the data of the next frame and goes into the next flush's staging buffer. With the CPU ahead of the
-  encoder this is the only boundary that does not hand a frame the data of the one after it: the commit comes some
-  milliseconds after the flush (the encode), and the game writes the next frame's data in that time.
-- Evidence (OoT, from the start to the intro movie and the first scene; `DIAG private between flush and commit`): the CPU
-  first-writes 0.0 to 1.1 member pages per frame between the flush and the commit (0.3 to 1.0 per frame in the movie). The address of
-  each first write is compared with the byte ranges (not the pages) that the frame binds. In nearly all windows none is inside the bytes of a
-  range that the frame reads as storage, uniform, vertex, index, indirect or copy source (0.00 per frame); 0.03 to 0.35 per frame are in a page that one of
-  its bindings shares (false sharing), 0.2 to 0.7 in pages of no binding of the frame, and 0.00 to 0.03 in the bytes that the
-  frame may write (those are writes in flight: the CPU waits for the frame and the write lands on the GPU's bytes). At the commit the
-  bytes of the bound ranges in the written pages were compared with what the frame sees (staged bytes, else the mirror): equal in
-  all windows but two, where 0.01 and 0.03 storage ranges per frame changed (1123 and 6273 bytes in 300 frames): a ring range
-  that the CPU rewrites for the next frame right after the present, which the flush rule leaves to the next frame, as intended.
-  Raw pointer reads of a shader are not bindings, so the pages in no binding cannot be excluded this way; the argument for them
-  is the order of events: the game writes after its present, which is the flush.
-- The exception is the queue gate (`nxkit-rt/src/nvn/ctx/gate.rs`, `order.rs`): a submit that waits for an event that only the
-  CPU signals is held, and a flush runs it without the signal. The game writes what the submit reads until the signal, which
-  comes after the flush. Such a flush now reports the waits (`Backend::forced_waits`, `ForcedWait`), and the backend registers
-  them with the frame (`forced_pending`, `private::late_expect`). The CPU's `nvnEventSignal` reports the signal
-  (`Backend::cpu_event_signalled`); when the last signal of a frame has come, `private::late_signal` captures the pages the CPU
-  wrote since the flush into a second staging buffer. The encode of the frame waits for that capture (at most 15 ms; after
-  4 frames in a row whose signals did not come in time the capture stops waiting) and adds a second copy-in pass before the
-  commit. Each submit so sees the data as of the time its wait was satisfied, which is the time it ran on the console. In OoT no
-  flush ran such a submit (0 of the frames in the windows, `DIAG private forced submits` is not printed); the gate showed
-  `forced at a flush 0` in the queue diagnostic. The path is tested with a unit test and has not run in a game.
-- `privlatestage` stays as a knob. It stages every page the CPU wrote since the flush a second time and copies it in before the
-  commit. With the CPU ahead of the encoder it hands frame N the data of frame N + 1, so it is a comparison for honest waits
-  (`privhonest`), not a setting for early fences.
-- Counter: `DIAG private between flush and commit` (pages in all, in bytes the frame writes, in bytes it reads by kind, in a page
-  of one of its bindings but outside the bytes, in no binding; frames with forced submits) and the line `exact`: the bound ranges per
-  frame whose bytes in a written page differ at the commit from what the frame sees. Both print only with
-  `NXKIT_DIAG=private`; the first writes are logged with their address per frame (`Pages::take_between`).
+- The pages the CPU wrote before the flush are staged at the flush and copied into the mirror at the start of the frame.
+  A write after the flush is the data of the next frame and goes into the next flush's staging buffer. With the CPU
+  ahead of the encoder, this is the only boundary that does not hand a frame the data of the one after it. The commit
+  comes some milliseconds after the flush (the encode), and the game writes the next frame's data in that time.
+- Evidence (OoT, from the start to the intro movie and the first scene, `DIAG private between flush and commit`): the
+  CPU first-writes 0.0 to 1.1 member pages per frame between the flush and the commit (0.3 to 1.0 per frame in the
+  movie). The address of each first write is compared with the byte ranges (not the pages) that the frame binds. In
+  nearly all windows, none is inside the bytes of a range that the frame reads as storage, uniform, vertex, index,
+  indirect or copy source (0.00 per frame). 0.03 to 0.35 per frame are in a page that one of its bindings shares (false
+  sharing). 0.2 to 0.7 are in pages of no binding of the frame. 0.00 to 0.03 are in the bytes that the frame may write
+  (those are writes in flight: the CPU waits for the frame and the write lands on the GPU's bytes). At the commit, the
+  bytes of the bound ranges in the written pages were compared with what the frame sees (staged bytes, else the mirror).
+  They were equal in all windows but two, where 0.01 and 0.03 storage ranges per frame changed (1123 and 6273 bytes in
+  300 frames). That was a ring range that the CPU rewrites for the next frame right after the present. The flush rule
+  leaves it to the next frame, as intended. Raw pointer reads of a shader are not bindings, so the pages in no binding
+  cannot be excluded this way. The argument for them is the order of events: the game writes after its present, which is
+  the flush.
+- The exception is the queue gate (`nxkit-rt/src/nvn/ctx/gate.rs`, `order.rs`). A submit that waits for an event that
+  only the CPU signals is held, and a flush runs it without the signal. The game writes what the submit reads until the
+  signal, which comes after the flush. Such a flush now reports the waits (`Backend::forced_waits`, `ForcedWait`), and
+  the backend registers them with the frame (`forced_pending`, `private::late_expect`). The CPU's `nvnEventSignal`
+  reports the signal (`Backend::cpu_event_signalled`). When the last signal of a frame has come, `private::late_signal`
+  captures the pages the CPU wrote since the flush into a second staging buffer. The encode of the frame waits for that
+  capture (at most 15 ms) and adds a second copy-in pass before the commit. After 4 frames in a row whose signals did
+  not come in time, the capture stops waiting. Each submit so sees the data as of the time its wait was satisfied, which
+  is the time it ran on the console. In OoT no flush ran such a submit (0 of the frames in the windows,
+  `DIAG private forced submits` is not printed). The gate showed `forced at a flush 0` in the queue diagnostic. The path
+  is tested with a unit test and has not run in a game.
+- `privlatestage` stays as a knob. It stages every page the CPU wrote since the flush a second time and copies it in
+  before the commit. With the CPU ahead of the encoder, it hands frame N the data of frame N + 1. So it is a comparison
+  for honest waits (`privhonest`), not a setting for early fences.
+- Counter: `DIAG private between flush and commit` (pages in all, in bytes the frame writes, in bytes it reads by kind,
+  in a page of one of its bindings but outside the bytes, in no binding, and frames with forced submits). The line
+  `exact` gives the bound ranges per frame whose bytes in a written page differ at the commit from what the frame sees.
+  Both print only with `NXKIT_DIAG=private`. The first writes are logged with their address per frame
+  (`Pages::take_between`).
 
-**Reads and writes in flight** (as in step 2: the page is tagged with the frame that may write it, and the CPU waits for the
-whole batch of that frame, copies the page from the mirror and goes on; a write in flight does the same and then lets the store
-land). What step 3 adds is the count: `DIAG private CPU waits for a writer` has, for reads and for writes, the waits per
-frame, their milliseconds per frame (all threads together), the longest one and how many began before the commit of the frame
-(the wait then includes the encode); `DIAG private in flight` sorts the first accesses to pages in flight by address: inside
-the bytes of a binding or copy the frame may write, inside a raw-store pool, or outside those bytes in a page they share.
+**Reads and writes in flight.** This is as in step 2. The page is tagged with the frame that may write it. The CPU waits
+for the whole batch of that frame, copies the page from the mirror and goes on. A write in flight does the same and then
+lets the store land. What step 3 adds is the count. `DIAG private CPU waits for a writer` has, for reads and for writes,
+the waits per frame and their milliseconds per frame (all threads together). It also has the longest one and how many
+began before the commit of the frame (the wait then includes the encode). `DIAG private in flight` sorts the first
+accesses to pages in flight by address. An access can be inside the bytes of a binding or copy the frame may write, or
+inside a raw-store pool. It can also be outside those bytes in a page they share.
 
-Measured in the OoT intro movie (a scene with a GPU time of 2 to 3 vsyncs at 60 Hz): the CPU first-reads pages in flight about
-5 times per frame, waiting 140 to 330 ms per frame in all threads (single waits up to 320 ms: a read of a page tagged by the newest
-frame waits for that frame, and for the two before it that the GPU still works on). All of these first reads (1650 to 1900 per 300
-frames, 0 inside) are at an address outside the bytes that the frame may write: the page is tagged because a binding starts or ends
-in it (a pool puts data of the CPU next to a buffer of the GPU), and the game reads the neighbouring data. A write in flight
-is rare (0.02 to 0.07 per frame; 1 to 3 ms per frame, single waits up to 320 ms). So the wait is for the whole frame by
-page granularity, not by a data dependency, and splitting the commit after the last pass that writes a page the CPU reads
-(option (b) of the design) would shorten it only as far as these writers are early in the frame; the pages need a byte-exact
-answer (emulate the faulting load for an address outside the written bytes, which needs the decoder of step 4 for loads, or make the
-buffers of the GPU start on page boundaries). That is the next step; the split commit is not built.
+Measured in the OoT intro movie (a scene with a GPU time of 2 to 3 vsyncs at 60 Hz): the CPU first-reads pages in flight
+about 5 times per frame. It waits 140 to 330 ms per frame in all threads (single waits up to 320 ms: a read of a page
+tagged by the newest frame waits for that frame, and for the two before it that the GPU still works on). All of these
+first reads (1650 to 1900 per 300 frames, 0 inside) are at an address outside the bytes that the frame may write. The
+page is tagged because a binding starts or ends in it (a pool puts data of the CPU next to a buffer of the GPU). The
+game reads the neighbouring data. A write in flight is rare (0.02 to 0.07 per frame, 1 to 3 ms per frame, single waits
+up to 320 ms). So the wait is for the whole frame by page granularity, not by a data dependency. The commit could be
+split after the last pass that writes a page the CPU reads (option (b) of the design). But that would shorten the wait
+only as far as these writers are early in the frame. The pages need a byte-exact answer (emulate the faulting load for
+an address outside the written bytes, which needs the decoder of step 4 for loads, or make the buffers of the GPU start
+on page boundaries). That is the next step. The split commit is not built.
 
-**Counters** (`NXKIT_DIAG=private`, every 300 frames): `DIAG private fences`: waits answered at the flush, those that also waited for
-the frame 3 before (count, ms per frame, longest) and the full waits by reason; `DIAG private CPU waits for a writer`;
-`DIAG private in flight`; `DIAG private between flush and commit` (two lines) and `DIAG private between sample` (the first
-writes into bound bytes); `DIAG private forced submits` when a flush ran submits before their CPU signals.
+**Counters** (`NXKIT_DIAG=private`, every 300 frames):
+
+- `DIAG private fences`: waits answered at the flush, those that also waited for the frame 3 before (count, ms per frame,
+  longest) and the full waits by reason.
+- `DIAG private CPU waits for a writer`.
+- `DIAG private in flight`.
+- `DIAG private between flush and commit` (two lines) and `DIAG private between sample` (the first writes into bound
+  bytes).
+- `DIAG private forced submits` when a flush ran submits before their CPU signals.
 
 ## Private GPU memory, step 4: accesses outside the bytes a frame writes (`NXKIT_PRIVATE=1`)
 
-With early fences (step 3) the CPU reads and writes pages that the frame in flight may write, and each such first access waited for
-the whole batch (in Ocarina of Time about 5 reads a frame, 140 to 350 ms in all, single waits up to 320 ms). Measured at the byte,
-none of those accesses was inside the bytes the frame may write: they were in the same 16 KiB page as a written range (false
-sharing at the page). Step 4 handles them by byte.
+With early fences (step 3), the CPU reads and writes pages that the frame in flight may write. Each such first access
+waited for the whole batch (in Ocarina of Time about 5 reads a frame, 140 to 350 ms in all, single waits up to 320 ms).
+Measured at the byte, none of those accesses was inside the bytes the frame may write. They were in the same 16 KiB page
+as a written range (false sharing at the page). Step 4 handles them by byte.
 
-**The stale blocks.** Each tracked page has a mask of 256 bits, one per block of 64 bytes (`PageInfo::stale`). The flush of a frame
-adds the blocks of every range the frame may write, rounded outward to whole blocks: the storage bindings and copy destinations by
-their bytes, a pool that shaders wrote through raw pointers by all its bytes (`range_masks`, after the page is tagged). The bits
-are the bytes whose truth is in the mirror: guest memory is stale there. They stay set until a copy from the mirror makes guest
-memory current, so the mask of a page is the union of the frames since its last copy. The copy from the mirror into guest memory
-(`copy_from_mirror`) moves the stale blocks only, and clears the mask when the writer is complete. The other blocks hold the CPU's
-bytes and stay. `privpoison` fills only the stale blocks.
+**The stale blocks.** Each tracked page has a mask of 256 bits, one per block of 64 bytes (`PageInfo::stale`). The flush
+of a frame adds the blocks of every range the frame may write, rounded outward to whole blocks. It adds the storage
+bindings and copy destinations by their bytes, and a pool that shaders wrote through raw pointers by all its bytes
+(`range_masks`, after the page is tagged). The bits are the bytes whose truth is in the mirror: guest memory is stale
+there. They stay set until a copy from the mirror makes guest memory current. So the mask of a page is the union of the
+frames since its last copy. The copy from the mirror into guest memory (`copy_from_mirror`) moves the stale blocks only,
+and clears the mask when the writer is complete. The other blocks hold the CPU's bytes and stay. `privpoison` fills only
+the stale blocks.
 
-**The alias.** `Pages::make_alias` (called when the mirror is made) maps guest memory a second time with read and write access:
-for each VM region of the range it calls `mach_vm_remap` without a copy into one reservation (`VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE`
-over an anonymous `PROT_NONE` mapping, so the second mapping sits at a fixed offset from the first), then raises the protection of the
-copy to read and write. Both mappings show the same pages (one VM object), and each has its own protection, so a page that has no
-access in guest memory can be read and written through the alias. A region that was never touched has no VM object yet, and the
-call makes one; for a touched region the object id and offset must be the same after the call (a copy would leave the GPU on the
-old pages, see `nxkit-hos` `pinned`), else the alias is dropped with a message and every access waits as in step 3. The alias
-costs address space only. `NXKIT_PRIVATE=1` prints one line at the start saying whether it exists.
+**The alias.** `Pages::make_alias` (called when the mirror is made) maps guest memory a second time with read and write
+access. For each VM region of the range, it calls `mach_vm_remap` without a copy into one reservation
+(`VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE` over an anonymous `PROT_NONE` mapping, so the second mapping sits at a fixed
+offset from the first). Then it raises the protection of the copy to read and write. Both mappings show the same pages
+(one VM object), and each has its own protection. So a page that has no access in guest memory can be read and written
+through the alias. A region that was never touched has no VM object yet, and the call makes one. For a touched region,
+the object id and offset must be the same after the call (a copy would leave the GPU on the old pages, see `nxkit-hos`
+`pinned`). Else the alias is dropped with a message and every access waits as in step 3. The alias costs address space
+only. `NXKIT_PRIVATE=1` prints one line at the start saying whether it exists.
 
-**The emulation** (`pages/a64.rs`, `try_emulate`). In the fault handler, for an access by a game thread (not an internal one) to a
-page tagged with a frame in flight, the handler reads the instruction at the program counter, decodes it, computes its address from
-the saved registers (the faulting address of the signal is only checked to lie inside the access), and when the access lies in
-one page and touches no stale block it does the access through the alias: a load fills the destination registers of the saved
-thread state, a store reads the source registers and writes the bytes, a pre or post index writes the base register back, and the
-program counter moves by 4. The page stays without access and the thread does not wait. The forms:
+**The emulation** (`pages/a64.rs`, `try_emulate`). The fault handler acts on an access by a game thread (not an internal
+one) to a page tagged with a frame in flight. It reads the instruction at the program counter and decodes it. It
+computes its address from the saved registers (the faulting address of the signal is only checked to lie inside the
+access). When the access lies in one page and touches no stale block, the handler does the access through the alias. A
+load fills the destination registers of the saved thread state. A store reads the source registers and writes the bytes.
+A pre or post index writes the base register back, and the program counter moves by 4. The page stays without access and
+the thread does not wait. The forms:
 
 | form | encodings |
 |---|---|
@@ -648,358 +675,412 @@ program counter moves by 4. The page stays without access and the thread does no
 | `simd ldr`, `simd str`, `simd ldp`, `simd stp` | the same for `b`, `h`, `s`, `d`, `q` registers |
 | `ldar`, `stlr` | `LDAR`, `LDARB`, `LDARH`, `STLR`, `STLRB`, `STLRH`, `LDAPR` (as an acquire load) |
 | `atomic` | `LDADD`, `LDCLR`, `LDEOR`, `LDSET`, `LDSMAX`, `LDSMIN`, `LDUMAX`, `LDUMIN`, `SWP` (also the store forms `STADD` and the others), all sizes, with the acquire and release variants: the same operation as a Rust atomic on the alias, the old value to the result register |
-| `cas` | `CAS`, `CASB`, `CASH` and `CASP` (pairs of `w` or `x`; the `x` pair through `CASPAL`), the old value to the compare register(s) |
+| `cas` | `CAS`, `CASB`, `CASH` and `CASP` (pairs of `w` or `x`, the `x` pair through `CASPAL`), the old value to the compare register(s) |
 | `ldxr`, `stxr` | `LDXR`, `LDAXR`, `LDXP`, `LDAXP` and `STXR`, `STLXR`, `STXP`, `STLXP`, all sizes |
 | `ld1`, `st1` | `LD1`/`ST1` of one to four registers (8 or 16 bytes each), also with an immediate or register post index |
 
-**Exclusives.** An emulated load-exclusive is a load that remembers (address, bytes, value) in a slot of the thread; the
-matching store-exclusive is a compare-exchange of the remembered value, status 0 on success and 1 on failure, and clears the slot.
-A store-exclusive without a load-exclusive of the same address and size in the slot fails. `CLREX` does not fault, so it does not clear the slot; a stale slot is harmless, because every store-exclusive clears it and checks address, size and value. The
-weakening is ABA: if another thread changes the location and changes it back between the two, the store succeeds where the
-hardware monitor would have failed it; the value is the same, so a counter or a lock word behaves, but a lock-free structure that
-needs the change itself will not. If the page opens between the load and the store (the frame completed), the store runs on the
-hardware, finds no monitor and fails, and the loop of the guest goes round once more.
-An atomic or exclusive on an address that is not aligned to its size (the hardware would fault) is not emulated and takes the
-ordinary path. `LD2` to `LD4`, `ST2` to `ST4`, the single-lane and replicating forms of `LD1` are not emulated.
+**Exclusives.** An emulated load-exclusive is a load that remembers (address, bytes, value) in a slot of the thread. The
+matching store-exclusive is a compare-exchange of the remembered value, with status 0 on success and 1 on failure. It
+clears the slot. A store-exclusive without a load-exclusive of the same address and size in the slot fails. `CLREX` does
+not fault, so it does not clear the slot. A stale slot is harmless, because every store-exclusive clears it and checks
+address, size and value. The weakening is ABA. If another thread changes the location and changes it back between the
+two, the store succeeds where the hardware monitor would have failed it. The value is the same, so a counter or a lock
+word behaves, but a lock-free structure that needs the change itself will not. If the page opens between the load and
+the store (the frame completed), the store runs on the hardware, finds no monitor and fails. Then the loop of the guest
+goes round once more. An atomic or exclusive on an address that is not aligned to its size (the hardware would fault) is
+not emulated and takes the ordinary path. `LD2` to `LD4`, `ST2` to `ST4`, and the single-lane and replicating forms of
+`LD1` are not emulated.
 
-An aligned access of 1 to 8 bytes is one atomic access (relaxed; acquire for a load-acquire, release for a store-release), a
-16-byte access is two 8-byte accesses, a misaligned access copies bytes. The access is not atomic as a whole against a GPU write,
-which the stale mask makes irrelevant: the GPU never writes the bytes touched.
+An aligned access of 1 to 8 bytes is one atomic access (relaxed, but acquire for a load-acquire and release for a
+store-release). A 16-byte access is two 8-byte accesses. A misaligned access copies bytes. The access is not atomic as a
+whole against a GPU write, but the stale mask makes this irrelevant: the GPU never writes the bytes touched.
 
 Everything else takes the path of step 3 (wait for the writer, copy the stale blocks, open the page) and is counted by class:
-`exclusive` and `atomic` (forms not listed above), `ld1/st1` (the other structure loads and stores), `dc zva`,
-`prefetch`, `other` (literal loads, unprivileged accesses, tagged and authenticated loads, anything else), `touches written bytes`
-(the access reaches a stale block) and `page border or address mismatch` (the access crosses the page, or the signal's address is not
-inside it).
 
-**Stores and the next frame.** A store done by the handler lands in guest memory only. The mirror does not see it, so the frame on
-the GPU keeps reading what it read, and the next flush hands it over: the first store to a page since the flush sets a flag on the
-page and logs it; the flush clears the flag, reads the page through the alias and stages it with the mask of its stale blocks
-(`Stager::stage_masked`). The copy-in pass leaves the blocks of the mask alone (`nxkit_private_in` takes a 256-bit skip mask per
-page), so the frame's own results in those blocks survive, and the CPU's bytes in the others reach the mirror at the start of the
-next frame. The frame's view of guest memory (`Overlay::read`) takes the skipped blocks from the mirror and the others from
-the staging buffer. The late capture of a flush that ran submits before the CPU signals they wait for (`Pages::flush_late`) stages
-these pages too. A page that is dirty (a store that took the ordinary path) is staged whole with the mask it has, which is empty
-after a copy from the mirror.
+- `exclusive` and `atomic` (forms not listed above)
+- `ld1/st1` (the other structure loads and stores)
+- `dc zva`
+- `prefetch`
+- `other` (literal loads, unprivileged accesses, tagged and authenticated loads, anything else)
+- `touches written bytes` (the access reaches a stale block)
+- `page border or address mismatch` (the access crosses the page, or the signal's address is not inside it)
 
-**Limits.** The emulation is for game threads and host code alike (a `memcpy` of the host faults and is emulated the same way),
-but only with an alias and only for a page whose frame is still in flight; after the completion the ordinary copy is one page
-copy and needs no emulation. The stale mask is only as exact as the ranges of the flush: a shader that writes beyond the bound size of a
-storage buffer, or into a raw pool before the encoder learned it, writes bytes that are not in the mask, and the copy from the
-mirror no longer moves them (before step 4 the copy moved the whole page). A load of a block outside the mask sees guest memory,
-which holds the CPU's own bytes. `privnoemu` (knob) turns the emulation off. A store of the CPU into a block that is
-not stale and that the GPU reads in the same frame is seen by the next frame only, as every CPU write after the flush.
+**Stores and the next frame.** A store done by the handler lands in guest memory only. The mirror does not see it, so
+the frame on the GPU keeps reading what it read. The next flush hands it over. The first store to a page since the flush
+sets a flag on the page and logs it. The flush clears the flag, reads the page through the alias and stages it with the
+mask of its stale blocks (`Stager::stage_masked`). The copy-in pass leaves the blocks of the mask alone
+(`nxkit_private_in` takes a 256-bit skip mask per page). So the frame's own results in those blocks survive, and the
+CPU's bytes in the others reach the mirror at the start of the next frame. The frame's view of guest memory
+(`Overlay::read`) takes the skipped blocks from the mirror and the others from the staging buffer. The late capture of a
+flush that ran submits before the CPU signals they wait for (`Pages::flush_late`) stages these pages too. A page that is
+dirty (a store that took the ordinary path) is staged whole with the mask it has, which is empty after a copy from the
+mirror.
 
-**Counters** (`NXKIT_DIAG=private`, `DIAG private emulated accesses per frame`): loads and stores done by the handler, by form,
-the milliseconds they took in the handler, the pages the flush staged for them, and the accesses that were not emulated and waited
-for the writer, by class; `DIAG private top program counters, not emulated` lists the program counters of those. The faults of
-step 3 (`read in flight`, `write in flight`) and the waits for a writer now count only what was not emulated; the first store to a
-page since the flush still counts in the line of writes to member pages by phase.
+**Limits.** The emulation is for game threads and host code alike (a `memcpy` of the host faults and is emulated the
+same way). But it works only with an alias and only for a page whose frame is still in flight. After the completion, the
+ordinary copy is one page copy and needs no emulation. The stale mask is only as exact as the ranges of the flush. A
+shader can write beyond the bound size of a storage buffer, or into a raw pool before the encoder learned it. Such a
+shader writes bytes that are not in the mask, and the copy from the mirror no longer moves them (before step 4 the copy
+moved the whole page). A load of a block outside the mask sees guest memory, which holds the CPU's own bytes.
+`privnoemu` (knob) turns the emulation off. The CPU can store into a block that is not stale and that the GPU reads in
+the same frame. Only the next frame sees such a store, as every CPU write after the flush.
+
+**Counters** (`NXKIT_DIAG=private`, `DIAG private emulated accesses per frame`). The line has the loads and stores done
+by the handler, by form, and the milliseconds they took in the handler. It also has the pages the flush staged for them,
+and the accesses that were not emulated and waited for the writer, by class.
+`DIAG private top program counters, not emulated` lists the program counters of those. The faults of step 3
+(`read in flight`, `write in flight`) and the waits for a writer now count only what was not emulated. The first store
+to a page since the flush still counts in the line of writes to member pages by phase.
 
 ## Private GPU memory, step 5: whole bindings, and less work on the game thread (`NXKIT_PRIVATE=1`)
 
 Step 5 closes a gap of the mirror and takes the cost of the model off the game thread.
 
-**Whole bindings.** A range that is partly on member pages resolved to guest memory (`partial`): it could read bytes that the GPU
-wrote in the mirror, or the GPU could write guest bytes that the next frame does not see. The flush now makes every
-binding range that touches a member whole before the frame is encoded: the closure over the read ranges (uniform,
-storage, stream, index, indirect and copy source) runs rounds until a round adds nothing (up to 8; it was 2), looks at each
-range once and drops the ranges that are whole, and cuts a range that reaches past the end of guest memory to it instead of
-leaving it out. Ranges that no part of `FrameDetail` announces (texture upload sources, copy boxes) are learned: every
-resolve that finds a range split between members and non-members (`overlay::note_partial`, called from `resolve`/`resolve_c`
-by class and from the uniform and storage sites through `check_span`) remembers `(address, length)`, and the next flush adds
-the remembered ranges (at most 2048) to the closure. A range is therefore split at most once, in the frame that first
-uses it; a second split resolve of the same range means a limit of the closure kept it (`CLOSURE_MAX_BYTES`, `RANGE_MAX_BYTES`,
-the rounds), and is counted apart. Before this the line printed the count of a whole window (300 frames), not a per-frame figure:
-601 in a window is about 2 per frame.
+**Whole bindings.** A range that is partly on member pages resolved to guest memory (`partial`). It could read bytes
+that the GPU wrote in the mirror, or the GPU could write guest bytes that the next frame does not see. The flush now
+makes every binding range that touches a member whole before the frame is encoded. The closure over the read ranges
+(uniform, storage, stream, index, indirect and copy source) runs rounds until a round adds nothing (up to 8, it was 2).
+It looks at each range once and drops the ranges that are whole. It cuts a range that reaches past the end of guest
+memory to it instead of leaving it out. Ranges that no part of `FrameDetail` announces (texture upload sources, copy
+boxes) are learned. Every resolve that finds a range split between members and non-members remembers
+`(address, length)`. This is `overlay::note_partial`, called from `resolve`/`resolve_c` by class and from the uniform
+and storage sites through `check_span`. The next flush adds the remembered ranges (at most 2048) to the closure. A range
+is therefore split at most once, in the frame that first uses it. A second split resolve of the same range means that a
+limit of the closure kept it (`CLOSURE_MAX_BYTES`, `RANGE_MAX_BYTES`, the rounds), and it is counted apart. Before this,
+the line printed the count of a whole window (300 frames), not a per-frame figure: 601 in a window is about 2 per frame.
 
-**Cost of the model.** Measured with a synthetic frame of the live shape (71 bindings of 72 pages, 77 written pages read and
-written by the CPU, 154 pages beside them that the CPU writes every frame; test
-`the_adaptive_settings_keep_the_bytes_exact_and_the_numbers_are_printed`): the flush spent 3.1 of 3.7 ms in the tags of the
-written pages, and 2.9 of those in `range_masks`, which set the 256 block bits of every written page one by one. It sets
-whole words now (0.3 ms for the same pages). The flush also tests a page's word before the compare-exchange (new members)
-and the stale bits before the `fetch_or` (the tags), and `DIAG private cost per frame` splits the flush: plan of the written
-ranges, read ranges, closure, growth of the mirror, the pages (new members, dirty log, staging, writable pages, tags, and the
-`mprotect` time in all of it), the rest, and the fault handler.
+**Cost of the model.** This was measured with a synthetic frame of the live shape (71 bindings of 72 pages, 77 written
+pages read and written by the CPU, 154 pages beside them that the CPU writes every frame, test
+`the_adaptive_settings_keep_the_bytes_exact_and_the_numbers_are_printed`). The flush spent 3.1 of 3.7 ms in the tags of
+the written pages, and 2.9 of those in `range_masks`. That function set the 256 block bits of every written page one by
+one. It sets whole words now (0.3 ms for the same pages). The flush also tests a page's word before the compare-exchange
+(new members) and the stale bits before the `fetch_or` (the tags). `DIAG private cost per frame` splits the flush: plan
+of the written ranges, read ranges, closure, growth of the mirror, the pages (new members, dirty log, staging, writable
+pages, tags, and the `mprotect` time in all of it), the rest, and the fault handler.
 
-**Copy back after completion.** A game thread that waits for a copy from the mirror (a fault on a page whose frame is done)
-marks the page `eager` for the epoch (256 flushes). When a frame completes, a thread of its own copies the stale blocks of
-the marked pages that are still tagged with that frame from the mirror into the page through the alias, then opens the run
-for reading and sets the pages clean, with one `mprotect` per run of marked pages and the control mutex held per run (a flush
-never sees a page half done; the handler's own claim, the `SYNC` state, covers a thread that faults at the same time). A
-page that nobody faults on any more loses the mark after two epochs and faults once to get it back, so the copies a page
-does not need are bounded. It needs the alias (no alias, no copy back). The knob
-`privnoeager` turns it off.
+**Copy back after completion.** A game thread that waits for a copy from the mirror (a fault on a page whose frame is
+done) marks the page `eager` for the epoch (256 flushes). When a frame completes, a thread of its own copies the stale
+blocks of the marked pages that are still tagged with that frame. It copies them from the mirror into the page through
+the alias. Then it opens the run for reading and sets the pages clean. It uses one `mprotect` per run of marked pages
+and holds the control mutex per run. So a flush never sees a page half done. The handler's own claim, the `SYNC` state,
+covers a thread that faults at the same time. A page that nobody faults on any more loses the mark after two epochs and
+faults once to get it back. So the copies that a page does not need are bounded. It needs the alias (no alias, no copy
+back). The knob `privnoeager` turns it off.
 
-**Writable pages.** A page that the CPU dirtied in 3 flushes in a row (`HOT_AFTER`) and that no frame writes in this flush
-stays read and write: the flush keeps a copy of the bytes it staged for it, compares the live page with it at each flush,
-stages the page when it differs, and after 8 flushes without a change (`HOT_QUIET`) protects it again and compares once more
-(a store between the last compare and the protection is staged then). The CPU never faults on such a page; the cost is one
-16 KiB compare per page per flush and one copy when it changed. A page that a frame writes in a flush leaves the set and
-takes the old path (tag, stale blocks). A store during the flush lands in this frame or the next, as for every other page;
-the shadow is what was staged, so no store is lost. The knob `privnohot` turns it off.
+**Writable pages.** Some pages stay read and write. The CPU dirtied such a page in 3 flushes in a row (`HOT_AFTER`), and
+no frame writes it in this flush. The flush keeps a copy of the bytes it staged for it and compares the live page with
+it at each flush. It stages the page when it differs. After 8 flushes without a change (`HOT_QUIET`), it protects the
+page again and compares once more (a store between the last compare and the protection is staged then). The CPU never
+faults on such a page. The cost is one 16 KiB compare per page per flush and one copy when it changed. A page that a
+frame writes in a flush leaves the set and takes the old path (tag, stale blocks). A store during the flush lands in
+this frame or the next, as for every other page. The shadow is what was staged, so no store is lost. The knob
+`privnohot` turns it off.
 
-**Counters** (`NXKIT_DIAG=private`): `DIAG private partial resolves per frame` (class and split: starts in and leaves, starts out
-and reaches in, past the run; the learned ranges; the repeats), `DIAG private cost per frame, game thread` (the milliseconds of
-the flush by part, the fault handler and the sum, "the model costs"), `DIAG private adaptive per frame` (writable pages, staged
-and unchanged, promotions and demotions; pages copied back after completion, `mprotect` calls and milliseconds on the copy-back
-thread). Synthetic numbers, per frame, with 304 faults per frame without step 5: the copy back leaves 1 copied by a fault of
-77, the writable pages take the faults to 83 (the 77 CPU writes to written pages remain: such a page is tagged every
-frame and cannot stay writable); the flush costs 0.9 ms (it was 3.7), plus 0.5 ms for the 150 writable pages. A fault costs
-2 us in this test and about 12 us live (3.9 ms for 313 faults), so the live saving is the faults times 10.
+**Counters** (`NXKIT_DIAG=private`):
+
+- `DIAG private partial resolves per frame`: class and split (starts in and leaves, starts out and reaches in, past the
+  run), the learned ranges and the repeats.
+- `DIAG private cost per frame, game thread`: the milliseconds of the flush by part, the fault handler and the sum ("the
+  model costs").
+- `DIAG private adaptive per frame`: writable pages, staged and unchanged, promotions and demotions, and pages copied back
+  after completion, `mprotect` calls and milliseconds on the copy-back thread.
+
+Synthetic numbers, per frame, with 304 faults per frame without step 5: the copy back leaves 1 copied by a fault of 77.
+The writable pages take the faults to 83. The 77 CPU writes to written pages remain, because such a page is tagged every
+frame and cannot stay writable. The flush costs 0.9 ms (it was 3.7), plus 0.5 ms for the 150 writable pages. A fault
+costs 2 us in this test and about 12 us live (3.9 ms for 313 faults). So the live saving is the faults times 10.
 
 ## Private GPU memory, step 6: pass signals for the results the CPU reads (`NXKIT_PRIVATE=1`)
 
-Step 4 and 5 left the accesses that touch bytes a frame really writes. In Ocarina of Time these are the results that the game
-reads back each frame (a visibility sum, spherical-harmonics coefficients): the CPU read waited 0.9 times per frame for 31 ms
-(longest 89 ms) and a write 0.15 times for 9 ms, for the whole batch of the frame, and for the encode of the frame when the
-access began before the commit. The GPU idled meanwhile and its clock dropped. A reader needs the bytes of one pass, not the
-end of the frame.
+Step 4 and 5 left the accesses that touch bytes a frame really writes. In Ocarina of Time, these are the results that
+the game reads back each frame (a visibility sum, spherical-harmonics coefficients). The CPU read waited 0.9 times per
+frame for 31 ms (longest 89 ms), and a write waited 0.15 times for 9 ms. It waited for the whole batch of the frame, and
+for the encode of the frame when the access began before the commit. The GPU idled meanwhile and its clock dropped. A
+reader needs the bytes of one pass, not the end of the frame.
 
 **What is learned.** The handler records the page of every first access of a game thread that waits for a writer
 (`learn_reader` in `pages.rs`, atomics only). `Pages::readers(frame)` (the encoder calls it, with its own lock, not the
-flush's) drains that log into a set of CPU-read GPU results and drops a page whose last wait is more than 240 frames old
+flush's) drains that log into a set of CPU-read GPU results. It drops a page whose last wait is more than 240 frames old
 (`LEARN_FRAMES`, 4 s at 60 fps). Accesses the handler emulates never wait and never teach.
 
-**Where the frame is cut.** `private::early_cuts`, called by `encode_frame_inner` before the batch is made, finds for each such
-page the last pass of the frame that may write it. The ranges a pass may write come from the same rules as the flush
-(`written_in`, storage bindings a shader may write, buffer copy and fill destinations), but taken from the commands of the pass
-(`ordinals_with_end` gives the draws, dispatches and copies of each pass). The unit is the page: a later pass that writes
-other bytes of the page moves the cut after itself, because the copy from the mirror moves every stale block of the page.
-A page has no cut when a pool that shaders wrote through raw pointers covers it (any pass may write it), when the flush's
-whole-frame ranges touch it and no pass was found for it, when a texture that the frame copies back or the CPU reads shares
-its range (those are written by the last command buffer), or when its last pass is the last pass of the frame. At most
-`EARLY_CUTS` (3) cuts are made: the earliest two and the last, the pages of the others join the next cut after them
-(`plan_cuts`, a pure function with a test). A cut after pass `p` puts `p + 1` into the chunk ends of `jobs::split`, so the
-chunk with that pass ends a command buffer; no pass moves. The ring holds `EARLY_CUTS` more allocators than before.
+**Where the frame is cut.** `encode_frame_inner` calls `private::early_cuts` before the batch is made. It finds for each
+such page the last pass of the frame that may write it. The ranges a pass may write come from the same rules as the
+flush (`written_in`, storage bindings a shader may write, buffer copy and fill destinations), but taken from the
+commands of the pass (`ordinals_with_end` gives the draws, dispatches and copies of each pass). The unit is the page. A
+later pass that writes other bytes of the page moves the cut after itself. The reason is that the copy from the mirror
+moves every stale block of the page. A page has no cut in four cases. A pool that shaders wrote through raw pointers
+covers it (any pass may write it). The flush's whole-frame ranges touch it and no pass was found for it. A texture that
+the frame copies back or the CPU reads shares its range (those are written by the last command buffer). Its last pass is
+the last pass of the frame. At most `EARLY_CUTS` (3) cuts are made: the earliest two and the last. The pages of the
+others join the next cut after them (`plan_cuts`, a pure function with a test). A cut after pass `p` puts `p + 1` into
+the chunk ends of `jobs::split`, so the chunk with that pass ends a command buffer. No pass moves. The ring holds
+`EARLY_CUTS` more allocators than before.
 
-**How the signal is given.** `Batch::on_prefix_complete(count, f)` (`nxkit-metal` `batch.rs`) makes the batch commit in groups:
-the command buffers up to the cut in one `commit`, the rest in another, each with its own feedback. Group `g` reports when every
-group up to it is done (the feedback handlers may run in any order), and the callback of the cut, `Pages::release_early(frame,
-runs)`, sets `ready = frame` on the pages of the cut and wakes the sleepers. Metal 4 has no event inside a command buffer, so
-a commit is the finest unit; the price is one more commit per cut (the older comment on `submit` measured 0.2 to 1 ms of GPU
-pause when every command buffer was committed one by one, here it is one to three extra commits). The knob `privnosplit` turns
-the cuts off.
+**How the signal is given.** `Batch::on_prefix_complete(count, f)` (`nxkit-metal` `batch.rs`) makes the batch commit in
+groups. The command buffers up to the cut go in one `commit`, and the rest go in another, each with its own feedback.
+Group `g` reports when every group up to it is done (the feedback handlers may run in any order). The callback of the
+cut, `Pages::release_early(frame, runs)`, sets `ready = frame` on the pages of the cut and wakes the sleepers. Metal 4
+has no event inside a command buffer, so a commit is the finest unit. The price is one more commit per cut. The older
+comment on `submit` measured 0.2 to 1 ms of GPU pause when every command buffer was committed one by one. Here it is one
+to three extra commits. The knob `privnosplit` turns the cuts off.
 
-**Committing early.** `Batch::commit_ahead` returns an `Ahead` for the first group. The encode hands each command buffer of the
-group to `Ahead::finish` as soon as its chunk is encoded (the first one, with the uploads and the copy-in, before the chunks), and the
-thread that ends the last one commits the group while the other chunks still encode. A reader whose access began before the
-commit (114 of the window) no longer waits for the whole encode. Not used when the frame has a late stage (`forced` flush, knob
-`privlatestage`: the first command buffer still gets the pages the CPU writes until the CPU signal), and the knob
-`privnoahead` turns it off. The group never contains the last command buffer, which carries the copy-back of textures.
+**Committing early.** `Batch::commit_ahead` returns an `Ahead` for the first group. The encode hands each command buffer
+of the group to `Ahead::finish` as soon as its chunk is encoded (the first one, with the uploads and the copy-in, before
+the chunks). The thread that ends the last one commits the group while the other chunks still encode. A reader whose
+access began before the commit (114 of the window) no longer waits for the whole encode. It is not used when the frame
+has a late stage (`forced` flush, knob `privlatestage`: the first command buffer still gets the pages the CPU writes
+until the CPU signal). The knob `privnoahead` turns it off. The group never contains the last command buffer, which
+carries the copy-back of textures.
 
-**The wait.** A page is in flight for a thread while its frame is not complete **and** `ready < frame`
-(`page_flying` in `pages.rs`). `wait_complete(page, frame, write)` sleeps on that, so a signal ends it; then the normal path runs:
-claim the page, copy the stale blocks from the mirror, clear the stale mask, clean or dirty. The bytes are the pass's:
-the mirror is written by the GPU before the commit's feedback. A later frame that flushes the page again tags it with its own
-number, and `ready` of an older frame does not release it. `try_emulate` leaves a released page to the copy.
+**The wait.** A page is in flight for a thread while its frame is not complete **and** `ready < frame` (`page_flying` in
+`pages.rs`). `wait_complete(page, frame, write)` sleeps on that, so a signal ends it. Then the normal path runs: claim
+the page, copy the stale blocks from the mirror, clear the stale mask, clean or dirty. The bytes are the pass's: the
+mirror is written by the GPU before the commit's feedback. A later frame that flushes the page again tags it with its
+own number, and `ready` of an older frame does not release it. `try_emulate` leaves a released page to the copy.
 
-**Run-ahead.** With early fences the CPU used to run up to `BATCHES_IN_FLIGHT` (3) frames ahead, and a read of a GPU result waited
-behind the whole queue. `NXKIT_PRIVATE_AHEAD=<n>` (default 1, at most the ring) makes a wait for fence N return once flush N is
-captured and frame N - n is complete; 0 is the honest wait. `DIAG private fences` reports the time spent waiting for frame N - n.
+**Run-ahead.** With early fences the CPU used to run up to `BATCHES_IN_FLIGHT` (3) frames ahead, and a read of a GPU
+result waited behind the whole queue. `NXKIT_PRIVATE_AHEAD=<n>` (default 1, at most the ring) makes a wait for fence N
+return once flush N is captured and frame N - n is complete. The value 0 is the honest wait. `DIAG private fences`
+reports the time spent waiting for frame N - n.
 
-**Counters** (`NXKIT_DIAG=private`): `DIAG private pass signals, per frame`: the waits that ended at a pass signal while the frame
-still ran and those that ended at the completion of the whole frame (count and ms per frame; the sum equals `DIAG private CPU
-waits for a writer`), the accesses that found their page released, the size of the learned set and how often it changed in the
-window, the frames cut with the cuts per frame, their position (pass index plus one over the passes, average), the pages
-released, the frames committed ahead, the readers per frame with and without a cut, and the planning time (encoder thread).
+**Counters** (`NXKIT_DIAG=private`): `DIAG private pass signals, per frame` has these values:
 
-**Tests.** `plan_cuts` (cut positions, the cap of cuts, blocked and unwritten pages), `early_cuts` on a real analysed frame of
-three passes after a real wait taught the pages, the exclusion of copy-back pages, and, on real Metal, a batch of three command
-buffers where pass 0 writes a learned page and pass 1 spins for 0.5 s on the GPU: the reader returns 0.4 ms after the first
-group was committed and 490 ms before the batch completes, while the third command buffer is not even encoded yet; in
-`pages.rs` a reader goes on at `release_early` while a second page waits for the completion, and the learned set grows and
-decays.
+- the waits that ended at a pass signal while the frame still ran and those that ended at the completion of the whole
+  frame (count and ms per frame, and the sum equals `DIAG private CPU waits for a writer`)
+- the accesses that found their page released
+- the size of the learned set and how often it changed in the window
+- the frames cut with the cuts per frame, and their position (pass index plus one over the passes, average)
+- the pages released, the frames committed ahead and the readers per frame with and without a cut
+- the planning time (encoder thread)
+
+**Tests.** The tests cover `plan_cuts` (cut positions, the cap of cuts, blocked and unwritten pages), and `early_cuts`
+on a real analysed frame of three passes after a real wait taught the pages. They also cover the exclusion of copy-back
+pages. On real Metal, a test runs a batch of three command buffers. In it, pass 0 writes a learned page and pass 1 spins
+for 0.5 s on the GPU. The reader returns 0.4 ms after the first group was committed and 490 ms before the batch
+completes. At that time, the third command buffer is not even encoded yet. In `pages.rs`, a reader goes on at
+`release_early` while a second page waits for the completion, and the learned set grows and decays.
 
 ## Private GPU memory, step 7: results one frame late (`NXKIT_PRIVATE=1`)
 
-Step 6 let a reader of a GPU result wait for the pass that writes it. The wait is still there, and it costs more than its
-milliseconds: the CPU waits for a result of the frame it just submitted, so the GPU idles for part of every frame, and on Apple
-GPUs the clock governor raises the clock only above about 90 % utilization. Measured in Ocarina of Time: P8 at 30 fps for a few
-seconds, then P1 and 15 fps. The game reads such results every frame (visibility and exposure sums, spherical harmonics).
+Step 6 let a reader of a GPU result wait for the pass that writes it. The wait is still there, and it costs more than
+its milliseconds. The CPU waits for a result of the frame it just submitted, so the GPU idles for part of every frame.
+On Apple GPUs, the clock governor raises the clock only above about 90 % utilization. Measured in Ocarina of Time: P8 at
+30 fps for a few seconds, then P1 and 15 fps. The game reads such results every frame (visibility and exposure sums,
+spherical harmonics).
 
-**The decision.** The CPU sees the GPU's results one frame late. A game thread's access to bytes that a frame in flight writes is
-served from guest memory without a wait, and guest memory holds the bytes of the last completed frame there. This is not exact:
-the game reads frame N - 1's sum while frame N runs, and a CPU write to such bytes wins over the frame's copy-back (below). Every
-other access stays exact: pages no frame in flight writes, the bytes of a page outside the stale blocks, internal threads, system
-calls (`settle` still waits), and the accesses that cannot be emulated (`LD2` to `LD4`, `DC ZVA`, an access across the page border).
-`NXKIT_PRIVATE_LATE=0` turns it off (a CPU access to the bytes waits for the writer, as in step 6); it needs the second mapping
-(step 4, knob `privnoemu` off). `NXKIT_PRIVATE_AHEAD` (default 1) stays the bound of the run-ahead: with the waits for writers gone
-the CPU runs one frame ahead and the GPU stays busy.
+**The decision.** The CPU sees the GPU's results one frame late. A game thread's access to bytes that a frame in flight
+writes is served from guest memory without a wait. Guest memory holds the bytes of the last completed frame there. This
+is not exact. The game reads frame N - 1's sum while frame N runs, and a CPU write to such bytes wins over the frame's
+copy-back (below). Every other access stays exact. This covers pages no frame in flight writes, the bytes of a page
+outside the stale blocks, internal threads and system calls (`settle` still waits). It also covers the accesses that
+cannot be emulated (`LD2` to `LD4`, `DC ZVA`, an access across the page border). `NXKIT_PRIVATE_LATE=0` turns it off (a
+CPU access to the bytes waits for the writer, as in step 6). It needs the second mapping (step 4, knob `privnoemu` off).
+`NXKIT_PRIVATE_AHEAD` (default 1) stays the bound of the run-ahead: with the waits for writers gone the CPU runs one
+frame ahead and the GPU stays busy.
 
-**Which page, which bytes.** A page qualifies after a game thread waited for it once (as in step 6) and while game threads keep
-reading it (the epoch of the copy-back, refreshed by each late read): `PageInfo::snap` is then the frame whose completion the
-stale blocks of the guest page hold, 0 when the guest bytes are not known to be a completed frame's. The mirror is shared across
-frames, so it cannot serve as the snapshot (the frame in flight may be writing it); guest memory is. `snap` is set by a copy of the
-stale blocks into a page whose writer is done (a fault that waited, the copy-back thread, the flush), and these keep it valid:
+**Which page, which bytes.** A page qualifies after a game thread waited for it once (as in step 6), and while game
+threads keep reading it (the epoch of the copy-back, refreshed by each late read). `PageInfo::snap` is then the frame
+whose completion the stale blocks of the guest page hold. It is 0 when the guest bytes are not known to be a completed
+frame's. The mirror is shared across frames, so it cannot serve as the snapshot (the frame in flight may be writing it).
+Guest memory can. A copy of the stale blocks into a page whose writer is done sets `snap` (a fault that waited, the
+copy-back thread, the flush). These rules keep it valid:
 
-- The completion of frame f (`Pages::complete`, under the control mutex) copies, for every page of f's runs, the blocks that f
-  wrote (`Ctrl::masks`, the per-frame blocks of the flush) from the mirror into guest memory through the alias, and sets
-  `snap = f` (`late_copy_back`). This holds for a page that a newer frame already tags and, since step 8, for a page that f
-  still tags (with `NXKIT_PRIVATE_AHEAD=1` frame f completes before f + 1 is flushed, so this is the common case; the page
-  is claimed while it is copied). `flush_mirrored` still copies a page that a complete frame still tags before it tags it again
-  (`late_flush_copies`), so that a flush after a completion never leaves stale blocks behind a valid `snap`. A page whose
-  blocks are not known, that a thread has open or is copying, or that nobody read lately gets `snap = 0` and waits again until a
-  fault copies it. The poison knob (`privpoison`) sets `snap = 0`, because the pattern replaces the snapshot.
-- The copy at the completion raced with the next frame, which may already have copied the CPU's staged bytes into the same
-  mirror blocks and written its own: step 9 copies from the GPU's copy of the frame's end instead. A reader that runs during the
-  64-byte copy can see half of a block. The age of the data is 1 frame in the normal case, 2 when the CPU runs ahead and frame
-  f - 1 has not completed.
+- The completion of frame f (`Pages::complete`, under the control mutex) copies the blocks that f wrote (`Ctrl::masks`,
+  the per-frame blocks of the flush) for every page of f's runs. It copies them from the mirror into guest memory
+  through the alias and sets `snap = f` (`late_copy_back`). This holds for a page that a newer frame already tags. Since
+  step 8, it also holds for a page that f still tags (with `NXKIT_PRIVATE_AHEAD=1` frame f completes before f + 1 is
+  flushed, so this is the common case, and the page is claimed while it is copied). `flush_mirrored` still copies a page
+  that a complete frame still tags before it tags it again (`late_flush_copies`). So a flush after a completion never
+  leaves stale blocks behind a valid `snap`. Some pages get `snap = 0` and wait again until a fault copies them. These
+  are a page whose blocks are not known and a page that a thread has open or is copying. A page that nobody read lately
+  is also one of them. The poison knob (`privpoison`) sets `snap = 0`, because the pattern replaces the snapshot.
+- The copy at the completion raced with the next frame. That frame may already have copied the CPU's staged bytes into
+  the same mirror blocks and written its own. Step 9 copies from the GPU's copy of the frame's end instead. A reader
+  that runs during the 64-byte copy can see half of a block. The age of the data is 1 frame in the normal case, 2 when
+  the CPU runs ahead and frame f - 1 has not completed.
 
-**Reads.** `try_emulate` allowed an access only outside the stale blocks. Now an access that overlaps them goes on when `snap != 0`
-and late results are on: the load runs through the alias on guest memory, the page keeps no access, no wait, no `mprotect`.
-`late reads` counts it with the age (frame in flight minus `snap`, an upper bound for a page that frames write rarely).
+**Reads.** `try_emulate` allowed an access only outside the stale blocks. Now an access that overlaps them goes on when
+`snap != 0` and late results are on. The load runs through the alias on guest memory, the page keeps no access, and
+there is no wait and no `mprotect`. `late reads` counts it with the age (frame in flight minus `snap`, an upper bound
+for a page that frames write rarely).
 
-**Writes and atomics.** The same path does a store, an atomic (`LDADD`, `SWP`, `CAS`, exclusives) and the SIMD forms on guest
-memory. Before the store the blocks it touches that are stale are marked CPU-owned in `PageInfo::own`, with the newest flushed frame
-(`own_frame`). Atomics operate on the last completed value and the result is a write: the CPU wins over the frame's bytes in those
-blocks (an atomic add on a counter the GPU also increments loses the GPU's increments of the frame in flight). Granularity is the
-block of 64 bytes, not the word: the other bytes of an owned block are the last completed frame's too, and they reach the mirror
-with the staged block. Two rules keep the CPU's bytes:
+**Writes and atomics.** The same path does a store, an atomic (`LDADD`, `SWP`, `CAS`, exclusives) and the SIMD forms on
+guest memory. Before the store, the blocks it touches that are stale are marked CPU-owned in `PageInfo::own`, with the
+newest flushed frame (`own_frame`). Atomics operate on the last completed value and the result is a write: the CPU wins
+over the frame's bytes in those blocks (an atomic add on a counter the GPU also increments loses the GPU's increments of
+the frame in flight). Granularity is the block of 64 bytes, not the word. The other bytes of an owned block are the last
+completed frame's too, and they reach the mirror with the staged block. Two rules keep the CPU's bytes:
 
-1. Every copy from the mirror leaves the blocks of `own`, and the blocks of `hold` for frames not newer than `hold_frame`
-   (`PageInfo::keep`): the copy-back at a completion, the thread that copies the page, the flush.
-2. The next flush stages them (`stage_emulated`, the dirty pages, the writable pages all take the mask from `PageInfo::take_skip`):
-   the skip mask is the stale blocks minus the owned ones, so the CPU's blocks go into the mirror and the frame's other blocks do
-   not. The owned blocks move to `hold` with the frame that was flushed when they were written, so the completion of that frame (the
-   one in flight at the write) does not overwrite them, while the next frame's completion does (it ran after the staging); a `hold`
-   no frame needs is dropped at the next staging.
+1. Every copy from the mirror leaves the blocks of `own`, and the blocks of `hold` for frames not newer than
+   `hold_frame` (`PageInfo::keep`). This applies to the copy-back at a completion, the thread that copies the page and
+   the flush.
+2. The next flush stages them (`stage_emulated`, the dirty pages, the writable pages all take the mask from
+   `PageInfo::take_skip`). The skip mask is the stale blocks minus the owned ones. So the CPU's blocks go into the
+   mirror and the frame's other blocks do not. The owned blocks move to `hold` with the frame that was flushed when they
+   were written. So the completion of that frame (the one in flight at the write) does not overwrite them, but the next
+   frame's completion does (it ran after the staging). A `hold` that no frame needs is dropped at the next staging.
 
-**Counters** (`NXKIT_DIAG=private`, `DIAG private late results, per frame`): late reads and writes, the blocks late writes took from
-the frame (`owned`) and the blocks that copies left alone for them, the age of the data served (mean, longest, histogram of 1, 2,
-3, 4 or more frames), the pages and blocks copied at completions and by the flush, and the waits for a writer per frame, which
-should be about 0 (the first read of each result still waits once, to teach the page). The line is printed while late results are
-on. `DIAG private CPU waits for a writer` keeps the waits that remain.
+**Counters** (`NXKIT_DIAG=private`, `DIAG private late results, per frame`). The line has the late reads and writes, the
+blocks late writes took from the frame (`owned`) and the blocks that copies left alone for them. It has the age of the
+data served (mean, longest, histogram of 1, 2, 3, 4 or more frames). It has the pages and blocks copied at completions
+and by the flush. It also has the waits for a writer per frame, which should be about 0 (the first read of each result
+still waits once, to teach the page). The line is printed while late results are on.
+`DIAG private CPU waits for a writer` keeps the waits that remain.
 
-**Tests** (`pages.rs`, real faults): a reader during frame N gets frame N - 1's bytes at once and N's after the completion; the
-completion of frame N copies for the reader of N + 1 when the CPU runs ahead; a page nobody waited for still waits; a CPU write
-during N survives the copy-back at N's completion (the other block of the page is copied) and is staged at the next flush; a write
-staged while N runs skips only the frame's blocks, survives N's completion and is not staged twice; an atomic add during N operates
-on N - 1's value, lands on guest memory, is staged and wins over N's 99; with `NXKIT_PRIVATE_LATE=0` an access waits.
+**Tests** (`pages.rs`, real faults):
+
+- A reader during frame N gets frame N - 1's bytes at once and N's after the completion.
+- The completion of frame N copies for the reader of N + 1 when the CPU runs ahead.
+- A page nobody waited for still waits.
+- A CPU write during N survives the copy-back at N's completion (the other block of the page is copied) and is staged at
+  the next flush.
+- A write staged while N runs skips only the frame's blocks, survives N's completion and is not staged twice.
+- An atomic add during N operates on N - 1's value, lands on guest memory, is staged and wins over N's 99.
+- With `NXKIT_PRIVATE_LATE=0`, an access waits.
 
 ## Private GPU memory, step 8: reads without a trap, and every late read served (`NXKIT_PRIVATE=1`)
 
-With step 7 the waits for a writer were small (0.5 per frame) but the game threads still trapped on every access to a page in
-flight: Ocarina of Time loaded about 16 700 times per frame from pages that a frame writes in a few blocks, each load a
-fault, the decode of the instruction in the handler and the return (a bare fault round trip is 2.6 us on this Mac: 43 ms per
-frame summed over the game threads, and `sample` showed `_sigtramp` in 10 to 13 % of the samples of the recording workers and the
-main thread). Four changes remove the traps and the last waits.
+With step 7, the waits for a writer were small (0.5 per frame), but the game threads still trapped on every access to a
+page in flight. Ocarina of Time loaded about 16 700 times per frame from pages that a frame writes in a few blocks. Each
+load was a fault, the decode of the instruction in the handler and the return. A bare fault round trip is 2.6 us on this
+Mac: 43 ms per frame summed over the game threads. `sample` showed `_sigtramp` in 10 to 13 % of the samples of the
+recording workers and the main thread. Four changes remove the traps and the last waits.
 
-**Why the snapshot is lost** (`DIAG private snapshots`). `PageInfo::snap_reset(why)` is the only way `snap` goes to zero, and
-it counts the reason (`SnapWhy`): never set (the first read of a result waits once and teaches the page), released, busy at the
-completion (a thread copied or had the page open), blocks unknown, nobody read the page lately (at the completion or at the
-flush), poison. A late access that finds no snapshot names the reason the page lost it last (`snap_misses`). In the benchmark
-the sum of the drops is 0.3 pages per frame and the misses are about 0.00 per frame.
+**Why the snapshot is lost** (`DIAG private snapshots`). `PageInfo::snap_reset(why)` is the only way `snap` goes to
+zero. It counts the reason (`SnapWhy`): never set (the first read of a result waits once and teaches the page),
+released, busy at the completion (a thread copied or had the page open), blocks unknown, nobody read the page lately (at
+the completion or at the flush), poison. A late access that finds no snapshot names the reason the page lost it last
+(`snap_misses`). In the benchmark the sum of the drops is 0.3 pages per frame and the misses are about 0.00 per frame.
 
-**Reads need no trap** (`Pages::set_read_open`, `NXKIT_PRIVATE_READOPEN=0` turns it off). While the guest bytes of a page are a
-completed frame's (`snap != 0`) and the completions keep them current, a read of the page at any time returns exactly what the
-handler returned after the trap: the last completed frame's bytes in the stale blocks, the CPU's bytes elsewhere. The flush
-therefore protects such a page `PROT_READ` instead of `PROT_NONE` (`read_open` counts the pages: about 205 per frame in the
-benchmark); a page without a snapshot stays `PROT_NONE` until a copy teaches it. Only stores fault, and the handler marks
-the blocks as the CPU's as before. A completion that takes the snapshot away (nobody read the page lately, or the blocks of the
-frame are unknown) also takes the read access away (`revoke_read`: the page is claimed, `PROT_NONE`, restored), so a reader never
-sees bytes older than the last completed frame; `read_revoked` counts these. Measured: emulated loads per frame 16 700 to 0.3
-(the loads that remain are stores' neighbours), handler time per frame for emulated accesses 0.70 ms to 0.07 ms before the stores.
+**Reads need no trap** (`Pages::set_read_open`, `NXKIT_PRIVATE_READOPEN=0` turns it off). Take a page whose guest bytes
+are a completed frame's (`snap != 0`) and that the completions keep current. A read of such a page at any time returns
+exactly what the handler returned after the trap. That is the last completed frame's bytes in the stale blocks, and the
+CPU's bytes elsewhere. The flush therefore protects such a page `PROT_READ` instead of `PROT_NONE` (`read_open` counts
+the pages: about 205 per frame in the benchmark). A page without a snapshot stays `PROT_NONE` until a copy teaches it.
+Only stores fault, and the handler marks the blocks as the CPU's as before. A completion can take the snapshot away
+(nobody read the page lately, or the blocks of the frame are unknown). Then it also takes the read access away
+(`revoke_read`: the page is claimed, `PROT_NONE`, restored). So a reader never sees bytes older than the last completed
+frame. `read_revoked` counts these. Measured: emulated loads per frame 16 700 to 0.3 (the loads that remain are stores'
+neighbours), handler time per frame for emulated accesses 0.70 ms to 0.07 ms before the stores.
 
-**System calls** (`late_host_read`). A host read of guest memory (a system call that reads a word, `ACCESS_READ`) used to wait
-for the writer of every page in flight, also when it read bytes outside the blocks the frame writes (a futex word that shares a
-page with a result: 0.4 waits per frame, each for the rest of the frame). A read of a page that has a snapshot, outside its
-stale blocks, goes on without a wait; `open` then makes the page readable, which the snapshot allows. `DIAG private snapshots`
-counts these reads and the system call accesses that still wait (0).
+**System calls** (`late_host_read`). A host read of guest memory (a system call that reads a word, `ACCESS_READ`) used
+to wait for the writer of every page in flight. It waited also when it read bytes outside the blocks the frame writes (a
+futex word that shares a page with a result: 0.4 waits per frame, each for the rest of the frame). A read of a page that
+has a snapshot, outside its stale blocks, goes on without a wait. `open` then makes the page readable, which the
+snapshot allows. `DIAG private snapshots` counts these reads and the system call accesses that still wait (0).
 
-**Lane stores and stores across the page border** (`a64.rs`, `try_emulate`). `ST1 {Vt.<T>}[i]` and `LD1 {Vt.<T>}[i]` (one lane,
-with or without post index) are emulated, and so is an access that crosses the border of two pages (the pair `STP` of the SDK's
-copy loop): both pages are looked at, a tracked neighbour is marked for staging when the access stores to it, and the stale blocks
-of both are handled as for one page. Without them a store the page read access did not protect against waited for the whole frame
-(0.5 per frame, 10 to 47 ms each), and with the reads gone these were the last waits.
+**Lane stores and stores across the page border** (`a64.rs`, `try_emulate`). `ST1 {Vt.<T>}[i]` and `LD1 {Vt.<T>}[i]`
+(one lane, with or without post index) are emulated. So is an access that crosses the border of two pages (the pair
+`STP` of the SDK's copy loop). The handler looks at both pages and marks a tracked neighbour for staging when the access
+stores to it. It handles the stale blocks of both as for one page. Without them, a store that the page read access did
+not protect against waited for the whole frame (0.5 per frame, 10 to 47 ms each). With the reads gone, these were the
+last waits.
 
-**EndRecording without the front lock: opt-in** (`Gpu::recorded_deferred`, `NXKIT_REC_LOCK=0`). The end of a recording only
-drops the cache summaries of recordings in its memory spans. With `NXKIT_REC_LOCK=0` the spans go into a list and the next
-`Gpu::lock` applies them before anything else uses the front end, as it does for `nvnMemoryPoolFlushMappedRange`, so the
-recording workers (six threads, 1700 recordings per frame) no longer wait for the front lock while the present holds it. It is
-not the default: in Ocarina of Time (private mode, two alternating pairs) the frame took 46.4 and 47.8 ms without the lock
-against 39.9 and 40.2 ms with it, all of it in the game's own time ("rest" 27 against 20 ms), and the GPU clock stayed lower.
-The waits on the lock pace the recording workers; without them they compete with the game threads.
+**EndRecording without the front lock: opt-in** (`Gpu::recorded_deferred`, `NXKIT_REC_LOCK=0`). The end of a recording
+only drops the cache summaries of recordings in its memory spans. With `NXKIT_REC_LOCK=0`, the spans go into a list. The
+next `Gpu::lock` applies them before anything else uses the front end, as it does for `nvnMemoryPoolFlushMappedRange`.
+So the recording workers (six threads, 1700 recordings per frame) no longer wait for the front lock while the present
+holds it. It is not the default. In Ocarina of Time (private mode, two alternating pairs), the frame took 46.4 and 47.8
+ms without the lock against 39.9 and 40.2 ms with it. All of it was in the game's own time ("rest" 27 against 20 ms),
+and the GPU clock stayed lower. The waits on the lock pace the recording workers. Without them, they compete with the
+game threads.
 
-**Not done: the present without the front lock.** The encode of the frame needs the texture table (mutable: it applies what the GPU
-wrote) and the descriptors for its whole duration, so the lock cannot be given up before it without a snapshot of both. The
-encoder thread (`NXKIT_ENC_THREAD=1` or `enc_thread`) is that snapshot: with it the frame holds the lock for 2.9 ms (page
-flush 1.9, snapshot and job 0.7) instead of 12. With the recordings taking no lock (`NXKIT_REC_LOCK=0`), nothing else takes it during the present (the
-submit is the present's own thread), and the measurement showed no gain: 45.6 ms per frame with the thread, against 40 to 50
-without; the time moved from the present to the rest of the frame.
+**Not done: the present without the front lock.** The encode of the frame needs the texture table (mutable: it applies
+what the GPU wrote) and the descriptors for its whole duration. So the lock cannot be given up before the encode without
+a snapshot of both. The encoder thread (`NXKIT_ENC_THREAD=1` or `enc_thread`) is that snapshot: with it the frame holds
+the lock for 2.9 ms (page flush 1.9, snapshot and job 0.7) instead of 12. With the recordings taking no lock
+(`NXKIT_REC_LOCK=0`), nothing else takes it during the present (the submit is the present's own thread). The measurement
+showed no gain: 45.6 ms per frame with the thread, against 40 to 50 without. The time moved from the present to the rest
+of the frame.
 
-**Counters** (`NXKIT_DIAG=private`): `DIAG private snapshots, per frame`: snapshots dropped by reason, late accesses that waited
-by reason, pages left readable by the flush, readable pages that lost it at a completion, system call reads without a wait and
-system call accesses that waited; `top program counters, not emulated` prints the instruction word of each program counter.
+**Counters** (`NXKIT_DIAG=private`): `DIAG private snapshots, per frame` has the snapshots dropped by reason, the late
+accesses that waited by reason and the pages left readable by the flush. It also has the readable pages that lost it at
+a completion, the system call reads without a wait and the system call accesses that waited.
+`top program counters, not emulated` prints the instruction word of each program counter.
 
-**Tests** (`pages.rs`, real faults): the completion of the newest frame copies its bytes before the next flush and the reader
-of the next frame gets them without a wait; a snapshot dropped for no recent reader is counted with its reason and the next
-access names it; a page with a snapshot is read without a trap (no emulated access is counted) while a store is done by
-the handler; a readable page nobody reads lately loses its access at the completion and its reader waits; a system call read
-outside the written bytes does not wait; a store across the page border and an `ST1` lane store are done without a wait and the
-neighbour page is staged. In `a64.rs`: the decode of lane forms and their execution. In `nxkit-rt`: the end of a recording
-returns while the lock is held and the next lock applies the spans.
+**Tests** (`pages.rs`, real faults):
+
+- The completion of the newest frame copies its bytes before the next flush, and the reader of the next frame gets them
+  without a wait.
+- A snapshot dropped for no recent reader is counted with its reason, and the next access names it.
+- A page with a snapshot is read without a trap (no emulated access is counted), while a store is done by the handler.
+- A readable page nobody reads lately loses its access at the completion, and its reader waits.
+- A system call read outside the written bytes does not wait.
+- A store across the page border and an `ST1` lane store are done without a wait, and the neighbour page is staged.
+
+In `a64.rs`: the decode of lane forms and their execution. In `nxkit-rt`: the end of a recording returns while the lock
+is held and the next lock applies the spans.
 
 ## Private GPU memory, step 9: the frame's own bytes for late results (`NXKIT_PRIVATE=1`)
 
-With steps 7 and 8 the picture of Ocarina of Time in the Kokiri forest was covered by a white haze, all the time, while
-`NXKIT_PRIVATE_LATE=0` and the honest mode were right. Making late stores wait (late reads still served) gave the right picture,
-so the defect was in what late stores and the completions did with the bytes the frame writes.
+With steps 7 and 8, a white haze covered the picture of Ocarina of Time in the Kokiri forest all the time.
+`NXKIT_PRIVATE_LATE=0` and the honest mode were right. Making late stores wait (late reads still served) gave the right
+picture. So the defect was in what late stores and the completions did with the bytes the frame writes.
 
-**What the game does.** A GPU pass adds up a float sum in a buffer of 4160 bytes. Each frame the game reads it (`main+0x3371c4`,
-`ldr s0, [x21, x8]`), turns it into a factor of the lighting (`1 + k / 256 * (sum - 256)`) and resets it (`main+0x3371f4`,
-`str wzr, [x21, x8]`) for the next frame. With late results the read happens while the frame that adds the next sum runs, and
-the reset is a late store into a block that frame writes. Two things then gave the CPU its own reset instead of a sum:
+**What the game does.** A GPU pass adds up a float sum in a buffer of 4160 bytes. Each frame the game reads it
+(`main+0x3371c4`, `ldr s0, [x21, x8]`), turns it into a factor of the lighting (`1 + k / 256 * (sum - 256)`) and resets
+it (`main+0x3371f4`, `str wzr, [x21, x8]`) for the next frame. With late results, the read happens while the frame that
+adds the next sum runs. The reset is a late store into a block that frame writes. Two things then gave the CPU its own
+reset instead of a sum:
 
 1. The store made the block the CPU's (`own`, then `hold`), and the completion of the frame in flight left it alone. The next read
    found the 0 the CPU wrote, every frame.
-2. The completion copied the frame's bytes from the mirror. With the CPU one frame ahead the next frame was already flushed and on
-   the GPU when the completion handler ran, and its first pass, the copy-in, had put the CPU's staged reset into the mirror. Even
-   without rule 1 the copy brought back 0 (or the next frame's partial sum).
+2. The completion copied the frame's bytes from the mirror. With the CPU one frame ahead, the next frame was already
+   flushed and on the GPU when the completion handler ran. Its first pass, the copy-in, had put the CPU's staged reset
+   into the mirror. Even without rule 1 the copy brought back 0 (or the next frame's partial sum).
 
-Measured before the fix: 1240 to 2570 late stores per frame, and 95 blocks per frame that the completion kept for the CPU while
-the mirror held other bytes.
+Measured before the fix: 1240 to 2570 late stores per frame. The completion also kept 95 blocks per frame for the CPU
+while the mirror held other bytes.
 
-**The frame's own bytes.** The flush lists the pages of the frame that game threads read late (`snap != 0` and read lately,
-`Pages::late_copy_pages`). `flush_mirror` takes a shared buffer of twice their size from the staging pool and hands it to the
-encoder in the overlay (`Overlay::late`). The encoder copies each page from the mirror into it twice with the copy-in kernel:
-right after the copy-in of the frame (the bytes the frame starts with) and in the last command buffer after every pass (the
-bytes it ends with), and registers the two copies (`Pages::set_late_copies`) before the commit. A staging or copy buffer goes
-back to the pool when the completion of its frame has finished its copies (`Pages::settled`).
+**The frame's own bytes.** The flush lists the pages of the frame that game threads read late (`snap != 0` and read
+lately, `Pages::late_copy_pages`). `flush_mirror` takes a shared buffer of twice their size from the staging pool and
+hands it to the encoder in the overlay (`Overlay::late`). The encoder copies each page from the mirror into it twice
+with the copy-in kernel. The first copy comes right after the copy-in of the frame (the bytes the frame starts with).
+The second comes in the last command buffer after every pass (the bytes it ends with). The encoder registers the two
+copies (`Pages::set_late_copies`) before the commit. A staging or copy buffer goes back to the pool when the completion
+of its frame has finished its copies (`Pages::settled`).
 
-The completion (`late_copy_back`) takes the frame's blocks from the copy of its end, not from the mirror. A page without such a
-copy (it became a read result after its flush, or the encode failed) uses the mirror only while no newer frame tags it, and
-otherwise loses its snapshot (`SnapWhy::NoCopy`), so its next reader waits once. The page is claimed while it is copied, also
-when a newer frame tags it, so a store that faults meanwhile waits for the claim.
+The completion (`late_copy_back`) takes the frame's blocks from the copy of its end, not from the mirror. A page without
+such a copy (it became a read result after its flush, or the encode failed) uses the mirror only while no newer frame
+tags it. Otherwise it loses its snapshot (`SnapWhy::NoCopy`), so its next reader waits once. The page is claimed while
+it is copied, also when a newer frame tags it. So a store that faults meanwhile waits for the claim.
 
-**The CPU's blocks.** A block the CPU wrote while the frame ran (`own` or `hold`) stays the CPU's when the frame did not change it
-(its bytes at the start and at the end are the same). When the frame changed it, the frame's bytes win in guest memory: the next
-read gets the frame's result, which is what one frame late means for a result the CPU reads and resets. The CPU's bytes still
-reach the GPU: a block a flush staged already is in the mirror (`hold`); for a block no flush staged yet (`own`) the completion
-keeps the CPU's bytes and the frame's bytes that replaced them aside (`Carry`), clears the block from `own` and marks the page
-for the next flush. Every staging path of the flush (`stage_carry`) puts the CPU's bytes back into a kept-aside block whose
-bytes are still the frame's (a newer CPU store wins) and lets the copy-in write it. A kept-aside block of a page no flush
-staged is dropped and counted.
+**The CPU's blocks.** A block the CPU wrote while the frame ran (`own` or `hold`) stays the CPU's when the frame did not
+change it (its bytes at the start and at the end are the same). When the frame changed it, the frame's bytes win in
+guest memory. The next read gets the frame's result, which is what one frame late means for a result the CPU reads and
+resets. The CPU's bytes still reach the GPU. A block that a flush staged already is in the mirror (`hold`). For a block
+that no flush staged yet (`own`), the completion keeps the CPU's bytes and the frame's bytes that replaced them aside
+(`Carry`). It clears the block from `own` and marks the page for the next flush. Every staging path of the flush
+(`stage_carry`) puts the CPU's bytes back into a kept-aside block whose bytes are still the frame's (a newer CPU store
+wins). Then it lets the copy-in write it. A kept-aside block of a page no flush staged is dropped and counted.
 
-**Later copies.** A page the completion copied this way keeps its tag until the next flush, and its guest bytes are current
-(`snap` is the tagging frame): the copy-back thread, the flush and a fault no longer copy it from the mirror again
-(`late_current`), which would bring back the CPU's reset that the next frame copied in.
+**Later copies.** A page that the completion copied this way keeps its tag until the next flush, and its guest bytes are
+current (`snap` is the tagging frame). The copy-back thread, the flush and a fault no longer copy it from the mirror
+again (`late_current`). That copy would bring back the CPU's reset that the next frame copied in.
 
-**Measured** (Ocarina of Time, Kokiri forest, `NXKIT_PRIVATE=1`, `bench.sh`, two runs): 39.3 and 39.7 ms per frame (25.5 and
-25.3 fps), GPU at P3 (69 and 71 %); before the fix 40 ms with the haze. The picture matches `NXKIT_PRIVATE_LATE=0`. Per frame: 204
-to 207 pages copied at completions, all from the frame's own copy; 43 to 61 blocks of CPU stores that the frame changed, 18 to 33
-of them kept aside for the next flush, none lost; waits for a writer 0.01. The two copies are about 6.5 MiB per frame on the GPU.
+**Measured** (Ocarina of Time, Kokiri forest, `NXKIT_PRIVATE=1`, `bench.sh`, two runs): 39.3 and 39.7 ms per frame (25.5
+and 25.3 fps), GPU at P3 (69 and 71 %). Before the fix, it was 40 ms with the haze. The picture matches
+`NXKIT_PRIVATE_LATE=0`. Per frame: 204 to 207 pages were copied at completions, all from the frame's own copy. The frame
+changed 43 to 61 blocks of CPU stores. 18 to 33 of them were kept aside for the next flush, and none was lost. Waits for
+a writer were 0.01. The two copies are about 6.5 MiB per frame on the GPU.
 
-**Counters** (`DIAG private late results`): the pages copied from the frame's own copy, the blocks of CPU writes the frame changed,
-the ones kept aside and the ones lost; `DIAG private snapshots` has the reason `no copy of the frame's bytes`.
+**Counters** (`DIAG private late results`): the pages copied from the frame's own copy, the blocks of CPU writes the
+frame changed, the ones kept aside and the ones lost. `DIAG private snapshots` has the reason
+`no copy of the frame's bytes`.
 
-**Tests** (`pages.rs`, real faults): the completion of frame 2 hands the reader of frame 3 frame 2's bytes from the copy although
-frame 3 wrote the mirror before it; without the copy such a page loses its snapshot; a sum the CPU reads and resets while the frame
-runs is read as the frame's sum next time, the reset reaches the next flush, and a block the frame did not change keeps the CPU's
-byte; a reset staged before the completion still lets the reader get the frame's sum; a CPU write the frame did not change
-survives; an atomic add on a counter the frame changed is staged and the reader gets the frame's value. `nxkit-gpu` (real Metal):
-the copy kernel copies the page at the start and the end of the frame, and the completion hands the reader the bytes of the end
-although the mirror changed after it.
+**Tests** (`pages.rs`, real faults):
+
+- The completion of frame 2 hands the reader of frame 3 frame 2's bytes from the copy, although frame 3 wrote the mirror
+  before it.
+- Without the copy, such a page loses its snapshot.
+- A sum that the CPU reads and resets while the frame runs is read as the frame's sum next time. The reset reaches the
+  next flush, and a block the frame did not change keeps the CPU's byte.
+- A reset staged before the completion still lets the reader get the frame's sum.
+- A CPU write the frame did not change survives.
+- An atomic add on a counter the frame changed is staged, and the reader gets the frame's value.
+
+`nxkit-gpu` (real Metal): the copy kernel copies the page at the start and the end of the frame. The completion hands
+the reader the bytes of the end, although the mirror changed after it.
 
 ## Memory
 
@@ -1008,20 +1089,20 @@ although the mirror changed after it.
 - The cache of native plans keeps 4 plans (`NXKIT_NATIVE_CACHE`), least recently used first out.
 - The batch scratch buffers start at 8 MiB per slot and double up to 64 MiB when a frame needs more.
 - Compressed, depth and stencil uploads share pooled staging buffers (see "Textures").
-- Textures that no frame used for 600 frames (`NXKIT_TEX_EVICT`) lose their Metal copy when the guest copy is current (`textures/evict.rs`). The store notes the frame of each Metal texture's last use every time `ensure` hands it out, and `end_frame` scans every 60 frames. A texture that was ever an attachment, an atomic target or a CPU-read texture, that a frame wrote, or that is memoryless, widened or scaled stays. The dropped texture goes through `retired`, and the command buffers of frames in flight keep their own references through `Keep`, so it lives until the GPU is done. The next use makes it again with `fresh` set, and the normal upload path (`needs_upload`) fills it from guest memory. The orphans of the front end (finalized textures that a pool slot still names) lose their Metal copy the same way when they go idle.
-- Textures over memory that another texture overwrote lose their Metal copy too (`textures/supersede.rs`, `NXKIT_TEX_SUPERSEDE=0` turns it off). On the console one guest range exists once, so a GPU write to a texture overwrites every other texture over the same memory. The game makes new texture objects over old memory with other sizes and formats, and each one has a Metal texture in the store. A Metal texture goes when another Metal texture over an overlapping range was written by a frame after the last use of the first one, and the first one was idle for `MIN_FRAMES` frames. Only a pass that wrote the texture counts as a write (`mark_written`), not the state "the GPU copy is newer". A texture with several images (`multi`: mip levels, layers, a cube, a depth) stays when the other range lies strictly inside it or strictly covers it, because the write may have touched only one image; a single image that was partly overwritten goes, so a smaller render target at the address of an older larger one supersedes it. A texture that the CPU reads back and a memoryless one stay. The scan runs with `evict_scan`, sorts one range per Metal texture by start address and compares each range with at most 256 followers, so a large cluster at one address is only partly seen in one scan. The ids keep their attachment, atomic and native state, so an id that is used again gets a new texture in the same shape.
+- Textures that no frame used for 600 frames (`NXKIT_TEX_EVICT`) lose their Metal copy when the guest copy is current (`textures/evict.rs`). The store notes the frame of each Metal texture's last use every time `ensure` hands it out, and `end_frame` scans every 60 frames. A texture that was ever an attachment, an atomic target or a CPU-read texture, that a frame wrote, or that is memoryless, widened or scaled stays. The dropped texture goes through `retired`. The command buffers of frames in flight keep their own references through `Keep`, so it lives until the GPU is done. The next use makes it again with `fresh` set, and the normal upload path (`needs_upload`) fills it from guest memory. The orphans of the front end (finalized textures that a pool slot still names) lose their Metal copy the same way when they go idle.
+- Textures over memory that another texture overwrote lose their Metal copy too (`textures/supersede.rs`, `NXKIT_TEX_SUPERSEDE=0` turns it off). On the console one guest range exists once, so a GPU write to a texture overwrites every other texture over the same memory. The game makes new texture objects over old memory with other sizes and formats, and each one has a Metal texture in the store. A Metal texture goes when two things are true. A frame wrote another Metal texture over an overlapping range after the last use of the first one. And the first one was idle for `MIN_FRAMES` frames. Only a pass that wrote the texture counts as a write (`mark_written`), not the state "the GPU copy is newer". A texture with several images (`multi`: mip levels, layers, a cube, a depth) stays when the other range lies strictly inside it or strictly covers it. The reason is that the write may have touched only one image. A single image that was partly overwritten goes. So a smaller render target at the address of an older larger one supersedes it. A texture that the CPU reads back and a memoryless one stay. The scan runs with `evict_scan`. It sorts one range per Metal texture by start address and compares each range with at most 256 followers. So one scan sees only part of a large cluster at one address. The ids keep their attachment, atomic and native state, so an id that is used again gets a new texture in the same shape.
 
-- The guest range is one no-copy `MTLBuffer`. Its whole length counts in the Metal device total and in the Metal HUD, touched or not, and the driver wires all of it while it is resident (see `docs/nxkit-host.md`, "What the GPU buffer costs"). `NXKIT_MEM_REPORT` shows the touched and wired pages apart.
-- The pipeline archive is read into memory per file. With shards (one per batch) the host opens a shard on its first pipeline and keeps 32 open (`NXKIT_SHARD_LRU`), and closes them all when the prewarm is over (`NXKIT_SHARD_TRIM=0` keeps them); the single archive of an older build is read whole (4.8 GB for one title, measured).
+- The guest range is one no-copy `MTLBuffer`. Its whole length counts in the Metal device total and in the Metal HUD, touched or not. The driver wires all of it while it is resident (see `docs/nxkit-host.md`, "What the GPU buffer costs"). `NXKIT_MEM_REPORT` shows the touched and wired pages apart.
+- The pipeline archive is read into memory per file. With shards (one per batch), the host opens a shard on its first pipeline and keeps 32 open (`NXKIT_SHARD_LRU`). It closes them all when the prewarm is over (`NXKIT_SHARD_TRIM=0` keeps them). The single archive of an older build is read whole (4.8 GB for one title, measured).
 - `NXKIT_MEM_ALLOC=<MiB>` prints who makes a large heap allocation.
 
-Shader libraries stay loaded on purpose. `Programs` keeps each `StageProgram` with its `ShaderLibrary` for the life of the shader directory, and the library cannot be dropped once the pipelines of a program exist: a program makes a new pipeline for every combination of render targets, blend state, vertex layout and topology, so a later draw can need the library again. The code does not know when the last such pipeline was made. `pipelines/render.rs` builds the pipeline description with `&vs.lib` before it looks the cache up, the background compile jobs (`RenderJob`, `MeshJob`) hold clones of the libraries, and the mesh path clones them as well. To release a library, the description would have to be built only on a miss, and `StageProgram.lib` would become a handle that loads the metallib again on demand. That changes the hot path of every draw for an unmeasured gain: the library counter (`libs` in the report) counts objects, not bytes, and Metal does not report what a library costs. Measure `libs` and the `files` regions in a long run before doing it.
+Shader libraries stay loaded on purpose. `Programs` keeps each `StageProgram` with its `ShaderLibrary` for the life of the shader directory. The library cannot be dropped once the pipelines of a program exist. A program makes a new pipeline for every combination of render targets, blend state, vertex layout and topology. So a later draw can need the library again. The code does not know when the last such pipeline was made. `pipelines/render.rs` builds the pipeline description with `&vs.lib` before it looks the cache up. The background compile jobs (`RenderJob`, `MeshJob`) hold clones of the libraries, and the mesh path clones them as well. To release a library, the description would have to be built only on a miss. Also, `StageProgram.lib` would become a handle that loads the metallib again on demand. That changes the hot path of every draw for an unmeasured gain. The library counter (`libs` in the report) counts objects, not bytes, and Metal does not report what a library costs. Measure `libs` and the `files` regions in a long run before doing it.
 
 ## Native replacements (`native`)
 
-A game can run a neural network as a chain of compute dispatches. `native` replaces such a chain by a `Plan` of own kernels (`nxkit-native-plan`, built by `nxkit-ndve` or `nxkit-ndsr`). The module knows no network: a `Replacement` gives the program keys that find the run, the weight buffers that prove the network, and the plan. Each frame `Native::prepare` reads and hashes the weights through the storage bindings, looks the verdict up in the plan cache (4 plans, least recently used out, `NXKIT_NATIVE_CACHE`) and resolves the game's textures, so nothing fails later. The pass loop then skips the run's dispatches and `encode` writes one compute pass with the plan's steps and a barrier between dependent steps. Any mismatch leaves the game's own dispatches: the result is the original picture and never a wrong one, and the health report counts the reason (`ndve.*`, `ndsr.*`).
+A game can run a neural network as a chain of compute dispatches. `native` replaces such a chain by a `Plan` of own kernels (`nxkit-native-plan`, built by `nxkit-ndve` or `nxkit-ndsr`). The module knows no network: a `Replacement` gives the program keys that find the run, the weight buffers that prove the network, and the plan. Each frame, `Native::prepare` reads and hashes the weights through the storage bindings. It looks the verdict up in the plan cache (4 plans, least recently used out, `NXKIT_NATIVE_CACHE`) and resolves the game's textures, so nothing fails later. The pass loop then skips the run's dispatches and `encode` writes one compute pass with the plan's steps and a barrier between dependent steps. Any mismatch leaves the game's own dispatches: the result is the original picture and never a wrong one. The health report counts the reason (`ndve.*`, `ndsr.*`).
 
-- NDVE (`native/ndve.rs`): the movie network, key and bindings of `nn::ndve`. NDSR (`native/ndsr.rs`): the agl upscaler; each input and output size has its own plan.
+- NDVE (`native/ndve.rs`): the movie network, key and bindings of `nn::ndve`. NDSR (`native/ndsr.rs`): the agl upscaler. Each input and output size has its own plan.
 - `NXKIT_NDVE=0` and `NXKIT_NDSR=0` turn a network off. `NXKIT_<NAME>_COMPARE=1` runs the game's chain and the plan on a sampled frame and prints the largest difference per channel. `NXKIT_DIAG=ndve`, `ndsr` print the capture list once per run. `NXKIT_DIAG=nativeprof` times each step with GPU timestamps (the steps then run one after the other, so the sum is above the plan's time). `NXKIT_SKIP_PROGRAMS` and `NXKIT_SKIP_FILE` leave out steps by kernel name.
 - Status: measured kernel times are in the plans ([ndve-impl.md](plans/ndve-impl.md), [ndsr-native.md](plans/ndsr-native.md)). A plan holds tens of MB of scratch.
 
@@ -1030,14 +1111,14 @@ A game can run a neural network as a chain of compute dispatches. `native` repla
 A game that upscales its scene with its own temporal anti-aliasing and one full-screen upscale draw can get MetalFX's temporal scaler instead. `temporal_upscale` of `game.json` names the draws by their fragment programs (docs/nxkit-host.md). `NXKIT_TEMPORAL_UPSCALE=0` turns it off.
 
 - The pass-through draws (the game's temporal anti-aliasing) are left out. A copy draw writes the texture of their pass-through slot (the jittered scene) one to one into colour attachment 0 of their pass, in its format. The game's history then holds the current frame, and the later passes work on the jittered picture.
-- The upscale draw is left out. Before its pass, a compute pass writes the motion texture (`Rg16Float`, input size): the decoded velocity of each pixel, or the camera motion from the depth and `ClipToPrevClip` where the velocity texel is 0. MetalFX's scaler then accumulates the picture of the upscale slot at the size of colour attachment 0, in the format of the picture. A copy draw writes the result into colour attachment 0 in its own format. The game's pass loads that attachment and draws the rest of its draws (the UI) on top.
-- Each replaced draw must be the first draw of its pass, so the replacement goes before the pass. The own passes start with a barrier after all earlier work of the queue and end with one before all later work, and the game's pass waits for the copy. MetalFX sets no barriers, so the motion pass holds the scaler's work behind it.
+- The upscale draw is left out. Before its pass, a compute pass writes the motion texture (`Rg16Float`, input size). It holds the decoded velocity of each pixel, or the camera motion from the depth and `ClipToPrevClip` where the velocity texel is 0. MetalFX's scaler then accumulates the picture of the upscale slot at the size of colour attachment 0, in the format of the picture. A copy draw writes the result into colour attachment 0 in its own format. The game's pass loads that attachment and draws the rest of its draws (the UI) on top.
+- Each replaced draw must be the first draw of its pass, so the replacement goes before the pass. The own passes start with a barrier after all earlier work of the queue and end with one before all later work. The game's pass waits for the copy. MetalFX sets no barriers, so the motion pass holds the scaler's work behind it.
 - `Tupscale::prepare` decides once per frame, before any pass is encoded. It finds the draws, resolves every texture, reads the view uniform buffer and checks the sizes, the formats and the usages that MetalFX asks for. When anything is missing or does not fit, nothing of the frame is replaced and the game's draws run. The log names each reason once (`nxkit-gpu: temporal upscale: ...`). A frame without the upscale draw (a menu) is not logged.
-- A scaler is made once per input size, output size, colour format and depth format, at most once in 30 frames, and the log names each one with its time (about one second). The scaler is reset on a new scaler, after a frame that did not run, and on a camera cut: a probe point at the centre or near a corner of the screen, far from the camera, moves more than half the screen.
+- A scaler is made once per input size, output size, colour format and depth format, at most once in 30 frames. The log names each one with its time (about one second). The scaler is reset on a new scaler, after a frame that did not run, and on a camera cut. In a camera cut, a probe point at the centre or near a corner of the screen, far from the camera, moves more than half the screen.
 - Signs. The velocity is this position minus the previous one, in clip units with y up. The motion is `(-V.x * W / 2, V.y * H / 2 * s)` pixels and the jitter `(J.x * W / 2, -J.y * H / 2 * s)` pixels, for a picture of `W` x `H`. `s` is 1 when the rows of the source pass run down the screen and -1 when its viewport has a negative height (a lower-left origin). The knobs `tupjx`, `tupjy`, `tupmx` and `tupmy` flip one sign while the game runs.
 - State: the scaler, its motion and output textures, the pipelines and the counters live in `Tupscale` behind a mutex. The frame's `Prepared` holds clones of what the encode threads need. One frame encodes at a time, so the scaler is never encoded twice at once.
-- `NXKIT_DIAG=tupscale` prints the textures of each new configuration and, every 120 frames, the frames that ran and fell back, the jitter and a summary of `ClipToPrevClip`.
-- Tests: the arithmetic (`tupscale/math.rs`), the motion kernel on the GPU against it for a written velocity and for the camera motion in both row directions, and the copy draw from `Bgra8Unorm` into `Rgba8Unorm`. No game ran with it yet: the signs of the motion and the jitter are not checked on a picture.
+- `NXKIT_DIAG=tupscale` prints the textures of each new configuration. Every 120 frames, it prints the frames that ran and fell back, the jitter and a summary of `ClipToPrevClip`.
+- Tests: the arithmetic (`tupscale/math.rs`) and the motion kernel on the GPU against it, for a written velocity and for the camera motion in both row directions. A test also covers the copy draw from `Bgra8Unorm` into `Rgba8Unorm`. No game ran with it yet: the signs of the motion and the jitter are not checked on a picture.
 
 ## Neural Engine offload (`native/ane`)
 
@@ -1045,7 +1126,7 @@ For NDVE the model can run on the Neural Engine instead (`NXKIT_NDVE_ANE=0` turn
 
 - A background thread writes the Core ML package (`nxkit-ndve::ane`), compiles and loads it with `nxkit-coreml`, and refuses it unless every operation is on the Neural Engine. The package is cached by the weights and the macOS build.
 - The model runs at decode time. `nxkit-svc-video` reports each decoded `Frame` and each read of a picture into guest memory (`PictureSink`). The feeder converts the picture to the f16 input on the CPU and starts `predict_async`. The completion makes the slot `Ready`. A picture shown twice finds its slot again.
-- The dispatch finds its picture by the address of a read, by the chain of the walk's copy records (each carries the plain GPU address of both sides; up to four hops), or by a luma fingerprint of 256 scattered bytes. The game copies the decoder's planes, so the first way alone fails.
+- The dispatch finds its picture by the address of a read or by the chain of the walk's copy records (each carries the plain GPU address of both sides, up to four hops). It can also use a luma fingerprint of 256 scattered bytes. The game copies the decoder's planes, so the first way alone fails.
 - A ready result lets the frame run `ndve_ane_quant` and `ndve_ane_epilogue` in place of the plan, with the slot's outputs bound as textures. Without a result the plan runs. Counters: `ndve.ane` and `ndve.ane_fallback(warmup|late|unknown_picture|params|error|no_match)`.
 - Not measured here: the share of pictures that are early enough in a game. Read it from the counters.
 
@@ -1057,15 +1138,15 @@ uses only its own layer and the ones below. The encode path reaches the analyses
 
 ## Diagnostics
 
-The encoder has opt-in diagnostics (`NXKIT_DIAG`), knobs for experiments (`NXKIT_KNOB`) and a render health report that counts every draw, upload, view and copy that was dropped (`NXKIT_DIAG=health`). [diagnostics.md](diagnostics.md) lists them all.
+The encoder has opt-in diagnostics (`NXKIT_DIAG`), knobs for experiments (`NXKIT_KNOB`) and a render health report (`NXKIT_DIAG=health`). The report counts every draw, upload, view and copy that was dropped. [diagnostics.md](diagnostics.md) lists them all.
 
 ## Measurement (R16)
 
-`EncodeStats` counts draws, skipped commands by reason, ICB executions and builds, pipeline switches and builds, barriers emitted and avoided, render and compute passes, command buffers, textures created, uploads, copy-backs and the CPU time of the encode in nanoseconds. The `Metrics` of the batch ring hold the GPU time of every command buffer.
+`EncodeStats` counts draws, skipped commands by reason, ICB executions and builds, and pipeline switches and builds. It also counts barriers emitted and avoided, render and compute passes, command buffers and textures created. Last, it counts uploads, copy-backs and the CPU time of the encode in nanoseconds. The `Metrics` of the batch ring hold the GPU time of every command buffer.
 
 ## Cost of the walk
 
-The walk runs on a helper thread beside the decode of the same submit, and the game thread waits for the longer of the two (`walk-join` in `NXKIT_DIAG=frame`). `NXKIT_DIAG=walkprof` prints, for each submit, the time in reading records, in the other records, in building the detail of draws, in snapshots and in allocation (see `docs/diagnostics.md`).
+The walk runs on a helper thread beside the decode of the same submit, and the game thread waits for the longer of the two (`walk-join` in `NXKIT_DIAG=frame`). `NXKIT_DIAG=walkprof` prints the time of each submit by part (see `docs/diagnostics.md`): reading records, the other records, building the detail of draws, snapshots and allocation.
 
 What keeps the walk short:
 
@@ -1074,7 +1155,7 @@ What keeps the walk short:
 - The knob lookups (`overlap`, `nosnap`, `nosnapsbuf`) are read once per submit, not once per bound buffer.
 - A snapshot buffer is an `Arc<[u8]>` per range, not a slice of one block per frame. A block that several `Arc` share needs `unsafe` or a changed `UboDetail`, and the consumers (`bindless/mod.rs`, the preload in `gpu/preload.rs`) read `Arc<[u8]>`. The pool gives the same saving in the steady state: no allocation, no page faults.
 
-The walk of one submit stays on one thread. A recording starts from the state that the recording before it left, and an `UpdateUniform` of one recording changes the bytes that the snapshots of the next one read, so the recordings are not independent. A split would need the final state of the first half before the second half starts.
+The walk of one submit stays on one thread. A recording starts from the state that the recording before it left. An `UpdateUniform` of one recording changes the bytes that the snapshots of the next one read. So the recordings are not independent. A split would need the final state of the first half before the second half starts.
 
 `DrawDetail` keeps five vectors and an `Arc` per draw. They are shared with the encoder, so the walker cannot reuse them. The `banks equal` counter of `walkprof` shows how many banks of a draw equal those of the draw before. It is the figure to read before a dirty bit per bank is worth its code.
 
@@ -1094,9 +1175,9 @@ These are known gaps. Each shows up as a `Skip` count or is a limit of the first
 - Partial clears (a scissor cuts the target) are not encoded.
 - Triangle fans, quads, adjacency and patches, and byte indices, are not translated.
 - Multisampled attachments are downgraded to one sample. The pass descriptions do not resolve.
-- The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool`, `drvcb`, `ubo_ptr`, `support`, `border`, `blendz`, `sbuf`, `c1`, `img`, `gmem_map` and `gmem_log` are filled. A program with another kind is skipped (`Skip::Binding`); the health report names the kind (`binding.refused`). `tex_ubo` and `samp_ubo` (a bindless handle that the shader reads from a uniform buffer) are filled as `tex` and `samp_tex` members of a texture slot of their own (`ubotex.rs`): before the frame resolves its handles, the host reads the handle word of each draw and dispatch from the snapshot of the uniform buffer or from guest memory and adds it to the draw's texture binds. A split handle takes the texture index from one word and the sampler index from the other; a sampler word in the driver bank c2 is not read, so such a member is still refused. The frame analysis does not see these textures, so a texture that an earlier pass of the frame writes gets no barrier for them, as with the pools. `img_ubo` (bindless images) is not filled. The shader variants `_bv`, `_bx` and `_bf` are not used. `_bp` is: a vertex shader with a `pull` field is loaded from `<key>_bp.metallib` (`programs.rs`), and each of its draws gets a `dm_vlayout` block at buffer 16 instead of its vertex streams and the default vertex (`pull/mod.rs`: per stream the address rounded down to 4 bytes, stride and divisor, per input location the NVN attribute word, 0 for an input without a bound stream). Its pipelines have no vertex layout, so the key and the thread memo leave the attributes and streams out. Off unless `NXKIT_PULL=1`; otherwise the `_b` library and the stage_in layout are used.
-- `blendz` is one 32-bit word per draw in the fragment argument buffer (`translate::blend_zero_word`): 3 bits per colour target, the kind of its source RGB factor (0 none, 1 `ZERO`, 2 `SRC_ALPHA`, 3 `ONE_MINUS_SRC_ALPHA`). The pixel shader writes RGB 0 to a float colour whose factor is 0 for the pixel, because the Apple blender gives NaN for `0 x NaN` and the console gives 0 (see [translator.md](translator.md)). The word is 0 for blending off, an integer format, a colour the shader does not write, the equation MIN or MAX every other factor and a destination RGB factor that reads the source colour (`SRC_COLOR`, `ONE_MINUS_SRC_COLOR`; the rule would zero it); the binding then points to the zero buffer. The memo of the argument buffers includes the word. A program without the binding ignores it, and the knob `nobz` sets every word to 0.
-- The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool` (the host tables of the pool tables section), `drvcb`, `ubo_ptr`, `support`, `border`, `sbuf`, `c1`, `img`, `gmem_map` and `gmem_log` are filled. A program with another kind is skipped (`Skip::Binding`); the health report names the kind (`binding.refused`). `tex_ubo` and `samp_ubo` (a bindless handle that the shader reads from a uniform buffer) are filled as `tex` and `samp_tex` members of a texture slot of their own (`ubotex.rs`): before the frame resolves its handles, the host reads the handle word of each draw and dispatch from the snapshot of the uniform buffer or from guest memory and adds it to the draw's texture binds. A split handle takes the texture index from one word and the sampler index from the other; a sampler word in the driver bank c2 is not read, so such a member is still refused. The frame analysis does not see these textures, so a texture that an earlier pass of the frame writes gets no barrier for them, as with the pools. `img_ubo` (bindless images) is not filled. The shader variants `_bv`, `_bx` and `_bf` are not used. `_bp` is: a vertex shader with a `pull` field is loaded from `<key>_bp.metallib` (`programs.rs`), and each of its draws gets a `dm_vlayout` block at buffer 16 instead of its vertex streams and the default vertex (`pull/mod.rs`: per stream the address rounded down to 4 bytes, stride and divisor, per input location the NVN attribute word, 0 for an input without a bound stream). Its pipelines have no vertex layout, so the key and the thread memo leave the attributes and streams out. Off unless `NXKIT_PULL=1`; otherwise the `_b` library and the stage_in layout are used.
+- The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool`, `drvcb`, `ubo_ptr`, `support`, `border`, `blendz`, `sbuf`, `c1`, `img`, `gmem_map` and `gmem_log` are filled. A program with another kind is skipped (`Skip::Binding`). The health report names the kind (`binding.refused`). `tex_ubo` and `samp_ubo` (a bindless handle that the shader reads from a uniform buffer) are filled as `tex` and `samp_tex` members of a texture slot of their own (`ubotex.rs`). Before the frame resolves its handles, the host reads the handle word of each draw and dispatch. It reads the word from the snapshot of the uniform buffer or from guest memory. It adds the word to the draw's texture binds. A split handle takes the texture index from one word and the sampler index from the other. A sampler word in the driver bank c2 is not read, so such a member is still refused. The frame analysis does not see these textures. So a texture that an earlier pass of the frame writes gets no barrier for them, as with the pools. `img_ubo` (bindless images) is not filled. The shader variants `_bv`, `_bx` and `_bf` are not used. `_bp` is used. A vertex shader with a `pull` field is loaded from `<key>_bp.metallib` (`programs.rs`). Each of its draws gets a `dm_vlayout` block at buffer 16 instead of its vertex streams and the default vertex (`pull/mod.rs`: per stream the address rounded down to 4 bytes, stride and divisor, per input location the NVN attribute word, 0 for an input without a bound stream). Its pipelines have no vertex layout, so the key and the thread memo leave the attributes and streams out. It is off unless `NXKIT_PULL=1`. Otherwise the `_b` library and the stage_in layout are used.
+- `blendz` is one 32-bit word per draw in the fragment argument buffer (`translate::blend_zero_word`): 3 bits per colour target, the kind of its source RGB factor (0 none, 1 `ZERO`, 2 `SRC_ALPHA`, 3 `ONE_MINUS_SRC_ALPHA`). The pixel shader writes RGB 0 to a float colour whose factor is 0 for the pixel. The reason is that the Apple blender gives NaN for `0 x NaN` and the console gives 0 (see [translator.md](translator.md)). The word is 0 for blending off, an integer format and a colour the shader does not write. It is also 0 for the equation MIN or MAX every other factor, and for a destination RGB factor that reads the source colour (`SRC_COLOR`, `ONE_MINUS_SRC_COLOR`: the rule would zero it). The binding then points to the zero buffer. The memo of the argument buffers includes the word. A program without the binding ignores it, and the knob `nobz` sets every word to 0.
+- The binding kinds `cbuf`, `tex`, `samp`, `samp_tex`, `tex_pool`, `samp_pool` (the host tables of the pool tables section), `drvcb`, `ubo_ptr`, `support`, `border`, `sbuf`, `c1`, `img`, `gmem_map` and `gmem_log` are filled. A program with another kind is skipped (`Skip::Binding`). The health report names the kind (`binding.refused`). `tex_ubo` and `samp_ubo` (a bindless handle that the shader reads from a uniform buffer) are filled as `tex` and `samp_tex` members of a texture slot of their own (`ubotex.rs`). Before the frame resolves its handles, the host reads the handle word of each draw and dispatch. It reads the word from the snapshot of the uniform buffer or from guest memory. It adds the word to the draw's texture binds. A split handle takes the texture index from one word and the sampler index from the other. A sampler word in the driver bank c2 is not read, so such a member is still refused. The frame analysis does not see these textures. So a texture that an earlier pass of the frame writes gets no barrier for them, as with the pools. `img_ubo` (bindless images) is not filled. The shader variants `_bv`, `_bx` and `_bf` are not used. `_bp` is used. A vertex shader with a `pull` field is loaded from `<key>_bp.metallib` (`programs.rs`). Each of its draws gets a `dm_vlayout` block at buffer 16 instead of its vertex streams and the default vertex (`pull/mod.rs`: per stream the address rounded down to 4 bytes, stride and divisor, per input location the NVN attribute word, 0 for an input without a bound stream). Its pipelines have no vertex layout, so the key and the thread memo leave the attributes and streams out. It is off unless `NXKIT_PULL=1`. Otherwise the `_b` library and the stage_in layout are used.
 - The texture view has no channel swizzle (counted as `swizzle_ignored`). A cube view ignores the layer range.
 - Texel fetches with integer coordinates and `textureSize` of a 2D texture see native units through the render scale of the support buffer. Other texture types still see the scaled size (refer to the render scale section).
 - An unbound pool slot reads as zero. A pool ID that a shader reads for the first time shows its texture one frame later.
@@ -1113,7 +1194,7 @@ Each item names the check.
 | A Metal 4 argument table keeps the values set before a draw | draw twice with different tables in one pass and read the result |
 | A barrier at queue scope covers earlier command buffers of the same queue | run a render to texture in one command buffer and a sample in the next |
 | A barrier inside a render pass comes after the attachment load | render with a load and a barrier and read the result |
-| The window origin: a lower-left device origin flips the viewport of a draw (negative height from the bottom row, `walk/origin.rs`), the origin that a queue captured flips the front face, and a present flips Y within the crop of an image presented under a lower-left origin. The contributor checked the picture visually. That the viewport follows the device origin and the winding the queue origin is assumed, without NVN evidence | run each game with a lower-left origin and compare its picture and its culled faces with the console |
+| The window origin: a lower-left device origin flips the viewport of a draw (negative height from the bottom row, `walk/origin.rs`). The origin that a queue captured flips the front face. A present flips Y within the crop of an image presented under a lower-left origin. The contributor checked the picture visually. It is assumed, without NVN evidence, that the viewport follows the device origin and the winding follows the queue origin | run each game with a lower-left origin and compare its picture and its culled faces with the console |
 | The channel order of the 4 bit formats and the block copy of compressed formats into uint textures | upload a known texture of each format and read it back |
 | The state after `ExecuteIcb` is undefined as assumed | compare a pass that runs an ICB and then draws without setting state |
 | The types that the encoding threads share are `Sync` | the first build |

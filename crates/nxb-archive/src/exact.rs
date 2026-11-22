@@ -156,7 +156,7 @@ pub struct ExactState {
     pub alpha_to_coverage: bool,
     /// ICB support.
     pub icb: bool,
-    /// The colour slots; `None` is an empty one.
+    /// The colour slots. `None` is an empty one.
     pub colors: Vec<Option<ColorSlot>>,
 }
 

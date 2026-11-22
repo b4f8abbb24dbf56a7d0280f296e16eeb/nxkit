@@ -31,7 +31,7 @@
 //! (default 64) flushes the frame at once (`FlushReason::Release`, `NXKIT_RELEASE_FLUSH=0` turns it off): the game
 //! signals the event when it has recorded the work of the frame, and the present comes a few ms later, so the encode
 //! of the work starts those ms earlier. The flush runs no held op. The submits that it carries and the fences they make
-//! belong to its number; what is still held and what comes after goes into the next flush, which the present makes.
+//! belong to its number. What is still held and what comes after goes into the next flush, which the present makes.
 //!
 //! `nvnQueueFlush` flushes the frame when no other flush took the submits before it along within 50 ms
 //! (`FlushReason::Queue`, `qflush`). It runs no held op either.

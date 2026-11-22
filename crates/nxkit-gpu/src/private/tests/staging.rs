@@ -7,7 +7,7 @@ fn a_frame_with_forced_submits_gets_the_pages_the_cpu_writes_until_their_signal(
     let _t = locked(&TURN);
     let Some(g) = guest(64 << 20) else { return };
     let page = PAGE;
-    // Page 90 is a member that frame 40 wrote and finished; frame 41 writes page 80 only.
+    // Page 90 is a member that frame 40 wrote and finished. Frame 41 writes page 80 only.
     let _o40 = at_flush(
         &dispatch(VA + 90 * page, 0x100),
         40,
@@ -123,7 +123,7 @@ fn a_range_that_resolved_partly_on_members_is_made_whole_by_the_next_flush() {
     let _t = locked(&TURN);
     let Some(g) = guest(64 << 20) else { return };
     let page = PAGE;
-    // Page 50 is written by the frame and so a member; a texture-like source starts in page 49, which no binding
+    // Page 50 is written by the frame and so a member. A texture-like source starts in page 49, which no binding
     // announces, and reaches into page 50.
     let detail = dispatch(VA + 50 * page, 0x100);
     let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
@@ -162,13 +162,13 @@ fn a_range_that_resolved_partly_on_members_is_made_whole_by_the_next_flush() {
     FORCE.with(|f| f.set(None));
 }
 
-/// The live case in small: 71 bindings of 72 pages that every frame may write, 154 pages the CPU writes every frame
-/// that no frame touches and 77 pages of the written ones that it reads and writes every frame. The three settings give
-/// the same bytes; the times are printed.
+/// The live case in small: 71 bindings of 72 pages that every frame may write. 154 pages the CPU writes every frame
+/// that no frame touches. 77 pages of the written ones that it reads and writes every frame. The three settings give
+/// the same bytes, and the test prints the times.
 #[test]
 fn the_adaptive_settings_keep_the_bytes_exact_and_the_numbers_are_printed() {
     let _t = locked(&TURN);
-    // The tests before this one left pages of their guest tracked and without access; the tracker still covers them.
+    // The tests before this one left pages of their guest tracked and without access. The tracker still covers them.
     Pages::global().release_all();
     let Some(g) = guest(256 << 20) else { return };
     let page = PAGE;

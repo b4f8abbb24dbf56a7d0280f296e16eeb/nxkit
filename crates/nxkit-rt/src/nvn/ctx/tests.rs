@@ -150,7 +150,7 @@ fn a_release_that_brought_a_lot_of_work_flushes_the_frame_and_the_fences_follow(
         on: true,
         min_work: 4,
     };
-    // Two commands were in the frame before the release; five came with it.
+    // Two commands were in the frame before the release, and five came with it.
     work(&g, 2);
     let from = g.lock().frame().cmds.len();
     work(&g, 5);

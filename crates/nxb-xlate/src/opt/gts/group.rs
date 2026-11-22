@@ -20,7 +20,7 @@ pub(super) fn canon(ir: &Ir, mut o: Opd) -> Opd {
     o
 }
 
-/// The value of a constant operand; an undefined one is the zero register.
+/// The value of a constant operand. An undefined one is the zero register.
 pub(super) fn constant_of(ir: &Ir, o: Opd) -> Option<i32> {
     match ir.ty(o) {
         OperandType::Constant => Some(ir.value(o)),
@@ -113,7 +113,7 @@ pub(super) fn decompose(ir: &Ir, lo: Opd, hi: Opd) -> (Opd, Opd, u32) {
     (lo, hi, k)
 }
 
-/// The immediate dominator of each block ("A Simple, Fast Dominance Algorithm"); block 0 is the entry and its own
+/// The immediate dominator of each block ("A Simple, Fast Dominance Algorithm"). Block 0 is the entry and its own
 /// dominator, and a block it does not reach has none.
 pub(super) fn immediate_dominators(blocks: &[Block]) -> Vec<Option<usize>> {
     let n = blocks.len();

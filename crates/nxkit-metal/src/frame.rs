@@ -276,7 +276,7 @@ impl Frame {
                     gpu_end_s: end,
                     failed: fb.error().is_some(),
                 };
-                // The batches print their failures (`batch.rs`); a frame (the present blit) did not, so a GPU fault
+                // The batches print their failures (`batch.rs`). A frame (the present blit) did not, so a GPU fault
                 // there left no line in the log.
                 if let Some(e) = fb.error() {
                     static SHOWN: AtomicUsize = AtomicUsize::new(0);

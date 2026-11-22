@@ -84,7 +84,7 @@ impl Rig {
             self.x[usize::from(op.rn)] = base;
         }
         let r = self.regs();
-        // SAFETY: the register file and the buffer are the rig's own; the access lies inside the buffer.
+        // SAFETY: the register file and the buffer are the rig's own. The access lies inside the buffer.
         unsafe {
             let p = plan(&op, &r);
             let off = p.ea.wrapping_sub(self.mem.as_ptr() as u64) as usize;

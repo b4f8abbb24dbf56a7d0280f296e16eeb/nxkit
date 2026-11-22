@@ -221,7 +221,7 @@ pub struct GpuEnv {
     pub copyback: bool,
     /// `NXKIT_COPYBACK_MAX_MB` (128): the storage MiB that one frame may copy back.
     pub copyback_max_mb: u64,
-    /// `NXKIT_PRIVATE` as given (`track`, `1`); the mode is read from it in `private`.
+    /// `NXKIT_PRIVATE` as given (`track`, `1`). The mode is read from it in `private`.
     pub private: Option<String>,
     /// `NXKIT_PRIVATE_AHEAD` (1): the frames the mirror may run ahead.
     pub private_ahead: u64,

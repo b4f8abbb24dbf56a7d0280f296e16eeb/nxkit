@@ -33,7 +33,7 @@ pub struct ImageDesc {
     pub pixel: PixelFormat,
     /// The type of the texture.
     pub kind: TextureKind,
-    /// Width, height and depth; at least 1 each.
+    /// Width, height and depth, each at least 1.
     pub extent: [u32; 3],
     /// The mip levels.
     pub levels: u32,

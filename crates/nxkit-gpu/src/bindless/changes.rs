@@ -160,7 +160,7 @@ mod tests {
             c.note(i);
         }
         assert_eq!(ids(c.take(0)), vec![0, 1, 2, 3]);
-        // the log is full and cut; slot 1 never took any of it
+        // the log is full and cut, and slot 1 never took any of it
         c.note(10);
         assert_eq!(c.take(1), Pending::All);
         // slot 0 passed everything before the cut

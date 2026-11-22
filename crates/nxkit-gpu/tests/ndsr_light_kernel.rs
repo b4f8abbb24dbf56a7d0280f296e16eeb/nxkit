@@ -4,7 +4,7 @@
 //! Needs a Metal 4 device, so the tests are ignored by default:
 //! `cargo test --release -p nxkit-gpu --test ndsr_light_kernel -- --ignored --nocapture`.
 //! The input is an RGB9E5 texture as in the game (`a335c1db`'s output). The correctness test compiles the kernels with
-//! `NDSR_SOFT_SAMPLER` (plain f32 bilinear, which the reference repeats); the timing uses the hardware sampler.
+//! `NDSR_SOFT_SAMPLER` (plain f32 bilinear, which the reference repeats). The timing uses the hardware sampler.
 #![cfg(target_os = "macos")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -179,7 +179,7 @@ impl Gpu {
         tex
     }
 
-    /// Runs the plan once; the GPU time in ms.
+    /// Runs the plan once and returns the GPU time in ms.
     fn run(&mut self, plan: &Plan, words: &[u32], tex0: &Texture, out: &Texture) -> f64 {
         let buffers: Vec<DataBuffer> = plan
             .buffers
@@ -240,7 +240,7 @@ impl Gpu {
 /// - Exact inputs (`quantised`): quantised weights and input keep most sums of the network exact, so the kernel's
 ///   `hstep` (f32 products, then f16) and the reference's single rounding mostly agree, and the f16 epilogue is the
 ///   same operations. A pixel counts as equal within 1e-5: variant A's sRGB encode uses the fast `exp2` / `log2` (the
-///   game's MUFU; a few f32 ulps), as in `ndsr_kernel.rs`. Not every sum stays exact through six layers: for some
+///   game's MUFU, a few f32 ulps), as in `ndsr_kernel.rs`. Not every sum stays exact through six layers: for some
 ///   ratios a few sums of the whole picture round differently. Each changes one patch, and a variant A kernel
 ///   magnifies that in the dark. The CPU model (`scratchpad/ndsr/light/fullflip.py`, every HMMA as sequential f32
 ///   fmas) on `r24_b`'s whole picture gives 86 grid cells, 93 pixels not equal and largest 0.0039. The GPU gave 92
@@ -250,8 +250,8 @@ impl Gpu {
 ///   sharpening (strength 2.5 here: centre 1.25, the neighbours -0.3125 each) spreads it to the four neighbours, so a
 ///   few per cent of the pixels move by a few f16 steps. Modelled on the CPU for `r12_a`'s first threadgroup
 ///   (`scratchpad/ndsr/light/flip2.py`: the reference with each HMMA as sequential f32 fmas): 336 of 2304 cells and
-///   2.7 % of the pixels beyond 4e-3, largest 0.025; the GPU gave 3.7 % and 0.050. Variant A magnifies the dark
-///   pixels' differences through the sRGB slope: `r43_a` 0.151, `r24_a` 0.126 on the GPU. 5 % beyond, 0.25 at most.
+///   2.7 % of the pixels beyond 4e-3, largest 0.025. The GPU gave 3.7 % and 0.050. Variant A magnifies the dark pixels'
+///   differences through the sRGB slope: `r43_a` 0.151, `r24_a` 0.126 on the GPU. 5 % beyond, 0.25 at most.
 fn compare(quantised: bool) {
     let mut failed = Vec::new();
     let mut gpu = Gpu::new("#define NDSR_SOFT_SAMPLER");

@@ -13,7 +13,7 @@ pub(super) fn compare_on(net: &str) -> bool {
 }
 
 /// Whether a network that can run on the Neural Engine does, with the plan as the fallback. On unless
-/// `NXKIT_<NAME>_ANE=0`; only networks with an offload (NDVE) use it.
+/// `NXKIT_<NAME>_ANE=0`. Only networks with an offload (NDVE) use it.
 pub(super) fn ane_on(net: &str) -> bool {
     crate::settings::env().native(net).ane
 }

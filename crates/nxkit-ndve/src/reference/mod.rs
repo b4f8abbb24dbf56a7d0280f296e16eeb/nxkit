@@ -3,12 +3,12 @@
 //! It is slow on purpose and meant for tests and diagnostics: the Metal kernels are checked against it layer by layer.
 //! Every layer is a function of its own (input tensor, weights bytes, bias bytes, output tensor), and [`run_chain`]
 //! strings them together from NV12 planes to the RGBA8 output. The numbers of the arithmetic come from
-//! `docs/plans/ndve-native.md`; sections are named where it matters.
+//! `docs/plans/ndve-native.md`. Sections are named where it matters.
 //!
 //! # Tensors and weights
 //!
 //! A [`Tensor`] is NHWC with f16 values (as `u16` bit patterns). Weights are the f16 bytes of the blob as the game has
-//! them, little endian, `[tap][cin][cout]`; a bias is `cout` f16 values.
+//! them, little endian, `[tap][cin][cout]`. A bias is `cout` f16 values.
 //!
 //! # The HMMA step
 //!
@@ -120,8 +120,8 @@ pub struct Picture10 {
     pub data: Vec<u32>,
 }
 
-/// The dither texture of the resampler: one unorm value (0 to 1) a texel. Its format is R in the notes; one channel
-/// is the best guess. Reads use `x & 0x1ff`, `y & 0x1ff`, wrapped into the texture's size.
+/// The dither texture of the resampler: one unorm value (0 to 1) a texel. Its format is R in the notes. One channel is
+/// the best guess. Reads use `x & 0x1ff`, `y & 0x1ff`, wrapped into the texture's size.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Dither {
     /// Width in texels.
@@ -181,7 +181,7 @@ fn step(a: &[f32], w: &[f32], base: usize, stride: usize, c: u16) -> u16 {
 }
 
 /// `relu(half(d + bias))`, the epilogue of layers 1 to 11. `HFMA2.RELU` computes `d * 1.0 + bias` with one rounding
-/// and clears negatives; [`half::relu`] says what it does with -0.0 (inferred).
+/// and clears negatives. [`half::relu`] says what it does with -0.0 (inferred).
 pub fn epilogue(d: u16, bias: u16, relu: bool) -> u16 {
     let s = half::add(d, bias);
     if relu { half::relu(s) } else { s }
@@ -209,7 +209,7 @@ fn finish(t: &mut Tensor, bias: &[u16], relu: bool) {
     }
 }
 
-/// Check the weights of a layer with `taps` taps and the bias; give the output channels.
+/// Check the weights of a layer with `taps` taps and the bias, and give the output channels.
 fn out_channels(input: &Tensor, weights: &[u8], bias: &[u8], taps: usize) -> Result<usize, Error> {
     if input.channels == 0 || !input.channels.is_multiple_of(16) {
         return Err(Error::Shape("input channels are not a multiple of 16"));
@@ -357,7 +357,7 @@ pub fn up2x2(input: &Tensor, skip: &Tensor, weights: &[u8], bias: &[u8]) -> Resu
     Ok(out)
 }
 
-/// Run layer `layer` of the table on `input` with the weights and bias taken from `blob`. Layers 1 to 11 only; layer 12
+/// Run layer `layer` of the table on `input` with the weights and bias taken from `blob`. Layers 1 to 11 only. Layer 12
 /// is [`final_layer`]. `skip` is needed by the up layers.
 pub fn run_layer(
     layer: &Layer,
@@ -413,7 +413,7 @@ pub fn space_to_depth(picture: &Image) -> Result<Tensor, Error> {
 }
 
 /// Layer 12: a 3x3 convolution without ReLU, added to the RGBA8 picture, depth to space (section 6). The input tensor
-/// is `w x h x 16`; `picture` is `2w x 2h`; the result is the RGB10A2 picture of `2w x 2h`.
+/// is `w x h x 16`, `picture` is `2w x 2h`, and the result is the RGB10A2 picture of `2w x 2h`.
 ///
 /// For the output pixel (`2X + sx`, `2Y + sy`), `s = 2 * sy + sx`, component `c = 0..3` comes from network channel
 /// `n = 2s, 2s + 1, 8 + 2s, 9 + 2s`: `out = ((half(picture_c) + D_n) + bias_n) + (-0.0)`, each sum rounded to half,

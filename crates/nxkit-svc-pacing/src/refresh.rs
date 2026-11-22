@@ -78,7 +78,7 @@ pub fn plan_ticks(refresh_hz: f64, target_fps: u32, free_rate: bool, adaptive: b
     let ratio = refresh / f64::from(target);
     let below = (ratio.floor() as u32).max(1);
     if free_rate {
-        // The candidates are the even splits just below and above the ratio; the nearer rate to the target wins.
+        // The candidates are the even splits just below and above the ratio. The nearer rate to the target wins.
         let rate = |m: u32| refresh / f64::from(m);
         let miss = |m: u32| (rate(m) - f64::from(target)).abs();
         let m = if miss(below) <= miss(below + 1) {

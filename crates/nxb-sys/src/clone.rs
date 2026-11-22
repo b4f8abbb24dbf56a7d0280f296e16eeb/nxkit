@@ -78,7 +78,7 @@ mod imp {
     pub(super) fn copy_attrs(src: &Path, dst: &Path) -> io::Result<()> {
         let s = CString::new(src.as_os_str().as_bytes())?;
         let d = CString::new(dst.as_os_str().as_bytes())?;
-        // SAFETY: both pointers are NUL-terminated strings alive for the call; a null state is allowed.
+        // SAFETY: both pointers are NUL-terminated strings alive for the call. A null state is allowed.
         if unsafe { copyfile(s.as_ptr(), d.as_ptr(), std::ptr::null_mut(), COPYFILE_XATTR) } == 0 {
             Ok(())
         } else {

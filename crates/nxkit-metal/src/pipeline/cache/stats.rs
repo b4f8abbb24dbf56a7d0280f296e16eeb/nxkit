@@ -28,8 +28,8 @@ impl PipelineCache {
             .map(|s| (s.shards(), s.pipelines(), s.open_now(), s.opens()))
     }
 
-    /// The pairs of functions that have exact pipelines (recorded states archived fully specialized) in the shards;
-    /// 0 without shards.
+    /// The pairs of functions that have exact pipelines (recorded states archived fully specialized) in the shards. 0
+    /// without shards.
     pub fn exact_pairs(&self) -> usize {
         self.shards.as_ref().map_or(0, |s| s.exact_pairs())
     }

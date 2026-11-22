@@ -50,7 +50,7 @@ pub struct Conv<'a> {
     pub bias: Option<&'a [u16]>,
     /// Stride `[h, w]`.
     pub strides: [i32; 2],
-    /// Padding `[top, bottom, left, right]`; `None` is `valid`.
+    /// Padding `[top, bottom, left, right]`. `None` is `valid`.
     pub pad: Option<[i32; 4]>,
     /// Groups.
     pub groups: i32,

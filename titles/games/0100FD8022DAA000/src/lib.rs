@@ -9,7 +9,7 @@
 //! shaders: its SPIR-V shaders go through the Vulkan shader step of the build. All nine services run on nxkit.
 //!
 //! The engine added to its Vulkan layer for this game what nxkit's does not have: triangle fans, the geometry viewport
-//! stage, the stride repair of `fix_strides`, wide points and lines. The module holds the build data; the game needs
+//! stage, the stride repair of `fix_strides`, wide points and lines. The module holds the build data. The game needs
 //! those parts of the layer to draw.
 //!
 //! The rewrite rules are data in `rules/0100FD8022DAA000.toml`: the build row of v393216 and the engine's SDK-wide

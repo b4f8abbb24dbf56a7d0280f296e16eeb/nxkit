@@ -37,7 +37,7 @@ fn every_colour_state_of_a_pair_is_a_state_of_its_own() {
 
 #[test]
 fn a_plain_state_is_exact_too() {
-    // the bases of `seen` leave it to the plain base; the exact list holds it
+    // the bases of `seen` leave it to the plain base, and the exact list holds it
     let s = read_list(&list(&[line(1, "Triangle", 1, 0, "Bgra8Unorm:f:-", "-")]));
     assert_eq!(s.len(), 1);
     let d = desc(&s[0]);
@@ -147,7 +147,7 @@ fn lines_the_script_cannot_name_are_left_out() {
 
 #[test]
 fn every_host_format_has_a_script_name() {
-    // the names the list uses are `Debug` of the host's formats; the table must hold a name for each colour format
+    // the names the list uses are `Debug` of the host's formats, and the table must hold a name for each colour format
     for (host, script) in PIXEL_FORMATS {
         assert!(!host.is_empty() && !script.is_empty());
         assert_eq!(pixel_format(host), Some(*script));

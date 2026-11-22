@@ -23,7 +23,7 @@ pub(crate) struct EarlyPlan {
     pub(crate) blocked: usize,
 }
 
-/// True when frames are cut for pass signals (`NXKIT_PRIVATE=1`; the knob `privnosplit` turns it off).
+/// True when frames are cut for pass signals (`NXKIT_PRIVATE=1`). The knob `privnosplit` turns it off.
 pub(crate) fn early_enabled() -> bool {
     mirrored() && !crate::knob("privnosplit")
 }

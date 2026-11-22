@@ -2,7 +2,7 @@
 //! process. The caller runs Apple's back half itself:
 //!
 //! - bitcode: `air-opt -O1 --discard-value-names - -o -` piped into `metallib - -o OUT`
-//!   ([`BACK_HALF_BITCODE`]);
+//!   ([`BACK_HALF_BITCODE`]).
 //! - text fallback (a construct the bitcode writer does not cover): `air-opt -O1` then
 //!   `air-opt --discard-value-names` then `metallib` ([`BACK_HALF_TEXT`]).
 //!

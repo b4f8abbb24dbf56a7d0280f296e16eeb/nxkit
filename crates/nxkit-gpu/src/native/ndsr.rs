@@ -5,9 +5,9 @@
 //! and output sizes and the push words the kernel reads. The dynamic resolution changes the sizes every few frames, so
 //! each size gets its own plan in the cache of [`crate::native`] and a size that comes back costs nothing.
 //!
-//! The run is one dispatch, the network. The three SMAA dispatches before it stay the game's own; the capture
+//! The run is one dispatch, the network. The three SMAA dispatches before it stay the game's own. The capture
 //! (`NXKIT_DIAG=ndsr`) lists them so that `docs/plans/ndsr-native.md` section 10 can be filled from one log. The numbers
-//! come from `docs/plans/ndsr-native.md` sections 4, 6 and 7.9; a wrong guess makes the run fall back to the game's
+//! come from `docs/plans/ndsr-native.md` sections 4, 6 and 7.9. A wrong guess makes the run fall back to the game's
 //! dispatch (`ndsr.fallback`), never a wrong picture. `NXKIT_NDSR=0` turns the network off, `NXKIT_NDSR_COMPARE=1` runs
 //! both on a sampled frame and prints the largest difference per channel.
 
@@ -205,8 +205,9 @@ fn plan_sizes(push: &[u8], input: &Bound, output: &Bound) -> ([u32; 2], [u32; 2]
 }
 
 /// The push words that change the kernel's result: the sizes, offsets and reciprocals (2 to 9), the unsharp strength
-/// and the dither switch (18, 19); for vr_light the tile, its mapping, the output size and the strength (18 to 28,
-/// section 15.4). The others are not read (section 7.9); a word that moves every frame would make a plan every frame.
+/// and the dither switch (18, 19). For vr_light, they are the tile, its mapping, the output size and the strength (18
+/// to 28, section 15.4). The others are not read (section 7.9). A word that moves every frame would make a plan every
+/// frame.
 fn push_tag(push: &[u8], light: bool) -> u64 {
     let mut h = foldhash::fast::FixedState::with_seed(0).build_hasher();
     for i in (2..10).chain(18..if light { 29 } else { 20 }) {

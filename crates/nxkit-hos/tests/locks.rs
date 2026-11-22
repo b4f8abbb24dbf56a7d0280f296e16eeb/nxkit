@@ -158,7 +158,7 @@ fn many_threads_share_one_guest_mutex_without_a_lost_update() {
 #[test]
 fn sdk_thread_tags_in_the_lock_word_are_not_handles() {
     // The Switch 2 SDK writes its own thread tags (0x51, 0x52, ...) into lock words instead of thread handles. A tag
-    // is not checked against the handle table; the word alone decides, and the waiter's tag is handed the lock.
+    // is not checked against the handle table. The word alone decides, and the waiter's tag is handed the lock.
     let w = world();
     let lock = w.addr(0);
     let (owner_tag, waiter_tag) = (0x51u32, 0x52u32);

@@ -13,7 +13,7 @@
 //!   submits themselves, not at presents: a present before the deadline that flushed older work only does not end it.
 //!
 //! In a frame that presents in time the request costs a lock and a notify. Unreal Engine 4.18's
-//! `RHIGetRenderQueryResult` waits for the report of an occlusion query like that; Octopath Traveler's render thread
+//! `RHIGetRenderQueryResult` waits for the report of an occlusion query like that. Octopath Traveler's render thread
 //! waited in it for minutes on the way out of the Atlasdam academy, while the game thread held the frame for a render
 //! fence: no present and no CPU wait came that would have flushed the query's work.
 
@@ -56,7 +56,7 @@ pub(crate) fn step(due: Due, now: Instant, sent: u64, delay: Duration) -> Step {
 }
 
 /// The new pending request when `nvnQueueFlush` asks for `submits` at `now`. A pending request that a flush has not
-/// served keeps its deadline and grows to the newer submits; a served one starts again.
+/// served keeps its deadline and grows to the newer submits. A served one starts again.
 pub(crate) fn merge(old: Option<Due>, submits: u64, sent: u64, now: Instant) -> Option<Due> {
     if submits <= sent {
         return old.filter(|d| d.submits > sent);
@@ -115,7 +115,7 @@ impl QueueFlush {
     }
 
     /// `nvnQueueFlush`: the submits so far are to reach the GPU. `flush` is what the watcher calls when the deadline
-    /// passes; the first request starts the watcher.
+    /// passes. The first request starts the watcher.
     pub(crate) fn request(&'static self, flush: fn(FlushReason)) {
         let submits = self.submitted.load(Ordering::Acquire);
         let sent = self.sent.load(Ordering::Acquire);
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn a_flush_of_older_work_only_does_not_end_the_request() {
-        // A present flushed submits 1..=5; the request asks for 7.
+        // A present flushed submits 1..=5, and the request asks for 7.
         let t0 = Instant::now();
         assert_eq!(step(due(t0, 7), t0 + DELAY, 5, DELAY), Step::Flush);
     }

@@ -92,7 +92,7 @@ fn guest(len: u64) -> Option<Guest> {
     FORCE.with(|f| f.set(Some(Mode::Mirror)));
     FAILED.store(false, Ordering::Relaxed);
     attach(&ctx, mem.host_base(), mem.len(), VA);
-    // These tests are about the waits for a writer; the late results are tested in `nxkit-metal`.
+    // These tests are about the waits for a writer. The late results are tested in `nxkit-metal`.
     Pages::global().set_late(false);
     Some(Guest { mem, map, ctx })
 }

@@ -42,7 +42,7 @@ impl Mem {
 
 impl Drop for Mem {
     fn drop(&mut self) {
-        // SAFETY: the allocation came from `alloc_zeroed` with this layout; make it writable first.
+        // SAFETY: the allocation came from `alloc_zeroed` with this layout. Make it writable first.
         unsafe {
             mprotect(self.base.cast(), self.layout.size(), PROT_RW);
             dealloc(self.base, self.layout);
@@ -102,7 +102,7 @@ struct Map {
 impl Map {
     fn new(pages: u64) -> Self {
         let len = (pages * P) as usize;
-        // SAFETY: an anonymous private mapping; the kernel picks the address.
+        // SAFETY: an anonymous private mapping. The kernel picks the address.
         let base = unsafe {
             mmap(
                 std::ptr::null_mut(),
@@ -137,7 +137,7 @@ impl Map {
 
 impl Drop for Map {
     fn drop(&mut self) {
-        // SAFETY: the mapping came from `mmap`; make it writable first so nothing is left protected.
+        // SAFETY: the mapping came from `mmap`. Make it writable first so nothing is left protected.
         unsafe {
             mprotect(self.base.cast(), self.len, PROT_RW);
             munmap(self.base.cast(), self.len);

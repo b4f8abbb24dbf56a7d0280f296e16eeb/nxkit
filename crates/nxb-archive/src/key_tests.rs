@@ -1,5 +1,5 @@
 //! The batch keys are content keys: the bytes of the libraries a batch's bases name, their entries and descriptors, and
-//! the tool identity. A rebuild with an unchanged library set finds every batch in the store; a changed library
+//! the tool identity. A rebuild with an unchanged library set finds every batch in the store. A changed library
 //! changes only the batches with a base that names it.
 
 use std::collections::{BTreeSet, HashMap};

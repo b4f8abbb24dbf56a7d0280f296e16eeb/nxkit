@@ -272,7 +272,8 @@ fn the_computes_the_host_recorded_follow_the_manifest_and_come_before_the_map() 
     let d = dir("compute_list");
     fs::write(d.join("manifest.tsv"), "C\tb1_b\n").unwrap();
     fs::write(d.join("map.tsv"), "k\tv\tcompute\tm1\nk\tv\tcompute\ta0\n").unwrap();
-    // the host's list: `C <key> <stem> <entry>`; render rows, a stem that is not a `_b` library and short rows are skipped
+    // the host's list: `C <key> <stem> <entry>`. Render rows, a stem that is not a `_b` library and short rows are
+    // skipped
     fs::write(
         d.join("seen.list"),
         "nxkit-pipelines-seen 2\nR\t1\t2\t0\tv_b\tmain0\tf_b\tmain0\t0\tTriangle\t1\t0\t-\t-\nC\t0000000000000001\ta0_b\tmain0\nC\t0000000000000002\tb1_b\tmain0\nC\t0000000000000003\tz9_b\tmain0\nC\t0000000000000004\tnot-a-lib\tmain0\nC\t5\n",

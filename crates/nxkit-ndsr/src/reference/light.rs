@@ -6,10 +6,10 @@
 //! (`w18 x w19` pixels), looked up bilinearly at a position the push words give (`w20 .. w23`), all in f16:
 //!
 //! 1. window: f16 luma of the sqrt-RGB texels (`hfma(G, .7148, hfma(R, .2126, B .0722))` in f16, or for the programs
-//!    that load with `TLD` the f32 luma rounded to f16);
-//! 2. network: the vr network, six layers or three (the 4/3 model), the grid cell `N[y][x]` is the result as is;
+//!    that load with `TLD` the f32 luma rounded to f16).
+//! 2. network: the vr network, six layers or three (the 4/3 model), the grid cell `N[y][x]` is the result as is.
 //! 3. per pixel: `up` = the grid at `(fma(x, w20, w22), fma(y, w21, w23))` (f16 lerps), `t = S + up` per channel with
-//!    `S` the f16 colour sample at the pixel centre, `lin = t |t|`, its f16 luma `L`;
+//!    `S` the f16 colour sample at the pixel centre, `lin = t |t|`, its f16 luma `L`.
 //! 4. sharpening: `d = w28/2 L - w28/8 (4 neighbours)` with the tile's edge clamped, `out = lin + d` (f16), then the
 //!    sRGB encoding for variant A.
 
@@ -55,7 +55,7 @@ impl LightPush {
     }
 
     /// The 29 words: the read ones set, the others as the game leaves them for an input of `in_size` (words 2, 3, 6,
-    /// 7 and 8, 9 are what Ocarina of Time writes; the programs here do not read them).
+    /// 7 and 8, 9 are what Ocarina of Time writes, and the programs here do not read them).
     pub fn words(&self, in_size: [u32; 2]) -> [u32; 29] {
         let mut w = [0u32; 29];
         w[2] = in_size[0] - 1;
@@ -138,7 +138,7 @@ pub fn lerp(a: f32, b: f32, f: f32) -> f32 {
 }
 
 /// Whether the program loads its window with `TLD` and computes the luma in f32 (the 4/3 variant A and the 3.0
-/// variant C); the others gather f16 texels with `TLD4`.
+/// variant C). The others gather f16 texels with `TLD4`.
 pub fn loads_f32(net: &Net) -> bool {
     matches!(net.key, "927ceaf3cf1be240" | "d99fbeeb53d38847")
 }
@@ -262,7 +262,7 @@ pub fn groups(net: &Net, in_size: [u32; 2]) -> (usize, usize) {
     )
 }
 
-/// Run every threadgroup and assemble the `W_out x H_out` image (without the offset); unwritten pixels stay NaN.
+/// Run every threadgroup and assemble the `W_out x H_out` image (without the offset). Unwritten pixels stay NaN.
 pub fn run_image(
     net: &Net,
     blob: &[u8],

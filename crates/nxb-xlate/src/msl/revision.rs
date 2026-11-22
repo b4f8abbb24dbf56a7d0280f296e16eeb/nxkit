@@ -36,8 +36,8 @@ pub struct Feature {
 /// `blendz` 1: a pixel shader writes RGB 0 to a float colour whose blend factor is 0 (`msl/variant/pixel.rs`).
 ///
 /// `surface` 1: the one coordinate of a 1D or buffer image load, store or atomic is a `uint` (`msl/inst_img.rs`). 2: an
-/// atomic on a texture buffer goes to its texels as device words (`img_words`; Metal has no texture buffer atomics), and
-/// the copy of a compare-and-swap value no longer takes the name of the coordinate.
+/// atomic on a texture buffer goes to its texels as device words (`img_words`, because Metal has no texture buffer
+/// atomics), and the copy of a compare-and-swap value no longer takes the name of the coordinate.
 ///
 /// `fetch1d` 1: the one coordinate of a buffer or 1D texel fetch is a `uint` (`msl/inst_tex.rs`).
 pub const FEATURES: &[Feature] = &[

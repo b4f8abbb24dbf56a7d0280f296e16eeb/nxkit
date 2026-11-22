@@ -28,7 +28,7 @@ the answer table (`shader_facts.tsv`) and the options. The job writer is `nxb_sh
 
 The call is `nxb_xlate::msl::translate(&job, &code, &ctx)`. It returns `Translated` or `Failure`.
 
-- `Context` has the chain version V, the source (`<package>#<index>`), the paired shader of the game's program (`pc_paired`), the answer-table flag `no_facts`, the flags `dual_source` and `fetch_outputs_only` and the `partners`.
+- `Context` has the chain version V, the source (`<package>#<index>`) and the paired shader of the game's program (`pc_paired`). It also has the answer-table flag `no_facts`, the flags `dual_source` and `fetch_outputs_only` and the `partners`.
 - `partners` is used by vertex shaders. It holds the `StageInputs` (the user varyings) of the paired pixel shaders. The translator pads the vertex outputs from them.
 - `Translated` has the libraries, the `StageInputs` of a pixel shader and the optional `Side`.
 - A `Library` has a suffix (`_b`, `_bf`, `_bp`, `_bv`, `_bg*`, `_bl*`, `_bgv`, `_bx`), the MSL text and an optional `Reflection`. The first library is `_b`.
@@ -36,7 +36,7 @@ The call is `nxb_xlate::msl::translate(&job, &code, &ctx)`. It returns `Translat
 - `Side` names the alpha test entries and the logic op entries of a pixel shader. The step cuts them from the `_b` library into `_bx` at the metallib level.
 - `Failure.reason` is one of the reason strings of [shader-step.md](shader-step.md). The step counts it as the refusal of the translator.
 
-The output keeps the contract of the engine host: the argument buffer at `[[buffer(0)]]` with `[[id(n)]]` members, the entry `main0` and its extra entries,
+The output keeps the contract of the engine host. This contract is the argument buffer at `[[buffer(0)]]` with `[[id(n)]]` members, the entry `main0` and its extra entries,
 the library suffixes and the fields of `_b.json`. The facts in `_b.json` come from the emitter. Nothing parses MSL text.
 
 ## Render scale
@@ -75,9 +75,9 @@ The emitter produces everything a vertex shader needs from one trace. The code i
 
 ## Compute kernels
 
-The workgroup counts of an NVN2 compute shader are c0 bytes 4, 8 and 12 (`C0_DISPATCH_NVN2`). `map_c0` reads them from the dispatch words of the driver block at `C0_DISPATCH` (0x200), which the host writes for every dispatch, and the read shows in `drv_reads`. An atomic compare-and-swap loops on a weak exchange that fails with the expected value still in memory (`while (!atomic_compare_exchange_weak_explicit(...) && t == tc) {}`).
+The workgroup counts of an NVN2 compute shader are c0 bytes 4, 8 and 12 (`C0_DISPATCH_NVN2`). `map_c0` reads them from the dispatch words of the driver block at `C0_DISPATCH` (0x200). The host writes these words for every dispatch, and the read shows in `drv_reads`. An atomic compare-and-swap loops on a weak exchange that fails with the expected value still in memory (`while (!atomic_compare_exchange_weak_explicit(...) && t == tc) {}`).
 
-A kernel with more than 32 KB of shared memory takes its arrays from a device buffer at `buffer(30)` (`spill`). The reflection field `tg_spill` has the bytes of one workgroup slice. The stores that only the first invocation of a dispatch makes leave the kernel, and the reflection field `first_store` lists them as `{reg, word, value}` for the host. A task or mesh shader keeps its shared memory in the threadgroup and is refused past the limit.
+A kernel with more than 32 KB of shared memory takes its arrays from a device buffer at `buffer(30)` (`spill`). The reflection field `tg_spill` has the bytes of one workgroup slice. Some stores are made only by the first invocation of a dispatch. These stores leave the kernel, and the reflection field `first_store` lists them as `{reg, word, value}` for the host. A task or mesh shader keeps its shared memory in the threadgroup and is refused past the limit.
 
 ## Pixel variants and side units
 
@@ -103,13 +103,13 @@ A discard in a helper function sets the flag `dm_kill`. Every caller returns at 
 A fragment shader interlock (`FSIBegin`, `FSIEnd`) has no statements. The images and storage buffers that the shader writes carry `raster_order_group(0)` in the argument buffer.
 `raster.sample_mask` is false because the IR has no sample mask output. `first_store` belongs to compute kernels and has no pixel form.
 
-Every fragment entry gets `[[early_fragment_tests]]` when `early_tests` is true. That is the case when the shader forces the early depth test, or when its texture pool marks IDs and the shader has no discard, depth write or memory write (`pool::early`). The rule lives in `entry::early_tests`, and the base entries, the side entries and the fetch entry use it.
+Every fragment entry gets `[[early_fragment_tests]]` when `early_tests` is true. That is the case when the shader forces the early depth test. It is also the case for a shader with no discard, depth write or memory write, when its texture pool marks IDs (`pool::early`). The rule lives in `entry::early_tests`, and the base entries, the side entries and the fetch entry use it.
 
 ## Blend factor 0
 
-On the console a blend term whose factor is exactly 0 contributes 0, also when the colour is NaN or Inf. The Apple GPU blender computes `0 x NaN = NaN`. A game that writes `Inf * 0 = NaN` with alpha 0 under `SRC_ALPHA` blending into a float target puts the NaN into the target, and a later pass spreads it as very bright blots.
+On the console a blend term whose factor is exactly 0 contributes 0, also when the colour is NaN or Inf. The Apple GPU blender computes `0 x NaN = NaN`. A game can write `Inf * 0 = NaN` with alpha 0 under `SRC_ALPHA` blending into a float target. Then the NaN goes into the target, and a later pass spreads it as very bright blots.
 
-Every pixel shader has the argument buffer member `constant uint* dm_bz` (binding kind `blendz`). It points to one 32-bit word that the host fills for each draw: 3 bits per colour target `i` at bit `3 i`, the kind of the source RGB factor of that target.
+Every pixel shader has the argument buffer member `constant uint* dm_bz` (binding kind `blendz`). It points to one 32-bit word that the host fills for each draw. The word has 3 bits for each colour target `i` at bit `3 i`. These bits are the kind of the source RGB factor of that target.
 
 | kind | source RGB factor | the factor is 0 when |
 |---|---|---|
@@ -120,11 +120,17 @@ Every pixel shader has the argument buffer member `constant uint* dm_bz` (bindin
 | 4 | `SRC1_ALPHA` | the alpha of the second source is +0 or -0 |
 | 5 | `ONE_MINUS_SRC1_ALPHA` | the alpha of the second source is exactly 1 |
 
-When the word is not 0, `main0` calls `dm_body_main0` and then, for every float colour output, writes RGB 0 if `dm_bz_zero` says the factor is 0. The tests are on integer bits (`as_type<uint>`), so fast math cannot fold them away. Alpha is never changed, because it is also a factor and feeds alpha to coverage. Integer outputs, pads, the second source (`index(1)`) and the side entries (`main0_a`, `main0_l`, `_bf`) get no rule. `main0_m` and `main0_d` have the rule for their float members; `main0_d` passes the alpha of its second source as the second factor of kinds 4 and 5. The host sets the kinds 4 and 5 never, because it uses no dual source entry.
+When the word is not 0, `main0` calls `dm_body_main0`. Then, for every float colour output, it writes RGB 0 if `dm_bz_zero` says that the factor is 0. The tests are on integer bits (`as_type<uint>`), so fast math cannot fold them away. Alpha is never changed, because it is also a factor and feeds alpha to coverage. Integer outputs, pads, the second source (`index(1)`) and the side entries (`main0_a`, `main0_l`, `_bf`) get no rule. `main0_m` and `main0_d` have the rule for their float members. `main0_d` passes the alpha of its second source as the second factor of kinds 4 and 5. The host never sets the kinds 4 and 5, because it uses no dual source entry.
 
 The rule changes the source RGB, so it needs that nothing else reads it. A target whose destination RGB factor is `SRC_COLOR` or `ONE_MINUS_SRC_COLOR` (the multiply blend is `ZERO` / `SRC_COLOR`) gets kind 0, because the destination term reads the source colour. The alpha blend reads the source alpha only and needs no condition.
 
-The rule does not cover a destination term with factor 0 (the shader does not see the destination), the factors `DST_*`, `SRC_ALPHA_SATURATE` and the constant colour factors, and the colour of `SRC1_COLOR` per channel. These stay at kind 0. With a stale NaN in the destination, `NaN x 0` can still differ from the console.
+The rule does not cover these terms:
+
+- a destination term with factor 0 (the shader does not see the destination)
+- the factors `DST_*`, `SRC_ALPHA_SATURATE` and the constant colour factors
+- the colour of `SRC1_COLOR` for each channel
+
+These stay at kind 0. With a stale NaN in the destination, `NaN x 0` can still differ from the console.
 
 The feature revision `blendz` (now 1) is in the key of every pixel shader that is not a mesh stage job, so these shaders translate again. `TRANSLATOR_ID` does not change. A translation without the binding (an old store) works: the host does not fill what the program does not have, and the rule is off.
 
@@ -137,11 +143,11 @@ The feature revision `blendz` (now 1) is in the key of every pixel shader that i
 Bit 76 of `LDG` and `STG` and bit 71 of `ATOMG` and `RED` mark the uniform register as a memory descriptor. A descriptor is not added to the address.
 
 A raw global access whose buffer is not known at translation time looks up the bound storage buffers at run time (`opt/gts_raw.rs`).
-Each lookup keeps the entry it chose last in a zeroed local array `gmem_last_N` of 7 words: the entry's index, then its start, end and delta (low word first) as the table holds them.
+Each lookup keeps the entry that it chose last in a zeroed local array `gmem_last_N` of 7 words. These are the index of the entry, then its start, end and delta (low word first) as the table holds them.
 The next access first checks the start and the end in that array. These are registers of the invocation, so an access in the same pool reads nothing from the table and adds the copied delta.
-When the address is outside it, the lookup tries the hint and then searches all entries, and one read of the chosen entry's six words fills the array again. The end of the chosen entry is checked once more after the search.
-A group of loads near one base (`LoadMultiRawRange`) takes the delta from the array of the range helper after its call, so no table read lies between the resolve and the loads.
-Before, a hit read the entry's start and end, then its end again after the join, then its delta: three dependent table reads before the data.
+When the address is outside it, the lookup tries the hint and then searches all entries. Then one read of the six words of the chosen entry fills the array again. The end of the chosen entry is checked once more after the search.
+A group of loads near one base (`LoadMultiRawRange`) takes the delta from the array of the range helper after its call. Thus no table read lies between the resolve and the loads.
+Before, a hit read the start and end of the entry, then its end again after the join, then its delta. These were three dependent table reads before the data.
 
 ## Ampere ALU details
 
@@ -193,7 +199,7 @@ A chain keeps FP32 in its slot from one call to the next. Ampere rounds D to hal
 
 ## Output size
 
-The shaders of a big Ampere title are far larger than those of a Maxwell title: the median `_b` library is 120 KB of MSL against 33 KB, and the median pixel library 118 KB against 13 KB. The text is plain code. The raw global memory helpers, the bindless lookups, the HMMA blocks and the task and mesh payload are each below 1% of it. What fills the text:
+The shaders of a big Ampere title are far larger than those of a Maxwell title. The median `_b` library is 120 KB of MSL against 33 KB, and the median pixel library 118 KB against 13 KB. The text is plain code. The raw global memory helpers, the bindless lookups, the HMMA blocks and the task and mesh payload are each below 1% of it. What fills the text:
 
 | part | share of the text before the changes |
 |---|---|
@@ -205,17 +211,17 @@ The shaders of a big Ampere title are far larger than those of a Maxwell title: 
 
 These choices keep the text short:
 
-- A local that has one assignment and no read before it, inside the block of the assignment, has no initial value, and the locals of one type and value share a declaration (`msl/decls.rs`). The lean geometry kernel reads the declarations line by line and keeps the old form (`Options.plain_decls`).
+- A local can have one assignment and no read before it, inside the block of the assignment. Such a local has no initial value. The locals of one type and value share a declaration (`msl/decls.rs`). The lean geometry kernel reads the declarations line by line and keeps the old form (`Options.plain_decls`).
 - The entries of a vertex library call one function `dm_body_main0`. It returns `out` without the depth fix. Each entry adds only its tail: the depth fix, the layer, the capture of `main0_gs`. `main0_discard` and `main0_tf` keep their own body.
 - A `.FTZ` comparison flushes an operand only when the other operand cannot decide the result for a denormal as it does for zero. A NaN, an infinity or any normal constant is such an operand, so a comparison with a literal needs no flush (`flush_denormal_pair`).
 - The constant folding folds `isnan` of a constant. The pass matched the integer form of the instruction only, so the float form never folded, and `isnan(0.96f)` stayed in the text.
 
-The effect on a sample of 190 shaders of Ocarina of Time: the `_b` text is 44% smaller (vertex 75%, pixel 20%, compute 24%). The optimized IR of a vertex library is 50% smaller, of a pixel library 0.4% smaller. The `metallib` stays as large as it was (within 2%), because `metallib` inlines the body function into every entry again, and Apple's back end sees the same code for a pipeline. The gain is in the front end: the own front end and `air-opt` take about 3 times less time for a vertex library, and the translation store and the `.metal` files shrink. Compile time of a pipeline and the size of the library can only fall with fewer operations in the entry that the pipeline uses.
+The effect on a sample of 190 shaders of Ocarina of Time: the `_b` text is 44% smaller (vertex 75%, pixel 20%, compute 24%). The optimized IR of a vertex library is 50% smaller, of a pixel library 0.4% smaller. The `metallib` stays as large as it was (within 2%). The reason is that `metallib` inlines the body function into every entry again, and Apple's back end sees the same code for a pipeline. The gain is in the front end. The own front end and `air-opt` take about 3 times less time for a vertex library. Also, the translation store and the `.metal` files shrink. Compile time of a pipeline and the size of the library can only fall with fewer operations in the entry that the pipeline uses.
 
 ## Identity and the cache
 
-The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
-the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
+The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source and the paired shader.
+It also has the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
 The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.22`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
@@ -256,7 +262,7 @@ The stage memory ends with the primitive bytes. The count is at +3. The index by
 The guest writes the index bytes of each lane in each primitive block, and a count of 0 makes every lane write. A mesh of 126 primitives has four blocks, so lanes 126 and 127 stay inside the array.
 
 A mesh shader has pixel shader partners, as a vertex shader has. The split pairs a mesh key with the pixel key of its variation. A pixel shader may read a location that the mesh shader does not write. Metal then refuses the pipeline. The mesh function declares such a location as an output `dm_pad<N>` with the value (0, 0, 0, 1). The hardware reads the same default.
-The position of the mesh function is `[[position, invariant]]`, as the position of a vertex shader is. A game draws one geometry with two mesh shaders, a depth pre-pass and a colour pass with the depth test EQUAL, and Metal gives equal depths from two shaders only for an invariant output. The `meshpos` feature revision marks the mesh shaders (`ms`) for this change.
+The position of the mesh function is `[[position, invariant]]`, as the position of a vertex shader is. A game draws one geometry with two mesh shaders: a depth pre-pass, and a colour pass with the depth test EQUAL. Metal gives equal depths from two shaders only for an invariant output. The `meshpos` feature revision marks the mesh shaders (`ms`) for this change.
 A mesh output is as wide as its pixel shaders read. Metal counts the declared outputs against a mesh limit of 32 KB, so a `float4` for every attribute can be too much. An output has the components that the shader writes, and a w that a pixel shader reads and the shader does not write. That w holds 1.
 A Metal fragment input wider than the output it links to reads 0 in the missing components. This is the hardware default for x, y and z. A `StageInputs` varying carries `read`, the components that its pixel shader reads. The bits come from the interpolation map of the pixel shader. A map that names no component counts as all four. Without partners every output is a `float4`.
 The pipeline archive leaves the pairs of a mesh shader out. The host builds mesh pipelines at the draw.

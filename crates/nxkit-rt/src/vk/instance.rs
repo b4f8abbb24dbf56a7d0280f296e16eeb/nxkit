@@ -199,7 +199,7 @@ extern "C" fn get_device_proc_addr(_device: u64, name: u64) -> u64 {
 }
 
 /// `vkCreateViSurfaceNN`: a surface on the `nn::vi` native window. The host has one window, the static object that
-/// `nn::vi::GetNativeWindow` gives (`gfx::vi`); a create info without a window gets it too.
+/// `nn::vi::GetNativeWindow` gives (`gfx::vi`). A create info without a window gets it too.
 extern "C" fn create_vi_surface(_instance: u64, ci: u64, _alloc: u64, out: u64) -> i32 {
     code("vkCreateViSurfaceNN", |vk| {
         let native = crate::gfx::vi::native_window();

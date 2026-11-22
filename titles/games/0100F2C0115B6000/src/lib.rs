@@ -20,7 +20,7 @@
 //! step, as the engine does for a build without its stub.
 //!
 //! The game loads NRO modules at run time through `nn::ro`. nxkit takes the calls over (`nxkit-svc-system`,
-//! `sdk/ro.rs`); a run of this game has not checked it.
+//! `sdk/ro.rs`). A run of this game has not checked it.
 //!
 //! `shader_facts.tsv` is the engine's `shader_facts_manual.tsv`: hand-written translation facts that the shader split
 //! merges over the generated rows.

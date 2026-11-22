@@ -115,7 +115,7 @@ pub(crate) struct Bind {
     pub(crate) reg: u32,
     /// The texture type that the shader declares for a `tex` member, from its `msl_type`.
     pub(crate) dim: Option<nxkit_metal::TextureKind>,
-    /// Whether the shader may write an `sbuf` member (`rw` of the reflection; a missing `rw` counts as written).
+    /// Whether the shader may write an `sbuf` member (`rw` of the reflection). A missing `rw` counts as written.
     pub(crate) rw: bool,
     /// The constant bank of a `drvcb` member: 0 and 2 are the driver block, 24 the push constants.
     pub(crate) bank: u32,
@@ -290,7 +290,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         .and_then(Json::as_bool)
         .unwrap_or(false);
     let mut arg_bytes = 0u32;
-    // The distinct sources of the `tex_ubo` and `samp_ubo` members; the index gives the texture slot.
+    // The distinct sources of the `tex_ubo` and `samp_ubo` members. The index gives the texture slot.
     let mut sources: Vec<crate::ubotex::Source> = Vec::new();
     for b in json.get("bindings").map(Json::as_arr).unwrap_or(&[]) {
         let kind_str = b.get("kind").and_then(Json::as_str).ok_or(Skip::Program)?;

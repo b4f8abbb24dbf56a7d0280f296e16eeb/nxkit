@@ -4,9 +4,9 @@
 //! CPU rewrites. This counts, without changing anything:
 //!
 //! - the `FlushMappedRange` calls of the CPU and their bytes, and the 16 KiB pages that they named in the last
-//!   [`DYNAMIC_FRAMES`] frames (dynamic pages);
+//!   [`DYNAMIC_FRAMES`] frames (dynamic pages).
 //! - the bytes of the buffer bindings of each frame (uniform, storage, vertex, index) that touch a dynamic page: what
-//!   shadow copies would copy;
+//!   shadow copies would copy.
 //! - the flushes that touch a page that the frame still on the GPU reads, by kind of binding: the writes that race with
 //!   the GPU when `nvnSyncWait` returns early (the `nowait` knob).
 

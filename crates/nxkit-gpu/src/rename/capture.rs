@@ -286,7 +286,7 @@ impl Renamer {
         let mut probes = Vec::new();
         for &(i, off) in &offsets {
             let r = &cap.ranges[i];
-            // Merge ranges and probes are filled on the GPU; the others take their bytes now.
+            // Merge ranges and probes are filled on the GPU. The others take their bytes now.
             if !r.start.is_empty() && buf.write(off, &r.start).is_err() {
                 return none();
             }

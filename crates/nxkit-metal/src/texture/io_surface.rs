@@ -18,7 +18,7 @@ impl Texture {
     ///
     /// `format` must have the pixel size of the surface and `width` by `height` must not exceed it. A surface of
     /// `nxkit-coreml` (`SharedTensor`) is `R16Float`, `width` by `height` of the tensor, one channel plane under the
-    /// other. `writable` adds shader write usage; a texture that is only read by shaders is `false`.
+    /// other. `writable` adds shader write usage. A texture that is only read by shaders is `false`.
     pub fn from_io_surface(
         ctx: &Context,
         surface: &IOSurfaceRef,

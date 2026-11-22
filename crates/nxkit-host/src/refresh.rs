@@ -51,7 +51,7 @@ pub enum Presentation {
 }
 
 /// Variable refresh when the screen adapts its rate and the game steps by the measured frame time (`StepMode::Variable`,
-/// `variable_target` is its target); the fixed grid otherwise. `max_fps` is the highest rate of the screen. A screen
+/// `variable_target` is its target). The fixed grid otherwise. `max_fps` is the highest rate of the screen. A screen
 /// that cannot go above the floor has nothing to follow, so it keeps the grid.
 pub fn choose_presentation(
     request: &Request,
@@ -266,7 +266,8 @@ impl Refresh {
         };
         let fps = plan.fps as f32;
         // The service takes the link rate and the vsync rate of the game, so that a frame step of N vsyncs holds N * ticks.
-        // Under variable refresh the link runs between the floor and the highest rate; the preferred rate stands for it.
+        // Under variable refresh the link runs between the floor and the highest rate. The preferred rate stands for
+        // it.
         let link_hz = vrr.map_or(plan.link_hz as f32, |r| r.preferred);
         let _ = nxkit_svc_pacing::set_rates(
             link_hz,

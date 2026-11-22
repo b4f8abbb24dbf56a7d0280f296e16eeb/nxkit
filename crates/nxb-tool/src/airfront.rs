@@ -105,7 +105,7 @@ fn mac_tag() -> &'static str {
     if host_major() < 27 { "+macosx26" } else { "" }
 }
 
-/// The major version of this Mac (`sw_vers -productVersion`), read once; 27 when it can't be read.
+/// The major version of this Mac (`sw_vers -productVersion`), read once, or 27 when it cannot be read.
 fn host_major() -> u32 {
     static MAJOR: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     *MAJOR.get_or_init(|| {

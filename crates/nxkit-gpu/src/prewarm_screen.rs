@@ -5,7 +5,7 @@
 //! window of the game does not exist yet at that point (the encoder is made before it). So the host sets a screen,
 //! and the start tells it how far it is. The calls come on the thread that waits, which is the one that made the
 //! encoder (the main thread of the host). The first `update` comes after a second of waiting, so a start that is
-//! quick shows nothing; `finish` comes once when the wait ends, if `update` was called.
+//! quick shows nothing. `finish` comes once when the wait ends, if `update` was called.
 
 use std::sync::Arc;
 

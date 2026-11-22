@@ -137,7 +137,7 @@ fn choose(
 }
 
 /// The folder of patched RomFS files for the standalone build, or `None` when no patch applies. `ex` is the extract
-/// folder (`extract/<package>`); the RomFS is its `RomFS.img`, or the loose folder `loose` (a NUP's). The folder is
+/// folder (`extract/<package>`). The RomFS is its `RomFS.img`, or the loose folder `loose` (a NUP's). The folder is
 /// `<work>/resources/<name of ex>.overlay` and holds only the new files, at their RomFS paths: nothing in `extract/`
 /// is written, and the caller takes each file from the overlay instead of the RomFS. Warnings go to `say`.
 pub(crate) fn overlay(

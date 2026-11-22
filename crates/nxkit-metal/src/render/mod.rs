@@ -63,7 +63,7 @@ pub enum CullMode {
 pub struct ColorAttachment {
     /// The texture.
     pub texture: Texture,
-    /// The depth plane when rendering a slice of a 3D texture; zero for other texture kinds.
+    /// The depth plane when rendering a slice of a 3D texture. Zero for other texture kinds.
     pub depth_plane: u32,
     /// The action at the start.
     pub load: LoadAction,

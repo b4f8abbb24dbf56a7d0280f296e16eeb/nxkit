@@ -159,7 +159,8 @@ impl ComputePass<'_> {
         self.cb.retain(texture.clone());
     }
 
-    /// Copies `size` bytes between two guest memories (or within one; Metal refuses overlapping ranges of one buffer).
+    /// Copies `size` bytes between two guest memories (or within one, because Metal refuses overlapping ranges of one
+    /// buffer).
     pub(crate) fn copy_guest_to_guest(
         &mut self,
         src: &Arc<GuestMemory>,

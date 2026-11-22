@@ -7,7 +7,7 @@
 //! variable every pass counts. For such a pass `nanscan` also
 //!
 //! - counts a target that the pass loads before the pass (`at load`), so a line says whether the pass made the
-//!   values; with an empty filter the knob `nanload` does it for every pass,
+//!   values. With an empty filter, the knob `nanload` does it for every pass,
 //! - counts the float textures that the listed programs sample, once per frame for each texture (`samples`), unless
 //!   the pass renders to them,
 //! - prints the fragment and mesh programs of the pass once per run (`pass programs`).
@@ -299,7 +299,7 @@ fn scan_texture(
         grid,
         threads: [8, 8, 1],
     });
-    // A later pass may write the texture again; it waits for the kernel.
+    // A later pass may write the texture again. It waits for the kernel.
     let _ = cp.encode(&ComputeCommand::Depend(Dependency {
         scope: Scope::ToLaterPasses,
         after: Stages::DISPATCH,

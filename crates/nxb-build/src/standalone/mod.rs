@@ -554,7 +554,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
                 "warning: no shared fonts, button icons draw as \"?\": {e}"
             )),
         }
-        // the cover of the game; an update's control data may have none, then the base's
+        // the cover of the game. An update's control data can have none, then the base's
         let cover = [ver_dir.join("icon.jpg"), work.join("extract/v0/icon.jpg")]
             .into_iter()
             .find(|c| c.is_file());

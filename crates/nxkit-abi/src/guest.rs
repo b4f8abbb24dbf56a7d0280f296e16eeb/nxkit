@@ -36,7 +36,7 @@ impl std::fmt::Display for Fault {
 
 impl std::error::Error for Fault {}
 
-/// The hook of [`before_host_access`], as the address of an `fn(u64, u64, u32)`; 0 for none.
+/// The hook of [`before_host_access`], as the address of an `fn(u64, u64, u32)`, or 0 for none.
 // Process-wide (W26): the trap of the private pages (`nxkit-metal`) is a signal handler, which has no context.
 static ACCESS_HOOK: AtomicUsize = AtomicUsize::new(0);
 
@@ -59,7 +59,7 @@ pub fn set_guard_hook(hook: fn(u64, u64, u32)) {
 pub fn before_host_access(addr: u64, len: u64, access: u32) {
     let h = ACCESS_HOOK.load(Ordering::Acquire);
     if h != 0 {
-        // SAFETY: the value is the address of an `fn(u64, u64, u32)` that `set_guard_hook` stored; function pointers
+        // SAFETY: the value is the address of an `fn(u64, u64, u32)` that `set_guard_hook` stored. Function pointers
         // and `usize` have the same size.
         let f = unsafe { std::mem::transmute::<usize, fn(u64, u64, u32)>(h) };
         f(addr, len, access);

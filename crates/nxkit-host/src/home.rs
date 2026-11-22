@@ -294,7 +294,7 @@ impl HomeMenu {
 
 /// The texts of the screens, in the order of the lines of `NXKIT_HOME_TEXT` (the order of the dm front end's
 /// `DM_HOME_QUIT_TEXT`, so a launcher passes the same lines): hold, title, note, quit, cancel, resume, launcher, menu
-/// title. An empty or missing line takes the English default.
+/// title, then the OK and the title of the text input screen. An empty or missing line takes the English default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Texts {
     /// The hold indicator.

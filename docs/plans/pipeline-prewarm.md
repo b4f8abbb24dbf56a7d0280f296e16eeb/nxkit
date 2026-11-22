@@ -1,6 +1,13 @@
 # Pipeline prewarm: no compile while playing
 
-Status: runtime cache built (identity by key scheme); the list is kept across builds (`seen-<scheme>.list`); the build compiles the recorded states into the archive (`--pipeline-list`, the lists of the app it replaces); the start waits for all pipelines of a list that its build has not made, with a loading screen; 2026-11-11. Not yet run on a title: the compile of the recorded bases by `metal-tt` and their lookup by the host are untested outside synthetic data. Mac only.
+Status, 2026-11-11:
+
+- The runtime cache is built (identity by key scheme).
+- The list is kept across builds (`seen-<scheme>.list`).
+- The build compiles the recorded states into the archive (`--pipeline-list`, the lists of the app it replaces).
+- The start waits for all pipelines of a list that its build has not made, with a loading screen.
+
+Not yet run on a title: the compile of the recorded bases by `metal-tt` and their lookup by the host are untested outside synthetic data. Mac only.
 
 ## The problem
 
@@ -10,9 +17,9 @@ The build archives one unspecialized pipeline for each shader pair. A draw needs
 
 The host owns a cache next to the title (details: `docs/shader-step.md` "The runtime pipeline cache").
 
-1. Every pipeline that the cache of `nxkit-metal` makes is captured by the pipeline data set serializer and written as an `rt-*.mtl4archive` file; its description goes into `pipelines.seen` (`nxkit-gpu/src/pipelines/record.rs`, hooked in `build_render`, the mesh builds and `Pipelines::compute`).
+1. Every pipeline that the cache of `nxkit-metal` makes is captured by the pipeline data set serializer and written as an `rt-*.mtl4archive` file. Its description goes into `pipelines.seen` (`nxkit-gpu/src/pipelines/record.rs`, hooked in `build_render`, the mesh builds and `Pipelines::compute`).
 2. At the next start the `rt-` files are extra lookup archives (`ArchiveConfig::runtime`) and `prewarm.rs` makes every pipeline of the list under the key the encoder uses, before the first frame. Anything new compiles once and is written for the run after.
-3. The archives are in a folder named by an identity of the app build, the key scheme, the macOS build and the GPU; another identity removes it. The size is cut to 512 MiB and 64 files, oldest first.
+3. The archives are in a folder named by an identity of the app build, the key scheme, the macOS build and the GPU. Another identity removes it. The size is cut to 512 MiB and 64 files, oldest first.
 4. The list is not in that folder. It is kept in `pipecache/seen-<scheme>.list` across builds, because it depends on the key scheme only. A rebuild drops the archives (binaries of the old build) but starts with the full list.
 5. The build side: `nxb build` reads the list of the app it replaces (or `--pipeline-list`) and adds a base for each recorded state that the plain base cannot serve (vertex layout, samples, alpha to coverage, ICB support) to the archive script, so the new app ships them compiled for the GPU. The host finds them in the archive and specializes them.
 6. A start with a list that its build has not made waits for all of it (a loading screen shows the count), then writes `prewarm.done`.
@@ -20,26 +27,26 @@ The host owns a cache next to the title (details: `docs/shader-step.md` "The run
 
 Choices:
 
-- Blocking start with a budget (20 s) over a background thread. A background list races the first frames: their draws build the same pipelines and wait. A start that is a few seconds longer is cheaper than the hitches of the first minutes. The budget keeps a list that grew over many sessions from stalling the first GPU call for long; the rest goes on in threads.
+- Blocking start with a budget (20 s) over a background thread. A background list races the first frames: their draws build the same pipelines and wait. A start that is a few seconds longer is cheaper than the hitches of the first minutes. The budget keeps a list that grew over many sessions from stalling the first GPU call for long. The rest goes on in threads.
 - The recorded key makes the pipeline of the start the one the first draw finds, without a copy of the hashing of `render.rs`. The price: the recorded keys follow the key scheme of the host (`KEY_SCHEME`, `keys.rs`), so the identity holds the scheme and a change of how a key is computed needs the constant raised. Tests pin one key of each kind (render, mesh, compute, point size), so such a change fails them.
 - Several small files over one rewritten archive: the serializer flushes what it captured (to be confirmed, see open points) and Metal cannot merge archives at run time, so a run writes few files (doubling gap) and the folder is cut by size.
 
 ## Not done
 
 - Pairs whose vertex shader has stage inputs were left out of the build's archive. They are covered when a list of recorded states or seeds of the title module exists: the exact pipeline with the vertex layout of the state is in the archive. A title without either compiles them at the first draw.
-- Mesh and compute pipelines of the list are not added to the archive by the list (compute has its own list from the profile; mesh pipelines are built by the host).
+- Mesh and compute pipelines of the list are not added to the archive by the list (compute has its own list from the profile, and the host builds the mesh pipelines).
 - The recorded colour state is not used by the build: the host specializes colours. A state that Metal cannot specialize from the base compiles at run time.
-- The shard of a state is the shard of its pair unless a very large group is cut between them; a lookup in the wrong shard misses and the pipeline compiles.
+- The shard of a state is the shard of its pair unless a very large group is cut between them. A lookup in the wrong shard misses, and the pipeline compiles.
 
 ## Open points
 
 - Key scheme 2 (the vertex layout holds only the attributes the shader reads) does not read the lists of scheme 1. A player's list starts again after the update, and the shipped list covers the seeded titles.
 
-- Whether `serializeAsArchiveAndFlushToURL` writes only what was captured since the last call or everything. The code assumes the first (a file per write, new content only). If it writes everything, the `rt-` files repeat each other and the size cut removes the oldest; check the file sizes after a long run.
+- Whether `serializeAsArchiveAndFlushToURL` writes only what was captured since the last call or everything. The code assumes the first (a file per write, new content only). If it writes everything, the `rt-` files repeat each other and the size cut removes the oldest. Check the file sizes after a long run.
 - Whether the serializer captures a pipeline that Metal found in a lookup archive or made by specialization. If it does not capture a specialization, the archive holds the base and the start specializes it (still no compile). The `compiled` count of the second run tells.
-- Done: the identity holds `KEY_SCHEME` and not the host executable, so a host build keeps the cache. The keys come from `DefaultHasher`, whose algorithm Rust does not fix across releases; the pinned key tests fail after such a change and the scheme is raised then.
+- Done: the identity holds `KEY_SCHEME` and not the host executable, so a host build keeps the cache. The keys come from `DefaultHasher`, whose algorithm Rust does not fix across releases. The pinned key tests fail after such a change, and then the scheme is raised.
 - `pipelines.seen` grows with every state a run met and is not cut (200,000 entries at most). A list entry whose archive was cut compiles at the start.
-- A cache folder in the run folder is lost with the app when the app is replaced; the fallback folder in `~/Library/Caches` is not.
+- A cache folder in the run folder is lost with the app when the app is replaced. The fallback folder in `~/Library/Caches` is not lost.
 
 ## Verify
 

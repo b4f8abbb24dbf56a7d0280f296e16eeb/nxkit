@@ -8,7 +8,7 @@
 //! - `guest`: the range of the no-copy GPU buffer. `mapped` is the address space, `res` in RAM, `dirty` written, `comp`
 //!   compressed or swapped, `wired` wired. While the buffer is resident the GPU driver wires all of it, touched or not,
 //!   and none of it counts in `footprint` (measured 2026-11-09), so `res` and `wired` near `mapped` are real RAM. The
-//!   numbers come from a query of every page (`vm::page_query`); `by region` is the region walk, by VM object.
+//!   numbers come from a query of every page (`vm::page_query`). `by region` is the region walk, by VM object.
 //! - `malloc`, `ioaccel`, `iosurface`, `files`, `other`: the other regions, by their VM tag. `files` is clean,
 //!   file-backed memory (the pipeline archive, metallibs) that the system drops under pressure without writing it out.
 //! - `metal`: `currentAllocatedSize` of the device, split into the no-copy guest buffer (its whole length counts,
@@ -38,7 +38,7 @@
 //!   decompressions and swap-ins (`TASK_VM_INFO`). Page-ins and decompressions above a few hundred per second while
 //!   the game runs mean that it waits for memory that macOS took away.
 //! - `system`: free and wired memory, the compressor's size, and the system's decompressions, compressions, page-ins,
-//!   swap-ins and swap-outs per second; `level` is the free percentage that `memory_pressure` prints.
+//!   swap-ins and swap-outs per second. `level` is the free percentage that `memory_pressure` prints.
 
 use std::time::{Duration, Instant};
 

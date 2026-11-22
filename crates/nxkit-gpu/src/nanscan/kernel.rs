@@ -8,7 +8,7 @@
 //! | 1 to 4 | the texels with a non-finite R, G, B and A |
 //! | 5 to 7 | texels with a non-finite RGB and an alpha that is 0 (+0 or -0), finite and not 0, non-finite |
 //! | 8 to 31 | x, y and slice of the first 8 texels the kernel found |
-//! | 32 to 35 | of these channels, the texels whose R, G, B and A is a NaN (mantissa not 0); the rest of the non-finite ones are Inf |
+//! | 32 to 35 | of these channels, the texels whose R, G, B and A is a NaN (mantissa not 0). The rest of the non-finite ones are Inf |
 //! | 36, 37 | the Inf values (mantissa 0) of R, G and B together: +Inf, -Inf |
 //! | 38, 39 | not used |
 //! | 40 to 295 | the texels per slice (layered kinds only), for the first `SLICES` slices |
@@ -23,7 +23,7 @@ pub(super) const WORDS: usize = 296;
 pub(super) const FIRST_AT: usize = 8;
 /// The coordinate triples of a record.
 pub(super) const FIRST: usize = 8;
-/// The word of the NaN count of R; G, B and A follow, then the +Inf and -Inf counts of RGB.
+/// The word of the NaN count of R. G, B and A follow, then the +Inf and -Inf counts of RGB.
 pub(super) const NAN_AT: usize = 32;
 /// The word of the count of slice 0.
 pub(super) const SLICE_AT: usize = 40;

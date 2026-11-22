@@ -14,7 +14,7 @@ pub(super) struct Shared {
     pub(super) members: AtomicU64,
     /// The newest frame whose completion was reported.
     pub(super) completed: AtomicU64,
-    /// The pages that went dirty since the last flush, as page number plus one; a slot is zero until its writer filled
+    /// The pages that went dirty since the last flush, as page number plus one. A slot is zero until its writer filled
     /// it.
     pub(super) log: [AtomicU32; LOG_CAP],
     pub(super) log_n: AtomicUsize,
@@ -93,7 +93,7 @@ pub(super) struct Shared {
     /// Pages the flush staged because the handler stored to them.
     pub(super) emu_staged: AtomicU64,
     /// Step 5: the completion of a frame copies back, on its own thread, the pages that game threads faulted on for a
-    /// copy lately; pages that the CPU writes in many flushes in a row stay writable and are diffed at each flush.
+    /// copy lately. Pages that the CPU writes in many flushes in a row stay writable and are diffed at each flush.
     pub(super) eager_on: AtomicBool,
     pub(super) hot_on: AtomicBool,
     /// The epoch (`frame / EPOCH_FRAMES`) of the newest flush.
@@ -105,8 +105,8 @@ pub(super) struct Shared {
     /// Step 6: the pages a game thread waited for (page plus one), until [`Pages::readers`] takes them.
     pub(super) readers_log: [AtomicU32; READERS_CAP],
     pub(super) readers_n: AtomicUsize,
-    /// Waits by what ended them (0 the pass signal of the page, the frame still running; 1 the completion of the whole
-    /// frame) and their time.
+    /// Waits by what ended them, and their time. 0 is the pass signal of the page, with the frame still running. 1 is
+    /// the completion of the whole frame.
     pub(super) wait_end: [AtomicU64; 2],
     pub(super) wait_end_ns: [AtomicU64; 2],
     /// Calls of [`Pages::release_early`], the pages they released, and the faults that found a page released while its frame

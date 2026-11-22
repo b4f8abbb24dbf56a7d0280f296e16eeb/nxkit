@@ -3,7 +3,7 @@
 //! The values are `offsetof` and `sizeof` of the official Vulkan headers (`vulkan_core.h`, header version 363) on a
 //! 64-bit target, printed by a C program and copied here. A pointer, a `size_t`, a `VkDeviceSize` and every handle
 //! take 8 bytes. Each module mirrors one struct whole, so some fields are not read yet. `SIZE` is the size of the
-//! struct; a field named `size` is `SIZE_`.
+//! struct. A field named `size` is `SIZE_`.
 #![allow(dead_code)]
 
 pub(crate) mod command;

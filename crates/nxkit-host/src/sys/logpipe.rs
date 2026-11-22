@@ -8,7 +8,7 @@
 //!
 //! [`install`] puts a pipe in place of fd 2 (and of fd 1 when it is the same file). One thread reads the pipe into
 //! memory at once, another writes the memory to the original file. A game thread then only waits for a copy into the
-//! pipe. The memory holds at most `MAX_QUEUED` bytes; what comes beyond is dropped and counted. At the exit of the
+//! pipe. The memory holds at most `MAX_QUEUED` bytes. What comes beyond is dropped and counted. At the exit of the
 //! process [`flush`] puts the original file back and writes what is left. A crash report writes to the original file
 //! directly ([`direct_fd`]), because the writer thread does not run after a fatal signal.
 
@@ -173,7 +173,7 @@ fn writer(fd: c_int, log: &'static Log) {
 /// Puts the pipe in place of fd 2, and of fd 1 when it is the same file. It does nothing when a step fails, and then
 /// the log blocks as before.
 pub fn install() {
-    // SAFETY: plain descriptor calls; `fds` has room for two descriptors.
+    // SAFETY: plain descriptor calls. `fds` has room for two descriptors.
     unsafe {
         let original = dup(2);
         if original < 0 {

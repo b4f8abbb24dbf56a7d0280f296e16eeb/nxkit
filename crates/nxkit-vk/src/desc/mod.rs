@@ -2,7 +2,7 @@
 //!
 //! The ids are the Vulkan handles of the objects ([`crate::handle`]), so they never collide across kinds and are never
 //! reused. Enum values that have no meaning to this crate (blend factors, compare ops, filters, address modes) stay as
-//! the raw Vulkan values; the backend maps them. Nothing here is a Metal type.
+//! the raw Vulkan values. The backend maps them. Nothing here is a Metal type.
 
 mod pipeline;
 mod resource;
@@ -10,7 +10,7 @@ mod resource;
 pub use pipeline::*;
 pub use resource::*;
 
-/// The storage of a `VkDeviceMemory`. The id 0 means no memory (a buffer that was never bound); the backend skips
+/// The storage of a `VkDeviceMemory`. The id 0 means no memory (a buffer that was never bound). The backend skips
 /// what refers to it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MemoryId(pub u64);
@@ -54,7 +54,7 @@ impl ShaderKey {
 /// A range of a buffer, resolved to its memory: `offset` counts from the start of the memory.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct BufferRef {
-    /// The memory the buffer is bound to; [`MemoryId`] 0 when it is not bound.
+    /// The memory the buffer is bound to, or [`MemoryId`] 0 when it is not bound.
     pub memory: MemoryId,
     /// The first byte, from the start of the memory.
     pub offset: u64,

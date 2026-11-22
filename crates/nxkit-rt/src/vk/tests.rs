@@ -44,7 +44,7 @@ fn the_vk_rows_exist_only_in_the_table_of_a_vulkan_game() {
         assert_eq!(find_in(nvn, gpu, n.as_bytes()), None, "{n}");
         assert_eq!(find_big_in(nvn, gpu, n.as_bytes()), None, "{n}");
     }
-    // A big-stack function is found only as one; the others only as plain functions.
+    // A big-stack function is found only as one, and the others only as plain functions.
     assert!(find_big_in(vulkan, gpu, b"vkQueueSubmit").is_some());
     assert_eq!(find_in(vulkan, gpu, b"vkQueueSubmit"), None);
     assert!(find_in(vulkan, gpu, b"vkCmdDraw").is_some());

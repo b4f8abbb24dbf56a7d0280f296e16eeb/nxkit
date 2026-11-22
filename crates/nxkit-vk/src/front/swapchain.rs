@@ -96,7 +96,7 @@ impl Vk {
     }
 
     /// `vkAcquireNextImageKHR`: the images in turn. The backend paces and waits until the image's previous present has
-    /// been shown; the fence (0 for none) is signalled at once, the semaphore needs nothing.
+    /// been shown. The fence (0 for none) is signalled at once, the semaphore needs nothing.
     pub fn acquire_next_image(
         &self,
         swapchain: u64,

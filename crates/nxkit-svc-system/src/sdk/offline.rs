@@ -31,40 +31,40 @@ fn code_text(code: u64) -> String {
     format!("{:04}-{:04}", code & 0xffff_ffff, code >> 32)
 }
 
-/// `err::ShowError(ErrorCode)`: error display applet; the host only logs it. The `ErrorCode` is the category in the
+/// `err::ShowError(ErrorCode)`: error display applet. The host only logs it. The `ErrorCode` is the category in the
 /// low 32 bits and the number in the high 32 bits.
 extern "C" fn show_error_code(code: u64) {
     let _applet = AppletGuard::new("error");
     log(&format!("game asks to show an error: {}", code_text(code)));
 }
 
-/// `err::ShowError(const ErrorResultVariant&)`: error display applet; the host only logs it.
+/// `err::ShowError(const ErrorResultVariant&)`: error display applet. The host only logs it.
 extern "C" fn show_error_variant() {
     let _applet = AppletGuard::new("error");
     log("game asks to show an error (ErrorResultVariant)");
 }
 
-/// `err::ShowUnacceptableAddOnContentVersionError()`: add-on content version mismatch error applet; the host only
+/// `err::ShowUnacceptableAddOnContentVersionError()`: add-on content version mismatch error applet. The host only
 /// logs it.
 extern "C" fn show_add_on_content_version() {
     let _applet = AppletGuard::new("error");
     log("game asks to show an error: add-on content version mismatch");
 }
 
-/// `err::ShowUnacceptableApplicationVersionError()`: game version mismatch error applet; the host only logs it.
+/// `err::ShowUnacceptableApplicationVersionError()`: game version mismatch error applet. The host only logs it.
 extern "C" fn show_application_version() {
     let _applet = AppletGuard::new("error");
     log("game asks to show an error: game version mismatch");
 }
 
-/// `err::ShowApplicationError(const ApplicationErrorArg&)`: application error applet; the host only logs it. The
+/// `err::ShowApplicationError(const ApplicationErrorArg&)`: application error applet. The host only logs it. The
 /// error screen of the game itself goes through the error applet too (Pokémon Legends: Z-A, SDK 19).
 extern "C" fn show_application_error() {
     let _applet = AppletGuard::new("error");
     log("game asks to show an application error (ApplicationErrorArg)");
 }
 
-/// `err::ShowNetworkServiceError(ErrorCode)`: network service error applet; the host only logs it. It follows a
+/// `err::ShowNetworkServiceError(ErrorCode)`: network service error applet. The host only logs it. It follows a
 /// failed online call (Pokémon Sword, SDK 7.3.2).
 extern "C" fn show_network_service_error(code: u64) {
     let _applet = AppletGuard::new("error");

@@ -189,7 +189,7 @@ fn locate<B: Backing>(
 type PutShared<'a> = &'a mut dyn FnMut(&Arc<[u8]>) -> Result<u64, Skip>;
 
 /// The uniform buffers of `stage`. A buffer with a snapshot reads its scratch copy and keeps its guest address for
-/// c0; the others read through their real address. A buffer in no pool reads the zero buffer.
+/// c0. The others read through their real address. A buffer in no pool reads the zero buffer.
 fn ubo_words<B: Backing>(
     out: &mut Vec<UboWord>,
     pools: &PoolSnapshot<B>,
@@ -229,7 +229,7 @@ fn ubo_words<B: Backing>(
 
 /// The word of a storage buffer. One that is not bound reads zeros, and its writes land in the zero buffer. A range that
 /// the frame renamed reads and writes its copy (`rename`). A buffer that the shader only reads takes the walk's copy when there is one (the overlap: the CPU may already write the
-/// next frame's data); one that it may write keeps the buffer itself, so the writes stay.
+/// next frame's data). A buffer that the shader may write keeps the buffer itself, so the writes stay.
 fn sbuf_word<B: Backing>(
     pools: &PoolSnapshot<B>,
     rename: &crate::rename::RenameMap,
@@ -395,7 +395,7 @@ fn build_args_in(
                 note_n(Reason::BindSampPool, 1);
                 env.pools.1
             }
-            // Bank 24 is the push constant block; banks 0 and 2 are the driver block.
+            // Bank 24 is the push constant block. Banks 0 and 2 are the driver block.
             BindKind::DrvCb if b.bank == PUSH_BANK => match inp.push {
                 Some(push) => sink.put(push)?,
                 None => env.statics.1,

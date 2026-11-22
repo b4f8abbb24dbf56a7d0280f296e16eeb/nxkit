@@ -82,8 +82,8 @@ impl Batch {
     /// the GPU starts after that prefix and not after the whole batch. The order of the command buffers stays the order of
     /// the slice. Returns None when `count` is 0 or not smaller than the number of command buffers, or when the groups are
     /// fixed already. Every command buffer of the prefix must be handed to `Ahead::finish`, and nothing may be encoded
-    /// into them afterwards; [`submit`](Self::submit) then commits only the rest. The commit costs the GPU a short pause at
-    /// the boundary (about 0.2 ms).
+    /// into them afterwards. [`submit`](Self::submit) then commits only the rest. The commit costs the GPU a short
+    /// pause at the boundary (about 0.2 ms).
     pub fn stream_prefix(&mut self, count: usize) -> Option<Arc<Ahead>> {
         if !self.on_prefix_complete(count, || {}) {
             return None;

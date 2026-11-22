@@ -22,7 +22,7 @@ const ENOUGH: usize = 2;
 
 type Hook = Box<dyn FnOnce() + Send>;
 
-// Process-wide (W26): the host sets the hook before the game starts; the present path and a Metal completion handler,
+// Process-wide (W26): the host sets the hook before the game starts. The present path and a Metal completion handler,
 // which have no context of the host, take it.
 static WAITING: Mutex<Option<Hook>> = Mutex::new(None);
 

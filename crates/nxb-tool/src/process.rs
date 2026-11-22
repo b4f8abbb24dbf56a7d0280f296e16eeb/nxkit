@@ -1,7 +1,7 @@
 //! Running a child process: own process group, drained pipes, watchdog, group kill, cancellation.
 //!
 //! Sequence per job:
-//! 1. spawn with the exact environment, in a new process group (pgid = pid), registered in the [`ProcessRegistry`];
+//! 1. spawn with the exact environment, in a new process group (pgid = pid), registered in the [`ProcessRegistry`].
 //! 2. stdin is written and stdout/stderr are drained on scoped threads, so no pipe can deadlock the child.
 //! 3. a waiter thread blocks in `waitid(WNOWAIT)` until the leader exits **without reaping it**.
 //! 4. at the deadline the whole group gets `SIGKILL`, after the leader exits, any straggler left in the group is killed

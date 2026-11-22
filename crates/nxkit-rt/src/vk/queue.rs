@@ -176,7 +176,7 @@ extern "C" fn acquire_next_image(
 }
 
 /// `vkQueuePresentKHR`: one frame of the vi layer, then the images of the swapchains. Each image's result goes to
-/// `pResults` when the game gave it; the call gives the first failure.
+/// `pResults` when the game gave it. The call gives the first failure.
 extern "C" fn queue_present(_queue: u64, pi: u64) -> i32 {
     const NAME: &str = "vkQueuePresentKHR";
     let clock = super::ctx::ctx(NAME).settings.clock_ns;

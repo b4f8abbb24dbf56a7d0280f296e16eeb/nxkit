@@ -175,7 +175,7 @@ fn the_grids_cover_the_images() {
                     "{}",
                     l.kernel
                 );
-                // the kernels read their tile geometry from template arguments; the widths divide the images
+                // the kernels read their tile geometry from template arguments, and the widths divide the images
                 assert_eq!(l.out_wh.0 % tw, 0, "{}", l.kernel);
             }
             Geometry::Tasks { mt } => {
@@ -191,7 +191,7 @@ fn the_grids_cover_the_images() {
     }
     let p = make();
     let rs = &p.steps[12];
-    // 10 threadgroups x 2 rounds x 8 simdgroups x 2 blocks = 320 blocks of 8 pixels = 2560; 180 rows of blocks = 1440
+    // 10 threadgroups x 2 rounds x 8 simdgroups x 2 blocks = 320 blocks of 8 pixels = 2560, 180 rows of blocks = 1440
     assert_eq!(rs.groups[0] * 2 * 8 * 2 * 8, 2560);
     assert_eq!(rs.threads[0], 8 * 32);
     assert_eq!(rs.groups[1] * 8, 1440);
@@ -330,7 +330,7 @@ fn the_fused_tiling_covers_every_pixel_once() {
         }
         assert!(owner.iter().all(|&c| c == 1));
     }
-    // the output row: the four m-tiles start at min(8 i, last_x); each pixel belongs to the first tile that holds it
+    // the output row: the four m-tiles start at min(8 i, last_x). Each pixel belongs to the first tile that holds it
     let mut hit = vec![0u32; tw];
     let mut written = vec![0u32; tw];
     for i in 0..4 {

@@ -7,7 +7,7 @@ fn a_written_binding_and_a_uniform_that_touches_it_resolve_to_the_mirror() {
     let _t = locked(&TURN);
     let Some(g) = guest(64 << 20) else { return };
     let page = PAGE;
-    // A storage binding of 1 KiB in page 10; its uniform is 0x8000 further (page 12), not a member.
+    // A storage binding of 1 KiB in page 10. Its uniform is 0x8000 further (page 12) and is not a member.
     let addr = VA + 10 * page + 0x100;
     g.mem.write(10 * page + 0x100, &[7; 16]).unwrap();
     let detail = dispatch(addr, 0x400);
@@ -34,7 +34,7 @@ fn a_written_binding_and_a_uniform_that_touches_it_resolve_to_the_mirror() {
         Pages::global().state_of(g.mem.host_base() + 10 * page),
         "gpu(1)"
     );
-    // The GPU writes the mirror and the frame completes; the CPU's read copies the page.
+    // The GPU writes the mirror and the frame completes. The CPU's read copies the page.
     run.mem.write(loc.offset, &[9; 16]).unwrap();
     encoded(1, None);
     let mut seen = [0u8; 16];
@@ -55,7 +55,7 @@ fn a_range_that_a_binding_reaches_into_a_member_makes_its_pages_members_too() {
     let _t = locked(&TURN);
     let Some(g) = guest(64 << 20) else { return };
     let page = PAGE;
-    // The storage binding is in page 20; a uniform that starts in page 19 and ends in page 20 touches it.
+    // The storage binding is in page 20. A uniform that starts in page 19 and ends in page 20 touches it.
     let mut detail = dispatch(VA + 20 * page, 64);
     detail.dispatches[0].ubos[0].address = VA + 20 * page - 0x100;
     detail.dispatches[0].ubos[0].size = 0x200;
@@ -161,7 +161,7 @@ fn the_gpu_copies_late_pages_as_the_frame_starts_and_ends_and_the_completion_han
         g.mem.read(70 * page, &mut b).unwrap();
         b
     };
-    // Frame 1: the GPU writes 5s; the CPU reads them after the completion, which makes the page a CPU-read result.
+    // Frame 1: the GPU writes 5s. The CPU reads them after the completion, which makes the page a CPU-read result.
     let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
     let loc = pools_of(&g, o1.clone()).resolve(addr, 0x100).unwrap();
     o1.runs()[loc.run as usize]
@@ -229,7 +229,7 @@ fn a_cpu_store_outside_the_bytes_a_frame_writes_needs_no_wait_and_reaches_the_ne
     let page = PAGE;
     let addr = VA + 50 * page;
     let detail = dispatch(addr, 0x100);
-    // Frame 1 writes the first 0x100 bytes of page 50; the GPU writes eight of them in the mirror.
+    // Frame 1 writes the first 0x100 bytes of page 50. The GPU writes eight of them in the mirror.
     let o1 = at_flush(&detail, 1, &g.map, 0, false, &|| {}).expect("overlay");
     let pools = pools_of(&g, o1.clone());
     let loc = pools.resolve(addr, 0x100).unwrap();
@@ -311,8 +311,8 @@ fn the_poison_knob_fills_the_stale_guest_bytes_of_a_page_a_host_thread_reads_in_
     FORCE_POISON.with(|f| f.set(true));
     let page = PAGE;
     let addr = VA + 40 * page;
-    // The page is a member; the CPU writes it, and the frame that writes it starts: it is fresh, guest memory holds
-    // its bytes, and the poison covers them.
+    // The page is a member. The CPU writes it, and the frame that writes it starts: it is fresh, guest memory holds its
+    // bytes, and the poison covers them.
     let o = at_flush(&dispatch(addr, 0x100), 1, &g.map, 0, false, &|| {}).expect("overlay");
     encoded(1, None);
     g.mem.write(40 * page + 4, &[3; 4]).unwrap();
@@ -347,7 +347,7 @@ fn a_may_write_page_the_gpu_did_not_write_equals_the_mirror_after_the_frame() {
     let _t = locked(&TURN);
     let Some(g) = guest(64 << 20) else { return };
     let page = PAGE;
-    // The program is unknown, so the binding counts as written; the GPU writes nothing.
+    // The program is unknown, so the binding counts as written. The GPU writes nothing.
     let addr = VA + 60 * page;
     g.mem.write(60 * page + 8, &[0x21; 8]).unwrap();
     let o = at_flush(&dispatch(addr, 0x100), 1, &g.map, 0, false, &|| {}).expect("overlay");
@@ -372,7 +372,7 @@ fn with_poison_threads_that_read_after_the_flush_wait_and_get_the_real_bytes() {
     let Some(g) = guest(64 << 20) else { return };
     FORCE_POISON.with(|f| f.set(true));
     let page = PAGE;
-    // 200 member pages that the frame writes; the CPU wrote each before.
+    // 200 member pages that the frame writes. The CPU wrote each before.
     let first = 100u64;
     for p in 0..200u64 {
         g.mem.write((first + p) * page, &[p as u8 + 1; 8]).unwrap();

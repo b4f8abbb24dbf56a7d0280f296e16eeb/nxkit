@@ -74,7 +74,7 @@ pub(crate) fn page_range(addr: u64, size: u64) -> KResultOr<(u64, u64)> {
 
 /// Whether `MapMemory` shares the pages: all three values are whole host pages, and the host may put other pages
 /// under both ranges. Only `MapMemory` asks. The pinned set changes while the game runs (`crate::pinned`), so a later
-/// answer can differ; `UnmapMemory` reads the choice that `MapMemory` recorded (`Space::views`).
+/// answer can differ. `UnmapMemory` reads the choice that `MapMemory` recorded (`Space::views`).
 fn shares(host: &dyn HostSpace, d0: u64, s0: u64, size: u64) -> bool {
     let page = host.page_size();
     [d0, s0, size].iter().all(|v| v.is_multiple_of(page))
@@ -419,8 +419,8 @@ impl Kernel {
     }
 
     /// `UnmapPhysicalMemory`: the mapped pages of the range in the alias region are given back. A locked page
-    /// refuses the call. Pages that a pin reaches (`crate::pinned`) stay where they are, zeroed and without access;
-    /// the kernel counts them as given back, and a later `MapPhysicalMemory` gives them access again and they read
+    /// refuses the call. Pages that a pin reaches (`crate::pinned`) stay where they are, zeroed and without access.
+    /// The kernel counts them as given back, and a later `MapPhysicalMemory` gives them access again and they read
     /// as zero.
     pub(crate) fn unmap_physical_memory(&self, addr: u64, size: u64) -> KResultOr<()> {
         let vm = self.vm()?;

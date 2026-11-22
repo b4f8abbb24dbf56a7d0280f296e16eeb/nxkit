@@ -101,8 +101,8 @@ pub(crate) fn region_at_or_after(addr: u64) -> Option<VmRegion> {
         let mut size = 0u64;
         let mut info = SubmapInfo::default();
         let mut count = SUBMAP_INFO_COUNT;
-        // SAFETY: `info` is writable for `count` ints, which is the size the kernel may fill; the other pointers are
-        // to locals. The call only reads the map of this task, and `mach_task_self_` is its port.
+        // SAFETY: `info` is writable for `count` ints, which is the size the kernel may fill. The other pointers are to
+        // locals. The call only reads the map of this task, and `mach_task_self_` is its port.
         let kr = unsafe {
             mach_vm_region_recurse(
                 mach_task_self_,

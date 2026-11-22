@@ -11,7 +11,7 @@
 //! run on nxkit.
 //!
 //! The rewrite rules are data in `rules/0100535012974000.toml`: the build row of v589824 and the engine's SDK-wide
-//! rules for the `sdk` module. `main` imports Epic Online Services (`EOS_*`, from an NRO through `nn::ro`); they stay
+//! rules for the `sdk` module. `main` imports Epic Online Services (`EOS_*`, from an NRO through `nn::ro`). They stay
 //! offline, as on the engine.
 //!
 //! The shared font is left to the core default: on SDK 10 and older the engine's rule is the TTF itself.

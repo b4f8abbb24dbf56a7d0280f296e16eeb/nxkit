@@ -288,7 +288,7 @@ fn a_range_that_passed_the_check_against_other_uses_is_trusted_for_a_while() {
             g.read(a, b)
         })
     };
-    // The check is made until the range passed it CLEAR_RUN times; a use that overlaps resets the count.
+    // The check is made until the range passed it CLEAR_RUN times. A use that overlaps resets the count.
     for _ in 0..CLEAR_RUN {
         assert_eq!(flush(&mut st, &|r| vec![false; r.len()]).renamed.len(), 1);
     }

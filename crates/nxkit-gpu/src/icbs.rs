@@ -45,8 +45,8 @@ pub(crate) struct PoolRefs<B: Backing> {
     /// The generation of the snapshot in which every pool was last seen to be current.
     generation: u64,
     pools: Vec<Named<B>>,
-    /// The buffers of the mirror runs that the ICB names. They stay alive with it; a run that grew is another buffer, and
-    /// the signature of the ICB holds the real addresses, so such an ICB is built again.
+    /// The buffers of the mirror runs that the ICB names. They stay alive with it. A run that grew is another buffer,
+    /// and the signature of the ICB holds the real addresses. Thus such an ICB is built again.
     runs: Vec<B>,
 }
 
@@ -93,8 +93,8 @@ impl<B: Backing + Clone> PoolRefs<B> {
 
     /// True when every pool is in `snap` under the same id at the same range. The snapshot only changes its
     /// generation when a pool is registered or unregistered, so the same generation as at the last check means
-    /// nothing changed and no id is looked up. Otherwise each id is looked up by its start; the generation is kept
-    /// when all pools are still there, so the lookups run once per change and not once per frame.
+    /// nothing changed and no id is looked up. Otherwise each id is looked up by its start. The generation is kept when
+    /// all pools are still there, so the lookups run once per change and not once per frame.
     pub(crate) fn current(&mut self, snap: &PoolSnapshot<B>) -> bool {
         if self.generation == snap.generation() {
             return true;
@@ -244,8 +244,8 @@ impl Icbs {
         self.entries.clear();
     }
 
-    /// Forgets the ICBs that name one of the pools `ids`. A pool that went away also fails the check in `get`; this
-    /// frees the ICB and its buffers at once.
+    /// Forgets the ICBs that name one of the pools `ids`. A pool that went away also fails the check in `get`. This
+    /// call frees the ICB and its buffers at once.
     // The per-pool mode calls it when a new snapshot generation unregistered pools (package P7).
     #[allow(dead_code)]
     pub(crate) fn forget_pools(&mut self, ids: &[u64]) {
@@ -383,7 +383,7 @@ fn slot_commands(
         });
     }
     for ((index, addr), loc) in p.streams.iter().zip(&p.stream_locs) {
-        // The default vertex and the layout block of a pulled draw are in the arena; the streams in guest memory.
+        // The default vertex and the layout block of a pulled draw are in the arena. The streams are in guest memory.
         if *index == crate::translate::DEFAULT_VERTEX_SLOT
             || p.pulled && *index == crate::pull::SLOT
         {

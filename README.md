@@ -46,11 +46,11 @@ flowchart LR
 - **The game code runs natively.** Switch games are AArch64 code, as the Mac is. `nxb` rewrites the parts that cannot run
   as they are (system calls, thread-local storage) and links the modules into one `nxgame.dylib` at the fixed addresses of the console.
 - **The shaders are translated once, at build time.** The games ship NVIDIA machine code (Maxwell and Ampere). `nxb-xlate`
-  translates it to MSL, and the pipeline archive holds a base for every shader pair. The host specializes a base for a colour state without a compile, and keeps the pipelines it made, so a start makes them before the first frame and nothing is rebuilt after playing.
+  translates it to MSL, and the pipeline archive holds a base for every shader pair. The host specializes a base for a colour state without a compile. It keeps the pipelines that it made. Thus a start makes them before the first frame, and nothing is rebuilt after playing.
 - **A small kernel of its own.** `nxkit-hos` gives each guest thread a host thread. Locks, condition variables and address
   waits use `os_sync_wait_on_address`, without a global lock. A thread's QoS class follows its role in the game.
 - **Services at SDK level.** The `nxkit-svc-*` crates answer the SDK functions and the IPC services that the games call:
-  file system and saves, audio, input (GameController, keyboard, mouse, rumble), video decoding (VP9 and AV1; AV1 in
+  file system and saves, audio, input (GameController, keyboard, mouse, rumble), video decoding (VP9 and AV1, with AV1 in
   hardware on M3 and newer), system settings and frame pacing.
 - **NVN on Metal 4.** `nxkit-rt` implements the NVN API. `nxkit-nvn` reads the game's command buffers into frames,
   `nxkit-gpu` turns them into Metal passes, and `nxkit-metal` is the Metal 4 backend.

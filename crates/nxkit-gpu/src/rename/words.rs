@@ -93,8 +93,8 @@ pub(crate) fn changed_words<'a>(
 }
 
 /// The words that changed between the flush of the frame (`pre`) and the start of the wait for it (`atwait`), one bit per
-/// word. For a range that shaders only read these are the CPU's writes in flight; for a range that shaders write they may
-/// include writes of the GPU that finished before the wait began.
+/// word. For a range that shaders only read these are the CPU's writes in flight. For a range that shaders write, they
+/// may include writes of the GPU that finished before the wait began.
 pub(crate) fn cpu_mask(pre: &[u8], atwait: &[u8]) -> Vec<u32> {
     let mut m = vec![0u32; pre.len().div_ceil(4).div_ceil(32)];
     for (i, (p, a)) in pre.chunks(4).zip(atwait.chunks(4)).enumerate() {
@@ -179,8 +179,8 @@ pub(crate) fn is_empty_mask(a: &[u32]) -> bool {
 }
 
 /// The words of a range that the host writes back in the wait: `(word index, start, end)` where `end` differs from `start`.
-/// A renamed range writes back every word that changed; a merge range only the words that both the CPU and the GPU write
-/// (the kernel writes the others at the end of the frame).
+/// A renamed range writes back every word that changed. A merge range writes back only the words that both the CPU and
+/// the GPU write (the kernel writes the others at the end of the frame).
 pub(super) fn written_words(r: &CapRange, end: &[u8]) -> Vec<(usize, u32, u32)> {
     if r.kind != Kind::Merge {
         return changed_words(&r.start, end).collect();

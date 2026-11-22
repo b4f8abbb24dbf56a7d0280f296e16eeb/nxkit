@@ -181,7 +181,7 @@ impl Seeds {
         o
     }
 
-    /// Reads the text of a file. A line that does not parse is left out, `#` lines are comments; a text of another
+    /// Reads the text of a file. A line that does not parse is left out, and `#` lines are comments. A text of another
     /// version is an error.
     pub fn parse(text: &str) -> Result<Seeds, String> {
         let mut lines = text.lines();

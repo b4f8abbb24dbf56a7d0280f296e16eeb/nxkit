@@ -77,7 +77,7 @@ fn steady_60_fps_frames_are_held_for_one_vsync() {
     let mut s = stepper(60);
     let out = run(&mut s, 1, 120, 1000.0 / 60.0, |_| {});
     assert_eq!((out.cap, out.hold, out.step, out.kmin), (60, 1, 1, 1));
-    // Only the first present reports the cap; nothing changes after it.
+    // Only the first present reports the cap. Nothing changes after it.
     assert!(
         out.events
             .iter()

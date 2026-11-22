@@ -36,8 +36,8 @@ pub(super) enum Way {
 }
 
 /// Encodes the copies of `blocks` in one compute pass. A load waits for all earlier work, which wrote the compressed
-/// texture; a store waits for the attachment writes of the render pass before. The pass that loads must itself wait
-/// for the blit stage of this pass. Returns false when a copy could not be encoded.
+/// texture. A store waits for the attachment writes of the render pass before. The pass that loads must itself wait for
+/// the blit stage of this pass. Returns false when a copy could not be encoded.
 pub(super) fn copy(
     ctx: &Context,
     cb: &mut CommandBuffer,

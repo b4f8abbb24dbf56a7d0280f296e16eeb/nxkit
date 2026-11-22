@@ -449,7 +449,8 @@ pub struct SurfaceCaps {
     pub max_extent: (u32, u32),
     /// `maxImageArrayLayers`.
     pub max_layers: u32,
-    /// `supportedTransforms`: identity, and inherit (Super Mario Galaxy asserts without it; transforms are ignored).
+    /// `supportedTransforms`: identity, and inherit (Super Mario Galaxy asserts without it, and transforms are
+    /// ignored).
     pub transforms: u32,
     /// `currentTransform`.
     pub current_transform: u32,

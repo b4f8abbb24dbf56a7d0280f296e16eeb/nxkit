@@ -1,6 +1,6 @@
 # Build once: how nxkit splits a game app so that changes stay small
 
-Status: design, 2026-11-08. Nothing of it is built. Mac only; iOS comes later.
+Status: design, 2026-11-08. Nothing of it is built. Mac only. iOS comes later.
 
 ## The problem
 
@@ -69,8 +69,8 @@ Rules that keep the parts apart:
 ### Player data
 
 - With a library marker (`.nxkit-library`, or a launcher's own such as `.nx2apple-library`) in the folder that holds
-  the app, saves go to `<folder>/save/<title id>` and logs to `<folder>/log/<title id>.log`; otherwise to
-  `~/Library/Application Support/nxkit/<title id>/` and `~/Library/Logs/nxkit/`.
+  the app, saves go to `<folder>/save/<title id>` and logs to `<folder>/log/<title id>.log`. Without a marker, they
+  go to `~/Library/Application Support/nxkit/<title id>/` and `~/Library/Logs/nxkit/`.
 - A save found inside an app (older builds) moves out once on the first start.
 
 ## For a launcher: NX2Apple
@@ -82,23 +82,27 @@ NX2Apple is the first launcher to use these contracts. Its builder is already be
    json --platform mac -o <app> --work-dir <work>` with no engine tree. Games without a title module keep today's
    path.
 2. **Recognition.** An app with `Contents/MacOS/nxkit-host` and `Contents/Resources/nxkit/game.json` is a game app,
-   besides today's layout; `DMTitleID` stays in Info.plist for the library and artwork.
-3. **Staleness.** For nxkit apps the engine diff and chain compare are replaced by `nxb status`; the library shows
+   besides today's layout. `DMTitleID` stays in Info.plist for the library and artwork.
+3. **Staleness.** For nxkit apps, `nxb status` replaces the engine diff and chain compare. The library shows
    "update available (seconds)" or "shaders are translated again (about 7 min)" and runs `nxb update` on request.
 4. **Play.** The launcher writes `launch.json` from its settings instead of setting its engine's environment
    variables for that game.
 5. **Distribution.** The release carries `nxb` and `nxkit-host` from one nxkit release, pinned as today in
    `frontend/nxbuild.pin`. Nothing is downloaded at run time.
 
-Phases: (0) the toggle exists and is off; (1) builds without the engine behind the toggle, for testers; (2) status
-and update; (3) per-game release once a game's nxkit build passes its checks; (4) the engine path leaves the launcher
-when every supported game has a title module and ran on nxkit for a release.
+Phases:
+
+0. The toggle exists and is off.
+1. Builds without the engine behind the toggle, for testers.
+2. Status and update.
+3. Per-game release when a game's nxkit build passes its checks.
+4. The engine path leaves the launcher when every supported game has a title module and ran on nxkit for a release.
 
 ## Open points
 
 - `nxb` has no `titles --json`, `status` or `update` yet, and `game.json` has no layer keys (in progress).
 - `nxkit-host` does not read a library marker or `launch.json` yet (in progress).
-- The launcher's launch-options UI needs a schema for each game's options; `game.json` can carry it.
+- The launcher's launch-options UI needs a schema for each game's options. `game.json` can carry it.
 - Pipeline archive coverage: the build leaves out vertex shaders with stage inputs, primitive-ID fragments, layered
   vertex shaders and mesh shaders, and uses default render states (`docs/pipeline-stages.md`). Until it archives the
   real pipelines, the first play of an area compiles pipelines at run time.

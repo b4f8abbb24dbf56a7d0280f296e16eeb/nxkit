@@ -140,7 +140,7 @@ pub(crate) fn nearest(d: u32, src: u32, dst: u32) -> u32 {
 }
 
 /// The two source texels and the weight of the second that destination texel `d` mixes with linear filtering. The
-/// centre is `(d + 0.5) * src / dst - 0.5`; both texels are clamped to `0..src`.
+/// centre is `(d + 0.5) * src / dst - 0.5`. Both texels are clamped to `0..src`.
 #[cfg(test)]
 pub(crate) fn taps(d: u32, src: u32, dst: u32) -> (u32, u32, f32) {
     if src == 0 || dst == 0 {

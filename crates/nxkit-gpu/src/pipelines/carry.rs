@@ -9,7 +9,7 @@
 //!
 //! Lists written by earlier host builds are in the identity folders as `pipelines.seen`. They are read as well and
 //! merged into the new list (they have no scheme in them: they are taken to have the current one), and they are not
-//! written any more. The text of the new list has a `#scheme <n>` line after the header; the reader of `record.rs`
+//! written any more. The text of the new list has a `#scheme <n>` line after the header. The reader of `record.rs`
 //! skips it, as it skips every line that is not an entry.
 //!
 //! One more file belongs to the identity folder: `prewarm.done`, which the start writes when it made every pipeline of

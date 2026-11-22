@@ -1,5 +1,6 @@
 //! The GPU counters of a frame (`nxkit_nvn::counters`): the samples of the draws of each slot, counted by Metal, and
-//! the vertices and primitives, added up from the draw arguments; written into the reports when the GPU finished.
+//! the vertices and primitives, added up from the draw arguments. They are written into the reports when the GPU
+//! finished.
 //!
 //! [`prepare`] runs before the encode. It gives every render pass with draws of a slot that counts samples offsets of
 //! its own in a zeroed visibility result buffer (one per slot of the pass), so no two passes add to the same 8 bytes,
@@ -417,7 +418,7 @@ impl FrameQueries {
 }
 
 /// Writes a 16-byte `NVNcounterData` at the GPU address `addr`: the 64-bit counter, then the 64-bit timestamp, little
-/// endian, as the GPU writes a four-word report. Only when all 16 bytes lie in guest memory; None otherwise.
+/// endian, as the GPU writes a four-word report. Only when all 16 bytes lie in guest memory, None otherwise.
 pub(crate) fn write_report(
     guest: &GuestSpace,
     map: &nxkit_metal::AddressMap,

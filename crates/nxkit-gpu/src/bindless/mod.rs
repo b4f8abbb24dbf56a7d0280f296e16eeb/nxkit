@@ -142,7 +142,7 @@ struct TableSlot {
     synced_n: (u32, u32),
 }
 
-/// The log of changed elements is cut at this many entries; a slot behind the cut copies its whole table.
+/// The log of changed elements is cut at this many entries. A slot behind the cut copies its whole table.
 const CHANGE_LOG_CAP: usize = 1 << 20;
 
 /// True when a stage program has a `tex_pool` or `samp_pool` binding.

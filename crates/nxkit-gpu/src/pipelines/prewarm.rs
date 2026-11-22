@@ -23,8 +23,9 @@
 //! line says how far it is while the start waits (every 2 s, every second when it waits for all).
 //!
 //! When the list is done the open shards of the build archive are closed (`NXKIT_SHARD_TRIM=0` keeps them).
-//! `newArchiveWithURL` holds each shard file in malloc memory (1.1 to 1.6 GB measured for 34 to 38 open archives), and
-//! idle after the prewarm it is the first memory macOS compresses; a later draw that needs a shard opens it again.
+//! `newArchiveWithURL` holds each shard file in malloc memory (1.1 to 1.6 GB measured for 34 to 38 open archives). When
+//! it is idle after the prewarm, it is the first memory that macOS compresses. A later draw that needs a shard opens it
+//! again.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -283,9 +284,9 @@ fn threads() -> usize {
 
 impl Pipelines {
     /// Makes the pipelines of `seen` from the libraries in `shader_dir`. Waits for them up to the budget (see the
-    /// module); what is left goes on in the background. `all` is the marker file to write when every pipeline is
-    /// made, and says that the start waits for all of them without a budget. The first `must` entries (the shipped
-    /// list) are waited for in any case.
+    /// module). What is left goes on in the background. `all` is the marker file to write when every pipeline is made,
+    /// and says that the start waits for all of them without a budget. The first `must` entries (the shipped list) are
+    /// waited for in any case.
     pub(super) fn prewarm(
         &self,
         seen: &Seen,
@@ -335,7 +336,8 @@ impl Pipelines {
                 .spawn(move || worker(&me));
             started += usize::from(spawned.is_ok());
         }
-        // a thread that did not start leaves its share to the others; none at all: the first draws build as before
+        // a thread that did not start leaves its share to the others. If no thread starts, the first draws build as
+        // before
         if started < n {
             w.alive.fetch_sub(n - started, Ordering::AcqRel);
         }

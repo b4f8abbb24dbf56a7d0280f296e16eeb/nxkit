@@ -29,7 +29,7 @@ fn round_down(v: u64) -> u64 {
 
 impl<B: Backing> PoolSet<B> {
     /// A set that makes one backing per pool with `maker`. A guest address `va` is the host address
-    /// `va - va_base + host_base`; both bases must be multiples of [`PAGE`].
+    /// `va - va_base + host_base`. Both bases must be multiples of [`PAGE`].
     pub fn new(
         va_base: u64,
         host_base: u64,
@@ -85,7 +85,7 @@ impl<B: Backing> PoolSet<B> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The snapshot now. Clone-cheap; hold it for as long as a frame needs it.
+    /// The snapshot now. It is cheap to clone. Hold it for as long as a frame needs it.
     pub fn current(&self) -> Arc<PoolSnapshot<B>> {
         Arc::clone(&self.lock().current)
     }

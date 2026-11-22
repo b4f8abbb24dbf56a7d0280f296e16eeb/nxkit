@@ -4,8 +4,8 @@ use super::*;
 
 /// Does the access that faulted on the page `pg` in place of the thread, when it lies outside the blocks that a frame
 /// in flight may write: the access runs through the alias, the registers are filled or read, and the program counter
-/// moves on. Returns false when the access must take the ordinary path (wait for the writer, copy, open). Atomics and
-/// the access itself; no lock, no allocation, no system call.
+/// moves on. Returns false when the access must take the ordinary path (wait for the writer, copy, open). It uses
+/// atomics and the access itself, and no lock, no allocation, no system call.
 pub(super) fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mut c_void) -> bool {
     let alias = SHARED.alias.load(Ordering::Acquire);
     if alias == 0 || pc == 0 || !SHARED.emulate.load(Ordering::Relaxed) {
@@ -128,7 +128,7 @@ pub(super) fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mu
     // pages `pa` and `pb`, which lie inside guest memory. The registers are the thread's own.
     unsafe {
         if !a64::perform_op(&op, &regs, &plan, (alias + (first - base)) as *mut u8) {
-            // An atomic on an address that is not aligned: the hardware would fault; the ordinary path decides.
+            // An atomic on an address that is not aligned: the hardware would fault, so the ordinary path decides.
             count_fallback(Reason::Mismatch, pc);
             return false;
         }
@@ -140,7 +140,7 @@ pub(super) fn try_emulate(pg: usize, w: &AtomicU32, pc: u64, far: u64, uctx: *mu
             let Some(info_q) = (if q == pg { Some(info) } else { self::info(q) }) else {
                 continue;
             };
-            // A dirty page is staged by the flush anyway; a page that is not tracked is not staged at all.
+            // A dirty page is staged by the flush anyway. A page that is not tracked is not staged at all.
             let state = if q == pg {
                 cur & STATE_MASK
             } else {

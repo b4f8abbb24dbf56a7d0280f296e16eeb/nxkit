@@ -35,7 +35,7 @@ pub(crate) fn short_reason(e: &str) -> String {
 
 /// [`compile`] for a batch that may hold recorded states. When the compile fails and the batch holds states, the plain
 /// bases are compiled alone and the states in groups that are cut in halves until each group compiles, so that only
-/// the states the compiler refuses are left out (reported in `dropped`); the rest of the batch is kept. A batch of
+/// the states the compiler refuses are left out (reported in `dropped`). The rest of the batch is kept. A batch of
 /// plain bases only, or whose plain bases fail, is an error as before.
 pub(crate) fn compile_resilient(
     c: &Config,

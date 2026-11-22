@@ -52,7 +52,7 @@ fn hmma_sums_in_the_documented_order() {
     a[2] = from_f32(-4096.0);
     b[2] = from_f32(4096.0);
     assert_eq!(hmma_step(&a, &b, ZERO), ZERO);
-    // C is added last: (2^24 - 2^24) + 3 would be the other order of the first two; here the 1 is added after.
+    // C is added last: (2^24 - 2^24) + 3 would be the other order of the first two. Here the 1 is added after.
     assert_eq!(to_f32(hmma_step(&a, &b, from_f32(3.0))), 3.0);
 }
 
@@ -72,7 +72,7 @@ fn hmma_rounds_to_half_after_the_step() {
 fn conv3x3_on_a_tiny_tensor_by_hand() {
     // 2x2 pixels, 16 channels, input value 1.0 in channel 0 of every pixel and 0 elsewhere.
     let input = tensor(2, 2, 16, |_, _, k| if k == 0 { 1.0 } else { 0.0 });
-    // Weights: every tap, cin 0 -> every cout = 0.5; everything else 0.
+    // Weights: every tap, cin 0 -> every cout = 0.5, and everything else 0.
     let mut w = vec![ZERO; 9 * 16 * 16];
     for t in 0..9 {
         for n in 0..16 {
@@ -123,7 +123,7 @@ fn down_reads_the_2x2_block() {
         16,
         |x, y, k| if k == 0 { (1 + x + 2 * y) as f32 } else { 0.0 },
     );
-    // Tap t has weight (t + 1) for cin 0 -> cout 0; cout 1 uses tap 3 only.
+    // Tap t has weight (t + 1) for cin 0 -> cout 0, and cout 1 uses tap 3 only.
     let mut w = vec![ZERO; 4 * 16 * 16];
     for t in 0..4 {
         w[t * 256] = from_f32((t + 1) as f32);

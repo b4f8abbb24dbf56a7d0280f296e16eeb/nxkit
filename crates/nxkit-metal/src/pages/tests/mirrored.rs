@@ -12,10 +12,10 @@ fn a_new_member_is_copied_into_the_mirror_and_a_gpu_written_page_is_copied_back_
     assert_eq!((f.new_members, f.written, f.staged), (1, 1, 0));
     assert_eq!(mir.load(2, 5), 42, "the guest bytes went into the mirror");
     assert_eq!(pg.state_of(m.addr(2)), "gpu(1)");
-    // The GPU writes the mirror; the guest page is stale and has no access.
+    // The GPU writes the mirror. The guest page is stale and has no access.
     mir.store(2, 5, 77);
     mir.store(2, 6, 78);
-    // The frame completes; a read copies the page.
+    // The frame completes. A read copies the page.
     pg.complete(1);
     assert_eq!(
         pg.state_of(m.addr(2)),
@@ -32,7 +32,7 @@ fn a_new_member_is_copied_into_the_mirror_and_a_gpu_written_page_is_copied_back_
         s1.writer_waits, s0.writer_waits,
         "no wait: the writer was complete"
     );
-    // A write now dirties it; the flush stages the whole page and tags it fresh when a frame writes it.
+    // A write now dirties it. The flush stages the whole page and tags it fresh when a frame writes it.
     m.store(2, 7, 9);
     assert_eq!(pg.state_of(m.addr(2)), "dirty");
     let f = pg.flush_mirrored(2, &[], &[(m.addr(2), 8)], None, &mut st);
@@ -103,7 +103,7 @@ fn a_reader_goes_on_at_the_pass_signal_of_its_page_while_the_frame_runs_and_the_
         !r1.is_finished() && !r2.is_finished(),
         "both wait for their writers"
     );
-    // The pass that writes page 1 is done; the frame is not.
+    // The pass that writes page 1 is done. The frame is not.
     pg.release_early(31, &[(1, 2)]);
     assert_eq!(r1.join().unwrap(), 11, "the bytes of the pass");
     std::thread::sleep(std::time::Duration::from_millis(40));
@@ -160,7 +160,7 @@ fn waits_for_a_writer_are_counted_by_access_with_their_time_and_whether_the_fram
     let _t = TURN.lock().unwrap_or_else(PoisonError::into_inner);
     let (m, mir, pg) = mirrored(4);
     let mut st = Collect::default();
-    // Frame 21 is flushed and not committed; it may write pages 1 and 2.
+    // Frame 21 is flushed and not committed. It may write pages 1 and 2.
     let _ = pg.flush_mirrored(21, &[], &[(m.addr(1), 1), (m.addr(2), 1)], None, &mut st);
     let _ = (pg.take_wait_max(), pg.take_in_flight());
     let s0 = pg.stats();
@@ -283,7 +283,7 @@ fn an_internal_thread_does_not_wait_and_the_page_loses_its_access_at_the_complet
     assert!(pg.stats().internal_opens > 0);
     pg.complete(9);
     assert_eq!(pg.state_of(m.addr(1)), "gpu(9)");
-    // The GPU wrote more; the game's read after the completion sees it.
+    // The GPU wrote more. The game's read after the completion sees it.
     mir.store(1, 0, 3);
     assert_eq!(m.load(1, 0), 3);
     pg.set_mirror(0);

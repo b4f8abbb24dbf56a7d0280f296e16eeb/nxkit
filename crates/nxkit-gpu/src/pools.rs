@@ -83,8 +83,8 @@ pub trait PagePins: Send + Sync {
     fn unpin(&self, start: u64, end: u64);
 }
 
-/// Makes the backing of a rounded range. The addresses are host addresses; `len` is a multiple of [`PAGE`].
-/// The error is the reason, for the log.
+/// Makes the backing of a rounded range. The addresses are host addresses. `len` is a multiple of [`PAGE`]. The error
+/// is the reason, for the log.
 pub trait MakeBacking<B>: Send + Sync {
     /// Makes the backing, or says why not.
     fn make(&self, host_start: u64, len: u64) -> Result<B, String>;
@@ -124,7 +124,7 @@ pub struct Loc {
     pub real: u64,
     /// The bytes from the first byte to the end of the pool. For a range in the mirror: to the end of its run.
     pub room: u64,
-    /// The index of the mirror run in `Overlay::runs` when the range lies in the mirror (`NO_RUN` otherwise); then
+    /// The index of the mirror run in `Overlay::runs` when the range lies in the mirror (`NO_RUN` otherwise). Then
     /// `offset` is the offset in the buffer of that run and `real` the address in it.
     pub run: u32,
 }
@@ -398,8 +398,8 @@ impl<B: Backing> PoolSnapshot<B> {
     }
 
     /// The pool of `[va, va + len)`. The whole range must lie in one pool. A `len` of 0 resolves when `va` lies in a
-    /// pool. The end of a pool is not in it. With a mirror, a range whose pages are all members gives the mirror; a range
-    /// that starts on a member page and reaches past the members is counted and gives guest memory.
+    /// pool. The end of a pool is not in it. With a mirror, a range whose pages are all members gives the mirror. A
+    /// range that starts on a member page and reaches past the members is counted and gives guest memory.
     pub fn resolve(&self, va: u64, len: u64) -> Result<Loc, Miss> {
         self.resolve_in(va, len, 0)
     }

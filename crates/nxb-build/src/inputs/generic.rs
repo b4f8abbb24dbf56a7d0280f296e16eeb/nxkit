@@ -134,7 +134,7 @@ fn select_generic(packages: Vec<GenericPackage>, want: Option<u64>) -> Result<In
             }
             let family = families.entry(app).or_default();
             match kind.as_str() {
-                // The highest version wins; packages are sorted by path, so the first path wins a tie.
+                // The highest version wins. Packages are sorted by path, so the first path wins a tie.
                 "Application" if role == GenericRole::Input => {
                     if family.base.is_none() || base_versions.get(&app) < Some(&version) {
                         family.base = Some(path.clone());

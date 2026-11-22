@@ -20,7 +20,7 @@ This is early cutoff, as in the build systems Shake, Bazel and Salsa.
 
 | stage | store domain | version part | content part |
 |---|---|---|---|
-| translator | `nxb.xlate.v2` | translator identity: a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.22`) and `NXB_TEST_XLATE_SALT`; the revisions of the features the code uses (`features`, only when it uses one) | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, dual-source and fetch-outputs-only flags, partner varyings |
+| translator | `nxb.xlate.v2` | translator identity: a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.22`) and `NXB_TEST_XLATE_SALT`. The revisions of the features that the code uses (`features`, only when it uses one) | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, dual-source and fetch-outputs-only flags, partner varyings |
 | Metal compile and link | `nxb.metallib.v2` | target record (flags), compiler identity (`metal` and `metallib` versions, SDK), own front-end tag (`air-front@0.10.0+f<FORMAT>`, no crate version) | the last MSL text |
 | pipeline archive batch | `nxb-archive batch 1` | architecture, platform, minimum OS, `metal-tt` version, driver (`metal-tt` or `applegpu-nt -j N`) | library bytes and the entries of the bases of the batch |
 
@@ -32,14 +32,14 @@ The effect of a chain change:
 - A change that alters only the shaders of one feature increases the feature's revision (`nxb_xlate::msl::revision::FEATURES`). Only the shaders whose code uses the feature translate again. The feature test reads the code bytes (an Ampere word with the HMMA opcode), not the output, so the key is known before the translation.
 - A release (a new workspace version) changes no key. The crate version is not in V of a build without the engine and not in the front-end id. Before 0.10.0 it was in both: a release translated and compiled every shader again.
 - A change of the translator compiles again only the shaders with a changed MSL, and their archive batches.
-- The archive ships the batch archives as shards (`pipelines/<batch key>.mtl4archive` and `index.nxpi`, see docs/shader-step.md "The pipeline archive as shards"). The batch key is the file name, so an unchanged batch comes from the store and keeps its file in the app, and a rebuild of an app made with the merged archive reuses the batches that it stored then, without a compile. The merged archive has no store entry in this layout: its key (`nxb-archive merged 1`) is used only by `NXB_ARCHIVE_LAYOUT=merged` or `both`.
+- The archive ships the batch archives as shards (`pipelines/<batch key>.mtl4archive` and `index.nxpi`, see docs/shader-step.md "The pipeline archive as shards"). The batch key is the file name. Thus an unchanged batch comes from the store and keeps its file in the app. A rebuild of an app made with the merged archive reuses the batches that it stored then, without a compile. The merged archive has no store entry in this layout: its key (`nxb-archive merged 1`) is used only by `NXB_ARCHIVE_LAYOUT=merged` or `both`.
 - A new translator version with the same output translates again, but does not compile a shader.
 - A V change translates all shaders again. It compiles only the shaders with a changed MSL.
 - A new Xcode compiles all shaders again, because the compiler identity is part of each compile key.
 
 ## Example: Ocarina of Time, msl-2.17 to msl-2.19
 
-The app was built at `msl-2.17` and 0.9.2, the next build ran at `msl-2.19` and 0.10.0. `msl-2.18` (bare locals, one body per vertex library) changed the MSL of nearly every shader: of 3,378 sampled sources 5 kept their MSL, and these 5 kept their library bytes. All 387 archive batches had a library with new bytes, so the archive compiled again in full. The archive keys did what they should. The crate version was a second cause: it was in V and in the front-end id, so the same build would have translated and compiled every shader also without a translator change.
+The app was built at `msl-2.17` and 0.9.2. The next build ran at `msl-2.19` and 0.10.0. `msl-2.18` (bare locals, one body per vertex library) changed the MSL of nearly every shader. Of 3,378 sampled sources, 5 kept their MSL, and these 5 kept their library bytes. All 387 archive batches had a library with new bytes, so the archive compiled again in full. The archive keys did what they should. The crate version was a second cause. It was in V and in the front-end id. Thus the same build would have translated and compiled every shader also without a translator change.
 
 ## Rules
 

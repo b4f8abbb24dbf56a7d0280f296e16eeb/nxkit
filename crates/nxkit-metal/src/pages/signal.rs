@@ -101,8 +101,8 @@ fn on_tracked(pg: usize, w: &AtomicU32, pc: u64, write: bool, addr: u64, uctx: *
                 FaultKind::Other
             };
         }
-        // A read of a clean page or an access to a dirty one cannot fault; it is a race with a flush that protected
-        // the page again. Open it.
+        // A read of a clean page or an access to a dirty one cannot fault. It is a race with a flush that protected the
+        // page again. Open it.
         protect_pages(p, p + 1, PROT_RW, false);
         break FaultKind::Other;
     };
@@ -173,7 +173,7 @@ pub fn set_pc_namer(f: fn(u64) -> Option<String>) {
 pub fn name_pc(pc: u64) -> String {
     let h = PC_NAMER.load(Ordering::Acquire);
     if h != 0 {
-        // SAFETY: the value is the address of an `fn(u64) -> Option<String>` that `set_pc_namer` stored; function
+        // SAFETY: the value is the address of an `fn(u64) -> Option<String>` that `set_pc_namer` stored. Function
         // pointers and `usize` have the same size.
         let f = unsafe { std::mem::transmute::<usize, fn(u64) -> Option<String>>(h) };
         if let Some(n) = f(pc) {
@@ -186,7 +186,7 @@ pub fn name_pc(pc: u64) -> String {
         sname: std::ptr::null(),
         saddr: 0,
     };
-    // SAFETY: `info` is a valid `Dl_info`; `dladdr` only looks the address up.
+    // SAFETY: `info` is a valid `Dl_info`. `dladdr` only looks the address up.
     if pc != 0 && unsafe { dladdr(pc as *const c_void, &mut info) } != 0 && !info.fname.is_null() {
         // SAFETY: dyld gives NUL-terminated strings that live while the image is loaded.
         let file = unsafe { std::ffi::CStr::from_ptr(info.fname) }.to_string_lossy();
@@ -208,7 +208,7 @@ pub fn name_pc(pc: u64) -> String {
 /// mappings is independent). Every VM region of the range is mapped by itself, so holes and regions without write
 /// permission leave a gap in the alias instead of failing the whole call. Returns the address of the byte at `base`.
 pub(super) fn build_alias(base: u64, len: u64) -> Result<u64, String> {
-    // SAFETY: an anonymous reservation without access; the kernel picks the address.
+    // SAFETY: an anonymous reservation without access. The kernel picks the address.
     let target = unsafe {
         mmap(
             std::ptr::null_mut(),
@@ -239,8 +239,8 @@ pub(super) fn build_alias(base: u64, len: u64) -> Result<u64, String> {
         }
         let before = (r.object, r.offset_of(s));
         let (mut t, mut cur, mut max) = (target + (s - base), 0, 0);
-        // SAFETY: the source range lies in this task; the target range is inside the reservation made above, which the
-        // call replaces with the second mapping (no copy: the pages are shared).
+        // SAFETY: the source range lies in this task. The target range is inside the reservation made above. The call
+        // replaces that reservation with the second mapping (no copy: the pages are shared).
         let kr = unsafe {
             mach_vm_remap(
                 mach_task_self_,

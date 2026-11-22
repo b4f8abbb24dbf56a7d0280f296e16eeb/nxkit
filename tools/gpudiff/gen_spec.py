@@ -32,7 +32,7 @@ def known_struct_rules(tname, verts, instances, src=''):
                 {'path': 'mask[*]', 'class': 'choice', 'values': [0, 255, 1023, 65535, 1, 3, 15, 31, 63, 4294967295, 0, 255]}]
     if tname == 'dm_vlayout':
         # NVN attribute words that decode to real data: formats the shader's own dm_ftab knows (float32 most often, as
-        # in real meshes; random bytes read as half or float give NaN and hide everything), offsets aligned to 4
+        # in real meshes, because random bytes read as half or float give NaN and hide everything), offsets aligned to 4
         fmts = vertex_formats(src)
         return [{'path': 's[*].stride', 'class': 'choice', 'values': [16, 16, 32, 32, 48, 64, 0, 12, 20, 24, 28]},
                 {'path': 's[*].divisor', 'class': 'choice', 'values': [0, 0, 0, 0, 0, 0, 0, 0, 1, 2]},

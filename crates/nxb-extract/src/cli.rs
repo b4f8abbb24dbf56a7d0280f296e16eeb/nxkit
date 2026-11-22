@@ -12,7 +12,7 @@ fn usage() -> i32 {
 }
 
 /// `nxb extract` / `nxb-extract`: returns the exit code. A `.nup` (`--nup <file>`, or the only argument) goes to
-/// [`crate::nup`]; everything else is the NSP extract.
+/// [`crate::nup`]. Everything else is the NSP extract.
 pub fn main(args: &[String]) -> i32 {
     let a: Vec<String> = args.to_vec();
     if let Some(code) = nup_main(&a) {

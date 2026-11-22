@@ -230,8 +230,8 @@ impl Pipelines {
     }
 
     /// The mesh pipeline of a task and mesh draw. `ts` is the task shader, when the program has one, and `fs` the pixel
-    /// shader; without one the pipeline draws depth only. The pipeline compiles in the background like a render
-    /// pipeline: until it is ready the draw is left out with `Skip::Pending`.
+    /// shader. Without a pixel shader, the pipeline draws depth only. The pipeline compiles in the background like a
+    /// render pipeline: until it is ready the draw is left out with `Skip::Pending`.
     pub(crate) fn mesh(
         &self,
         d: &DrawDetail,
@@ -320,7 +320,7 @@ pub(crate) fn layered(d: &DrawDetail, vs: &StageProgram) -> bool {
 
 /// The vertex function of the draw and the suffix of its pipeline key: the layer entry (`:layer`) for a [`layered`]
 /// draw, the base entry otherwise. With the device in the depth mode 0 to 1 (`zero_to_one`) it is the form of the
-/// entry that keeps the clip depth (`main0_z`, `main0_lz`; suffix `:z`); the base forms convert the -1 to 1 depth of
+/// entry that keeps the clip depth (`main0_z`, `main0_lz`, suffix `:z`). The base forms convert the -1 to 1 depth of
 /// the default mode.
 pub(super) fn vertex_entry<'a>(
     d: &DrawDetail,

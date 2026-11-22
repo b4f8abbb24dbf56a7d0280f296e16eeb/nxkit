@@ -538,7 +538,7 @@ fn local_refs<'a>(op: &'a Op, out: &mut Vec<&'a str>) {
 }
 
 /// Removes every result that no side effect needs (mark and sweep): the instructions with a side effect or without a
-/// result are live, and so is every instruction a live one uses; the rest goes. Unlike removing what has no uses, this
+/// result are live, and so is every instruction a live one uses. The rest goes. Unlike removing what has no uses, this
 /// also removes cycles of dead phis. mem2reg places a phi for every promoted variable at every join it reaches, also
 /// where the variable is dead, so a translated shader with its many function-scope temporaries and a loop got
 /// thousands of phis that only fed each other, and the GPU compiler kept them: the forward lighting shader of one

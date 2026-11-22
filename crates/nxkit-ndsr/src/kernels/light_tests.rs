@@ -49,7 +49,7 @@ fn table_matches_the_msl_instantiations() {
 }
 
 /// Every program of the pack has its kernel, and each kernel serves one program (two entries of the pack may share
-/// it); the other packs have none.
+/// it). The other packs have none.
 #[test]
 fn every_light_program_has_a_kernel() {
     let mut used = vec![0; LIGHT_KERNELS.len()];

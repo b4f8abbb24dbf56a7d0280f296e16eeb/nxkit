@@ -46,7 +46,7 @@ struct Base {
 /// The unspecialized pipelines fetched from the archive, and the counters of the specialization.
 #[derive(Default)]
 pub(super) struct Bases {
-    /// By base; `None` when there is no unspecialized pipeline for it, so it is asked for once.
+    /// By base. `None` when there is no unspecialized pipeline for it, so it is asked for once.
     by_base: RwLock<HashMap<BaseKey, Option<Base>>>,
     found: AtomicU64,
     rejected: AtomicU64,
@@ -72,7 +72,7 @@ pub struct BaseStats {
     pub missing: u64,
     /// Pipelines made by specialization.
     pub specialized: u64,
-    /// Specializations, or compiles of an unspecialized pipeline, that Metal refused; the pipeline was compiled
+    /// Specializations, or compiles of an unspecialized pipeline, that Metal refused. The pipeline was compiled
     /// instead.
     pub failed: u64,
     /// The first refusal.
@@ -136,7 +136,7 @@ impl PipelineCache {
         desc.fragment?;
         let base = self.base(archive, desc)?;
         let d = self.render_descriptor(desc).ok()?;
-        // Specialization keeps what the base has set; ask for the class it has (none for an archived base, none for a
+        // Specialization keeps what the base has set. Ask for the class it has (none for an archived base, none for a
         // vertex function that writes the point size).
         d.setInputPrimitiveTopology(base.topology);
         let b = &self.bases;
@@ -159,7 +159,7 @@ impl PipelineCache {
     }
 
     /// The unspecialized pipeline of the base of `desc`, made once per base. A base in the archived state is asked
-    /// from the archive; a base the archive lacks is compiled when the cache compiles bases.
+    /// from the archive. A base the archive lacks is compiled when the cache compiles bases.
     fn base(
         &self,
         archive: Option<&ProtocolObject<dyn MTL4Archive>>,
@@ -175,7 +175,7 @@ impl PipelineCache {
         {
             return found.clone();
         }
-        // Two threads may ask for one base at once and both make it; the second insert counts nothing.
+        // Two threads may ask for one base at once and both make it. The second insert counts nothing.
         let d = self.render_descriptor(desc).ok()?;
         let archived = if archivable(desc) {
             assume_defaults(&d);

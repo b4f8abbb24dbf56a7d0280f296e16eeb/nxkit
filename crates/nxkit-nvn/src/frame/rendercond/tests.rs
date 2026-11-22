@@ -115,7 +115,7 @@ fn a_report_value_of_an_earlier_command_is_seen_before_it_reaches_memory() {
             ),
         ],
     );
-    // Guest memory still says equal; the reports say not.
+    // Guest memory still says equal, but the reports say not.
     run(&mut rc, &mut f, &s, &[(0x100, 0), (0x110, 0)]);
     assert_eq!(skipped(&f), [1]);
     assert_eq!(rc.take_stats().false_, 1);

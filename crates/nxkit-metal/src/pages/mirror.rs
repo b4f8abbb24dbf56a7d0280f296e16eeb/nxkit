@@ -73,7 +73,7 @@ pub(super) fn copy_blocks(src: u64, dst: u64, mask: &Mask) {
 
 /// Serves a fault on the tracked page `pg` when there is a mirror. A page tagged with a frame holds stale bytes: the
 /// thread waits for the frame to complete (an internal thread does not wait), copies the page from the mirror and opens
-/// it. Atomics, `mprotect`, `memcpy` and the wake word; no lock, no allocation.
+/// it. It uses atomics, `mprotect`, `memcpy` and the wake word, and no lock, no allocation.
 pub(super) fn serve_mirrored(
     pg: usize,
     w: &AtomicU32,

@@ -28,7 +28,7 @@ fn a_write_to_a_clean_page_dirties_it_and_the_flush_cleans_it() {
                 .sum::<u64>(),
         1
     );
-    // The flush takes it back to clean; the next store faults again.
+    // The flush takes it back to clean. The next store faults again.
     let st = pg.flush(2, &[]);
     assert_eq!(st.dirtied, 1);
     assert_eq!(pg.state_of(m.addr(2)), "clean");
@@ -50,7 +50,7 @@ fn accesses_in_flight_are_counted_by_kind_and_the_data_stays() {
     assert_eq!(pg.state_of(m.addr(3)), "gpu(10)");
     // A read in flight: counted, the page opens for reading, the data is the guest's.
     assert_eq!(m.load(3, 0), 5);
-    // A second read does not fault; a write does, as a write in flight.
+    // A second read does not fault. A write does, as a write in flight.
     assert_eq!(m.load(3, 1), 0);
     m.store(3, 2, 8);
     // The other page: a write first.

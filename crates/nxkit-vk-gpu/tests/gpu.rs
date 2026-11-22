@@ -1,5 +1,5 @@
 //! A smoke test on a real Metal 4 GPU: memory, an image, a pipeline from a tiny library, one submit with an update,
-//! a render pass, a draw with a uniform buffer and push constants, a copy back into memory and a timestamp; then a
+//! a render pass, a draw with a uniform buffer and push constants, a copy back into memory and a timestamp, then a
 //! present without a display. Without a device it prints a message and passes.
 #![cfg(target_os = "macos")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -584,7 +584,7 @@ fn a_multisample_pass_resolves_and_a_resolve_image_copies() {
         "pass resolve {px:?}"
     );
     assert!(gpu.read_memory(mem, 512, &mut px));
-    // the 2x2 region went to the top left; the rest of the image is untouched
+    // the 2x2 region went to the top left, and the rest of the image is untouched
     assert!(
         close(&px[..4]) && close(&px[20..24]),
         "resolve image {px:?}"

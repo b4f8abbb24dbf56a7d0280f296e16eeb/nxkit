@@ -1,7 +1,7 @@
 //! The movie network of `nn::ndve` as a [`Replacement`].
 //!
 //! The fingerprint, the plan and the kernels live in `nxkit-ndve`. This file says where the game binds the weights and
-//! the pictures. The numbers come from `docs/plans/ndve-native.md`; the ones marked "to confirm" are guesses that the
+//! the pictures. The numbers come from `docs/plans/ndve-native.md`. The ones marked "to confirm" are guesses that the
 //! first `NXKIT_DIAG=ndve` capture settles. A wrong guess makes the run fall back to the game's dispatches
 //! (`ndve.fallback`), never a wrong picture.
 

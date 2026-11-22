@@ -201,7 +201,7 @@ pub(super) fn written_ranges(
 
 /// The ranges (GPU address, length) that the draws, dispatches and copies in the given index ranges of `detail` may write
 /// (not the pools that shaders wrote through raw pointers). `seen` is a direct-mapped table of the bindings seen lately: draws
-/// after draws bind the same buffers, and it drops the repeats; a power of two long.
+/// after draws bind the same buffers, and it drops the repeats. Its length is a power of two.
 pub(super) fn written_in(
     detail: &FrameDetail,
     rw: &Rw,

@@ -7,7 +7,7 @@ use std::sync::{Mutex, PoisonError};
 
 use nxkit_nvn::backend::Rect;
 
-// Process-wide (W26): `nn::vi::SetLayerCrop` is a C function of the game with no context; the present reads it.
+// Process-wide (W26): `nn::vi::SetLayerCrop` is a C function of the game with no context. The present reads it.
 /// The layer crop as `x | y << 16 | w << 32 | h << 48`. 0 means none.
 pub(crate) static CROP: AtomicU64 = AtomicU64::new(0);
 

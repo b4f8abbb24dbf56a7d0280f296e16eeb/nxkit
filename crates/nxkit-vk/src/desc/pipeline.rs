@@ -105,7 +105,7 @@ pub struct StageDesc {
 pub struct VertexBinding {
     /// The binding number (at most 13).
     pub binding: u32,
-    /// The stride; 0 means one value for all vertices.
+    /// The stride. A stride of 0 means one value for all vertices.
     pub stride: u32,
     /// Whether the binding steps per instance.
     pub per_instance: bool,
@@ -275,7 +275,7 @@ pub struct Targets {
 /// A graphics pipeline as the backend builds it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GraphicsPipelineDesc {
-    /// The stages (vertex, fragment; a geometry stage is kept for the backend to lower or refuse).
+    /// The stages (vertex, fragment, and a geometry stage that is kept for the backend to lower or refuse).
     pub stages: Vec<StageDesc>,
     /// The fixed-function state.
     pub state: PipelineState,

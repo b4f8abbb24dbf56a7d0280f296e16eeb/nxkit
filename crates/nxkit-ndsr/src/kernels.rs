@@ -4,11 +4,11 @@
 //!
 //! There is one kernel per network program of the vr pack: five input scales (`in` = 10, 8, 7, 6, 4 of the 12-pixel
 //! grid, ratios 1.2, 1.5, 12/7, 2, 3) times three output variants (A: sRGB 8 bit, B: linear 10 bit, C: R11G11B10F). The
-//! specialisation is by C++ template in the MSL (the plan names a function, it cannot carry function constants), and
-//! [`KERNELS`] repeats the instantiations' parameters; a test compares the two.
+//! specialisation is by C++ template in the MSL (the plan names a function, it cannot carry function constants).
+//! [`KERNELS`] repeats the parameters of the instantiations, and a test compares the two.
 //!
 //! The kernel reads the sizes, the output offset, the unsharp strength and the dither switch from the game's push block
-//! (bank 24), so one plan serves every input and output size of its tile shape; only the threadgroup count depends on
+//! (bank 24). Thus one plan serves every input and output size of its tile shape. Only the threadgroup count depends on
 //! the input size.
 //!
 //! The vr_light programs have kernels of their own ([`light`], section 15 of the notes). The agl_ndsr input (f32 luma,
@@ -34,7 +34,7 @@ pub mod light;
 pub struct KernelSpec {
     /// The kernel's function name.
     pub name: &'static str,
-    /// Input pixels per patch step (`in`; the grid is 12 cells per patch, so the ratio is `12 / in`).
+    /// Input pixels per patch step (`in`: the grid is 12 cells per patch, so the ratio is `12 / in`).
     pub in_px: u32,
     /// The output encoding.
     pub variant: Variant,
@@ -46,7 +46,7 @@ pub struct KernelSpec {
     pub cell: [u32; 4],
     /// Whether the rows use the odd-row form of `ty` (all but the 1.2 programs).
     pub ty_odd: bool,
-    /// Simdgroups of a threadgroup (`NSG` of the instantiation); the threadgroup has 32 times as many threads. Tuned
+    /// Simdgroups of a threadgroup (`NSG` of the instantiation). The threadgroup has 32 times as many threads. Tuned
     /// per kernel on the full-size picture: more simdgroups hide the latency of the window, the cell samples and the
     /// barriers, until the registers per thread suffer.
     pub simdgroups: u32,
@@ -146,7 +146,7 @@ const C4: [u32; 4] = [0x3eaa_aaab, 0x3e2a_aaab, 0x3f00_0000, 0x3f00_0000];
 
 use Variant::{A, B, C};
 
-/// The 15 network programs of the vr pack (ndsr-native.md section 4; the tile is the config bytes `b0 b1`).
+/// The 15 network programs of the vr pack (ndsr-native.md section 4). The tile is the config bytes `b0 b1`.
 pub const KERNELS: [KernelSpec; 15] = [
     spec("ndsr_in10_a", 10, A, [39, 29], (R10, C10), false, [12, 1]),
     spec("ndsr_in10_b", 10, B, [39, 29], (R10, C10), false, [12, 1]),
@@ -174,9 +174,9 @@ pub fn find(in_px: u32, variant: Variant) -> Option<&'static KernelSpec> {
 }
 
 /// The plan of a network of the table ([`crate::fingerprint::find`]) for an input of `in_size` pixels and an output of
-/// `out_size`. The kernel is the one of the network's input scale and variant ([`find`]); `blob` is the game's weight
-/// blob (ssbo 2 of the dispatch) and `push` the dispatch's push block, which the kernel reads from the game's bank at
-/// run time, so it only has to be there.
+/// `out_size`. The kernel is the one of the network's input scale and variant ([`find`]). `blob` is the game's weight
+/// blob (ssbo 2 of the dispatch). `push` is the dispatch's push block. The kernel reads it from the game's bank at run
+/// time, so it only has to be there.
 ///
 /// # Errors
 ///
@@ -333,7 +333,7 @@ mod tests {
         }
     }
 
-    /// Names are unique and follow the scale and variant; the tile covers whole patches.
+    /// Names are unique and follow the scale and variant. The tile covers whole patches.
     #[test]
     fn table_is_consistent() {
         for (i, k) in KERNELS.iter().enumerate() {
@@ -380,7 +380,7 @@ mod tests {
         assert!(s.textures[1].writes && !s.textures[0].writes);
     }
 
-    /// Every vr network of the table has a kernel of its scale and variant; agl refuses with a reason.
+    /// Every vr network of the table has a kernel of its scale and variant, and agl refuses with a reason.
     #[test]
     fn plan_of_a_net() {
         let push = [0u8; 80];

@@ -75,7 +75,7 @@ pub enum Source {
 }
 
 impl Source {
-    /// The time the pipeline took to make; zero for one the cache held.
+    /// The time the pipeline took to make. Zero for one the cache held.
     pub fn took(self) -> Duration {
         match self {
             Self::Cached => Duration::ZERO,

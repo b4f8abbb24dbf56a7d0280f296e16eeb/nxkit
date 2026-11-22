@@ -24,7 +24,7 @@ impl Graphics {
         }
     }
 
-    /// Reads the key; an absent key is NVN.
+    /// Reads the key. An absent key is NVN.
     pub(crate) fn parse(v: Option<&Value>) -> Result<Graphics> {
         match v.map(|v| v.as_str()) {
             None => Ok(Graphics::Nvn),

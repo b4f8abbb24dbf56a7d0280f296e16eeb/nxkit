@@ -1,8 +1,8 @@
 //! The title module of ŌKAMI HD for Nintendo Switch (`0100276009872000`).
 //!
 //! The game is update 1.0.0 (v0) on SDK 4.5.0, graphics NVN. The engine tree names its engine: Clover Studio's PS2
-//! engine, remastered; CRIWARE. The engine family is `clover` (Clover Studio's PS2 engine, remastered). The modules are
-//! `main`, `subsdk0` and `sdk`. This module holds what the engine tree knows of the game.
+//! engine, remastered, and CRIWARE. The engine family is `clover` (Clover Studio's PS2 engine, remastered). The modules
+//! are `main`, `subsdk0` and `sdk`. This module holds what the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v0, the shader
 //! split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is not a

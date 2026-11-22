@@ -107,8 +107,8 @@ fn all_modes(display: DisplayId) -> Vec<Mode> {
     if list.is_null() {
         return Vec::new();
     }
-    // SAFETY: `list` is a live array. Each value is a mode that the array owns; `CGDisplayModeRetain` gives us our
-    // own reference, which `Mode` releases. The array is released once, after the loop.
+    // SAFETY: `list` is a live array. Each value is a mode that the array owns. `CGDisplayModeRetain` gives us our own
+    // reference, which `Mode` releases. The array is released once, after the loop.
     let modes = unsafe {
         (0..CFArrayGetCount(list))
             .map(|i| CGDisplayModeRetain(CFArrayGetValueAtIndex(list, i)))
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn the_main_display_has_a_mode() {
-        // The id of the main display is 1 on every Mac that has one; CI has none, so the answer may be `None`.
+        // The id of the main display is 1 on every Mac that has one. CI has none, so the answer may be `None`.
         let _ = current_refresh_hz(1);
         let _ = refresh_choices(1);
     }

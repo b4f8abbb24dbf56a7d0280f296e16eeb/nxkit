@@ -94,7 +94,7 @@ pub(crate) struct Layout {
     pub stack_end: u64,
     pub alias_base: u64,
     pub alias_end: u64,
-    /// The arena behind the alias region, up to `end`; empty when there is none.
+    /// The arena behind the alias region, up to `end`, or empty when there is none.
     pub arena_base: u64,
 }
 

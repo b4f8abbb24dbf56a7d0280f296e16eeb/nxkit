@@ -94,7 +94,7 @@ const KNOBS: &[&str] = &[
     // it samples (the behaviour before the barriers looked at the stages of the bindings).
     "vsbar",
     // With the overlap on, the storage buffers that draws only read use the buffer itself instead of the walk's copy
-    // (the behaviour before; the CPU's writes for the next frame then race with the GPU).
+    // (the behaviour before). The CPU's writes for the next frame then race with the GPU.
     "nosnapsbuf",
     // With the overlap and the encoder thread, a wait for the newest frame waits for the frame two back.
     "overlap2",
@@ -136,7 +136,7 @@ const KNOBS: &[&str] = &[
     "ubodumpall",
     // With the overlap on, the renamed storage ranges are bound as usual but never written back (`rename`).
     "renamenowb",
-    // With the overlap on, no storage range is renamed at bind time; the learning still runs (`rename`).
+    // With the overlap on, no storage range is renamed at bind time. The learning still runs (`rename`).
     "renameoff",
     // With the overlap on, a frame that binds a written range that the CPU also writes while the frame runs waits in full
     // (`rename`).

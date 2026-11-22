@@ -5,7 +5,8 @@
 //!
 //! - [`Context`]: the device, the Metal 4 command queue, the compiler and the residency set.
 //! - [`GuestMemory`]: the guest memory as one no-copy `MTLBuffer`, with the address map `AddressMap`.
-//! - [`GuestSpace`]: the CPU half of the guest memory with the virtual guest GPU addresses; no buffer, no real address.
+//! - [`GuestSpace`]: the CPU half of the guest memory with the virtual guest GPU addresses. It has no buffer and no
+//!   real address.
 //! - [`ShaderLibrary`], [`PipelineCache`]: pipelines through `MTL4Compiler`, keyed by a hash, with an archive. A
 //!   [`MeshPipelineDesc`] gives a mesh pipeline (object, mesh and fragment stage).
 //! - [`FrameRing`], [`Frame`]: two command allocators, one per frame in flight, with timing.

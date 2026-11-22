@@ -54,7 +54,7 @@ impl Pins {
     }
 }
 
-/// Pins `[start, end)` as the one whole range. A later call replaces that range; `set(0, 0)` takes it away. The
+/// Pins `[start, end)` as the one whole range. A later call replaces that range, and `set(0, 0)` takes it away. The
 /// counted pins of [`pin`] are not touched.
 pub fn set(start: u64, end: u64) {
     START.store(start, Ordering::Relaxed);
@@ -292,10 +292,10 @@ mod tests {
 
     #[test]
     fn split_cuts_at_pinned_host_pages() {
-        // 16 KiB pages; the pins are cut by hand, without the statics
+        // 16 KiB pages. The pins are cut by hand, without the statics
         let page = 0x4000;
         assert_eq!(cut(0, 0x10000, page, &[]), vec![(0, 0x10000, false)]);
-        // a pin of one byte pins its page; two pins in one page, and two pages that touch, make one run
+        // a pin of one byte pins its page. Two pins in one page, and two pages that touch, make one run
         let runs = cut(
             0,
             0x20000,

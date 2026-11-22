@@ -287,7 +287,7 @@ impl Gpu {
 
     /// Tells the encoder about a texture or sampler pool that the game made. The pool memory is part of the guest
     /// memory, so nothing is copied. The call checks that the range is inside it. Each call adds one entry to
-    /// [`Gpu::pools`]; [`Gpu::unregister_memory_pool`] takes the oldest entry with its address out again.
+    /// [`Gpu::pools`]. [`Gpu::unregister_memory_pool`] takes the oldest entry with its address out again.
     pub fn register_pool(&mut self, gpu_addr: u64, len: u64) -> Result<()> {
         self.guest.address_map().host_address(gpu_addr, len)?;
         self.pools.push((gpu_addr, len));

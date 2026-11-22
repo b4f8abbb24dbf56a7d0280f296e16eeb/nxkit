@@ -139,7 +139,7 @@ The route is one save and one path through the game: the title screen, loading t
 ## Sources
 
 - Code ported from MIT projects can go into nxkit, which is MIT. `THIRD_PARTY.md` names the ported parts and keeps the notices.
-- mush8 (`c22dev/mush8`, Mario Kart 8 Deluxe) is GPL-3.0. Its code cannot be ported into nxkit; it can be read as a reference only.
+- mush8 (`c22dev/mush8`, Mario Kart 8 Deluxe) is GPL-3.0. Its code cannot be ported into nxkit. It can be read as a reference only.
 - The frame step brings Breath of the Wild above 60 fps and above 1080p. It is the reference for H4.
 
 ## Open questions

@@ -52,7 +52,7 @@ The keys file is `<keys>/prod.keys`.
 
    The output lists the base game, the update and the DLC it found, the paths and the seven stages. Check that each file is there.
 
-3. Run the build. Give the output and the work folder on a disk with enough free space, so that nothing is written to the disk with the game files. The work folder takes many GB:
+3. Run the build. Give the output and the work folder on a disk with enough free space. Then the build writes nothing to the disk with the game files. The work folder takes many GB:
 
    ```sh
    target/release/nxb build \
@@ -80,10 +80,10 @@ The work folder holds the extracted files. You can delete it after the build. A 
 
 1. Extract. The packages become `RomFS.img`, `ExeFS` and the shader split. The update layers on top of the base game.
 2. Romfs. The files of `RomFS.img` go to `romfs/`. The build checks that `romfs/Pack/Bootup_Graphics.pack` exists. Each DLC goes to its own folder `aoc/<index>/`. The Master Trials is `aoc/1` and The Champions' Ballad is `aoc/2`. The DLC is not merged into `romfs/`. Refer to R50 in [decisions.md](decisions.md).
-3. Rewrite. For each of the modules `main`, `subsdk0` and `sdk`, `nxb-rewrite` changes the svc calls, the reads of `tpidrro_el0` and the imports, and applies the patch rules of the title module (`rewrite_rules()` of `nxgame-botw`, one file `rules/01007EF00011E000.toml`).
+3. Rewrite. For each of the modules `main`, `subsdk0` and `sdk`, `nxb-rewrite` changes the svc calls, the reads of `tpidrro_el0` and the imports. It also applies the patch rules of the title module (`rewrite_rules()` of `nxgame-botw`, one file `rules/01007EF00011E000.toml`).
 4. Manifest. `game.json` gets the modules, the NVN function list, the services, the main thread from `main.npdm`, the memory layout and the run settings.
 5. Link. `nxgame.dylib` holds the modules at their fixed addresses. `codesign` signs it ad hoc. Refer to R48.
-6. Shaders. The build compiles the shaders into `shaders/` and makes the pipeline archive for the GPU of this Mac: `pipelines/` with one archive file for each batch and an index (`NXB_ARCHIVE_LAYOUT=merged` makes the single `pipelines.mtl4archive` instead). `--gpu none` skips the archive.
+6. Shaders. The build compiles the shaders into `shaders/`. It also makes the pipeline archive for the GPU of this Mac: `pipelines/` with one archive file for each batch and an index (`NXB_ARCHIVE_LAYOUT=merged` makes the single `pipelines.mtl4archive` instead). `--gpu none` skips the archive.
 7. Bundle. The build adds `Info.plist`, signs `nxkit-host` ad hoc and moves the app to its final path.
 
 ## What does not work yet

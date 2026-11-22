@@ -6,7 +6,7 @@
 //! - Objects appear and go: memory storage, textures (images, image views, texel buffer views, swapchain images),
 //!   samplers, pipelines, query pools. The id of each is the Vulkan handle, so ids never collide or repeat. The front end
 //!   calls `create_*` outside its lock, once per object, and `destroy_*` when the game destroys it. The game must not
-//!   destroy an object that pending work uses (Vulkan); the backend's command buffers keep what they encode alive.
+//!   destroy an object that pending work uses (Vulkan). The backend's command buffers keep what they encode alive.
 //! - Memory storage is made on the first buffer bind or map of a `VkDeviceMemory` (memory that only backs images
 //!   never gets one). [`Backend::create_memory`] gives the host address of the contents, which the game maps.
 //! - A submit ([`Backend::submit`]) hands over the recorded commands of every command buffer, the secondary command
@@ -15,7 +15,7 @@
 //! - Submits are numbered 1, 2, 3 in queue order ([`Submission::serial`]). The backend completes them in order and
 //!   reports the highest completed serial ([`Backend::completed`]). Fences, events and query results are done when
 //!   their serial is. The backend must complete a serial even when encoding it failed.
-//! - The swapchain: [`Backend::acquire`] paces the game and waits until the image's previous present has been shown;
+//! - The swapchain: [`Backend::acquire`] paces the game and waits until the image's previous present has been shown.
 //!   [`Backend::present`] shows an image once the given serial has completed.
 
 use std::collections::HashMap;
@@ -133,7 +133,7 @@ pub trait Backend: Send + Sync {
     /// Tells the backend about a new shader module and its SPIR-V (for a capture or a report of a missing shader).
     fn shader_module(&self, _key: ShaderKey, _code: &[u8]) {}
 
-    /// Builds a graphics pipeline. A pipeline that the backend refuses is still handed to the game; its draws are
+    /// Builds a graphics pipeline. A pipeline that the backend refuses is still handed to the game. Its draws are
     /// skipped.
     fn create_graphics_pipeline(
         &self,

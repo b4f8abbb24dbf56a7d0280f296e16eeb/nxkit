@@ -93,7 +93,7 @@ unsafe fn rmw(p: *mut u8, size: u8, op: RmwOp, v: u64, o: Ordering) -> u64 {
     }
 }
 
-/// Compare-exchange of `size` bytes (1 to 8) at the aligned `p`; returns the old value.
+/// Compare-exchange of `size` bytes (1 to 8) at the aligned `p`. Returns the old value.
 ///
 /// # Safety
 /// `p` must be valid for `size` bytes and aligned to them.
@@ -115,13 +115,13 @@ unsafe fn cas(p: *mut u8, size: u8, old: u64, new: u64, o: Ordering) -> u64 {
     }
 }
 
-/// A 16-byte compare-exchange (`CASPAL`); returns the old value as (low, high).
+/// A 16-byte compare-exchange (`CASPAL`). Returns the old value as (low, high).
 ///
 /// # Safety
 /// `p` must be valid for 16 bytes and 16-byte aligned.
 unsafe fn cas16(p: *mut u8, old: (u64, u64), new: (u64, u64)) -> (u64, u64) {
     let (mut o0, mut o1) = old;
-    // SAFETY: per the caller; the registers are the even pairs the instruction wants.
+    // SAFETY: per the caller. The registers are the even pairs the instruction wants.
     unsafe {
         std::arch::asm!(
             ".arch_extension lse",
@@ -146,7 +146,7 @@ thread_local! {
 }
 
 /// Does `op` at `p` (the alias of `plan.ea`). Returns false, with nothing changed, when the access is not aligned the way
-/// an atomic needs; the caller takes the ordinary path.
+/// an atomic needs. The caller then takes the ordinary path.
 ///
 /// # Safety
 /// `r` must be a valid register file, and `p` readable and writable for `plan.len` bytes.
@@ -257,7 +257,7 @@ pub(crate) unsafe fn perform_op(op: &Op, r: &Regs, plan: &Plan, p: *mut u8) -> b
                         Ordering::Relaxed
                     };
                     if *pair && *size == 8 {
-                        // Two words: read them as one 16-byte unit (a compare-exchange with itself would write; two
+                        // Two words: read them as one 16-byte unit (a compare-exchange with itself would write, but two
                         // atomic reads are enough for the value the store compares against).
                         (read(p, 8, o) as u64, read(p.add(8), 8, o) as u64)
                     } else if *pair {

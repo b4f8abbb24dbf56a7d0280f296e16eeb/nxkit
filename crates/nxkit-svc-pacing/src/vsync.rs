@@ -147,7 +147,7 @@ mod tests {
         let mut seen = 0;
         for target in [2, 4] {
             clock.tick();
-            // The fallback advances its cursor; leave the actual vsync cursor unchanged.
+            // The fallback advances its cursor. Leave the actual vsync cursor unchanged.
             let mut probe = seen;
             assert_eq!(wait_vsync(&clock, &rates, &mut probe), Wait::SelfClocked);
             assert_eq!(probe, target - 1);

@@ -18,7 +18,7 @@ fn down(f: &[f32]) -> (f32, f32) {
 }
 
 /// Reads `ch` interleaved PCM16 channels per frame from `bytes` into `dst`, which has `w` channels per frame (2 or 6),
-/// times `gain`. Six channels on a stereo device are mixed down; fewer channels on a 5.1 device go to the front.
+/// times `gain`. Six channels on a stereo device are mixed down. Fewer channels on a 5.1 device go to the front.
 pub(crate) fn convert(bytes: &[u8], ch: usize, w: usize, gain: f32, dst: &mut [f32]) {
     let frame = 2 * ch.max(1);
     let mut six = [0.0f32; 6];

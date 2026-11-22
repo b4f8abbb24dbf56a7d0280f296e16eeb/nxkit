@@ -64,7 +64,7 @@ impl<V: Copy> Registry<V> {
 }
 
 impl<V: Copy> Registry<V> {
-    /// Removes every registration `(start, end, value)` that `gone` names; returns how many went.
+    /// Removes every registration `(start, end, value)` that `gone` names. Returns how many went.
     pub(crate) fn remove_where(&mut self, mut gone: impl FnMut(u64, u64, V) -> bool) -> usize {
         let mut n = 0;
         self.by_start.retain(|s, es| {
@@ -131,7 +131,7 @@ impl<V> Registry<V> {
         self.by_start.values().map(Vec::len).sum()
     }
 
-    /// Every registration `(start, end)`, sorted by start; for equal starts the longer one comes first.
+    /// Every registration `(start, end)`, sorted by start. For equal starts, the longer one comes first.
     pub(crate) fn sorted(&self) -> Vec<(u64, u64)> {
         let mut out = Vec::with_capacity(self.len());
         for (s, es) in &self.by_start {

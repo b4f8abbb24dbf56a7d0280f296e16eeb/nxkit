@@ -1,7 +1,7 @@
 //! The work-stealing executor.
 //!
 //! Queues:
-//! - one **priority injector** (a max-heap by priority, FIFO among equals) for roots and [`Ctx::submit`];
+//! - one **priority injector** (a max-heap by priority, FIFO among equals) for roots and [`Ctx::submit`].
 //! - one **local deque per worker** for [`Ctx::spawn`] (continuations: pushed and popped at the back, stolen from the front).
 //!
 //! A worker takes, in order: its own newest local task (finish started work first, keeps memory bounded), the

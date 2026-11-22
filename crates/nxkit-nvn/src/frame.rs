@@ -102,7 +102,7 @@ impl TargetView {
     pub fn layer(self) -> u32 {
         self.0 >> 5 & 0xffff
     }
-    /// A format override; `None` uses the texture format.
+    /// A format override. `None` uses the texture format.
     pub fn format(self) -> Option<i32> {
         (self.0 & (1 << 30) != 0).then_some((self.0 >> 21 & 0x1ff) as i32)
     }
@@ -291,7 +291,7 @@ pub struct Frame {
     /// The shared texture lists.
     pub lists: Vec<TexId>,
     /// The ranges of commands that run while a render condition is false, in order and apart. Only the commands that
-    /// [`conditional`] names are left out; the others in a range run.
+    /// [`conditional`] names are left out. The others in a range run.
     pub disabled: Vec<Range<u32>>,
     /// The slots of the GPU counters and the reports that the backend writes (see [`crate::counters`]).
     pub counters: FrameCounters,
@@ -333,7 +333,7 @@ impl Frame {
         self.gates.clear();
     }
 
-    /// Marks the commands of `r` as run under a false render condition. The ranges come in command order; one that
+    /// Marks the commands of `r` as run under a false render condition. The ranges come in command order. One that
     /// touches the last range joins it.
     pub fn disable(&mut self, r: Range<u32>) {
         if r.is_empty() {

@@ -301,8 +301,8 @@ impl Backend for GpuBackend {
         if self.enc.is_some() {
             // With the encoder thread a frame reaches the queue only after its encode, so the queue does not see the
             // frames that wait for the encoder. Counted from the game's presents, at most MAX_PENDING frames are on
-            // their way to the screen; otherwise the game ran frames ahead, each showed 80 ms after it, and the
-            // textures it wrote for later frames reached the encodes of earlier ones.
+            // their way to the screen. Without this limit, the game ran frames ahead and each frame showed 80 ms after
+            // it. Also, the textures that the game wrote for later frames reached the encodes of earlier frames.
             let in_flight = |_: &Vec<Pending>| {
                 self.asked
                     .load(Ordering::Acquire)

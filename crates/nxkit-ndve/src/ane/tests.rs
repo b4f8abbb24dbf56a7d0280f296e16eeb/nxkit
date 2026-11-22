@@ -203,7 +203,7 @@ fn dense_blocks_fold_both_stages() {
         let at = byte + 2 * i;
         res[at..at + 2].copy_from_slice(&half::from_f32(v).to_le_bytes());
     };
-    // block 1 at 0x800: W1_0 = identity: tiles [kb][rb] at +0, +0x80, +0x100, +0x180; diagonal in tiles (0,0) and (1,1).
+    // block 1 at 0x800: W1_0 = identity: tiles [kb][rb] at +0, +0x80, +0x100, +0x180. Diagonal in tiles (0,0) and (1,1).
     for d in 0..8 {
         put(&mut res, 0x800, d * 9, 1.0); // kb 0, rb 0
         put(&mut res, 0x800 + 0x180, d * 9, 1.0); // kb 1, rb 1

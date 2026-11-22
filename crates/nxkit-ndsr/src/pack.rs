@@ -4,7 +4,7 @@
 //! `nn::ndve`'s resampler's. A layer is 1024 halves, `[W1_0, W1_1, W2_0, W2_1]` of 256 halves each, as 8x8 row-major
 //! tiles ready for `simdgroup_load` with a row stride of 8:
 //!
-//! - `W1_t[r][k]` at `256 t + 128 (k / 8) + 64 (r / 8) + 8 (r % 8) + k % 8`;
+//! - `W1_t[r][k]` at `256 t + 128 (k / 8) + 64 (r / 8) + 8 (r % 8) + k % 8`.
 //! - `W2_t[k][n]` at `512 + 256 t + 128 (n / 8) + 64 (k / 8) + 8 (k % 8) + n % 8`.
 //!
 //! The vr blobs are the same matrices in the order of the tensor core fragments (section 8.2), and the even layers hold
@@ -273,7 +273,7 @@ mod tests {
             state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             f64::from(i32::try_from(state >> 24).unwrap_or(0) - 128) / 512.0
         };
-        // the blob is stored as f16 bit patterns; keep the values in a side table keyed by the pattern index
+        // the blob is stored as f16 bit patterns. Keep the values in a side table keyed by the pattern index
         let len = layers * LAYER_BYTES;
         let vals: Vec<f64> = (0..len / 2).map(|_| next()).collect();
         let bytes: Vec<u8> = (0..len / 2)

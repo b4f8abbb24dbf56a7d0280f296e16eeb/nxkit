@@ -148,7 +148,7 @@ pub(super) fn late_copy_back(
                     let mut won: Mask = [0; 4];
                     for b in (0..blocks).filter(|&b| has(m, b) && has(&keep, b)) {
                         let o = b as u64 * BLOCK;
-                        // SAFETY: both copies hold a whole page for `pg`; the GPU finished them before the completion.
+                        // SAFETY: both copies hold a whole page for `pg`. The GPU finished them before the completion.
                         let (x, y) = unsafe {
                             (
                                 std::slice::from_raw_parts(

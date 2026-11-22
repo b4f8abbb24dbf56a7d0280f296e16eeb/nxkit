@@ -21,7 +21,7 @@ pub struct PageStats {
     pub mprotect_ns: u64,
     /// `mprotect` calls that failed.
     pub mprotect_failed: u64,
-    /// Dirty pages that did not fit the log; the flush then scans the table.
+    /// Dirty pages that did not fit the log. The flush then scans the table.
     pub log_overflows: u64,
     /// Program counters that did not fit the tables.
     pub pc_overflow: u64,
@@ -50,7 +50,7 @@ pub struct PageStats {
     pub emulated: [u64; Form::COUNT],
     /// Time of the emulated accesses.
     pub emulated_ns: u64,
-    /// Accesses of a page in flight that the handler could not do, by [`Reason`]; they waited for the writer.
+    /// Accesses of a page in flight that the handler could not do, by [`Reason`]. They waited for the writer.
     pub fallbacks: [u64; Reason::COUNT],
     /// Pages the flush staged because the handler stored to them.
     pub emu_staged: u64,
@@ -138,7 +138,7 @@ pub struct FlushStats {
     pub scanned: bool,
     /// Pages handed to the stager (mirrored mode).
     pub staged: u32,
-    /// Pages that the CPU wrote between the staging and the tag (mirrored mode); they are staged again.
+    /// Pages that the CPU wrote between the staging and the tag (mirrored mode). They are staged again.
     pub raced: u32,
     /// Pages staged because the handler stored to them while a frame wrote others of their blocks (part of `staged`).
     pub emu_staged: u32,

@@ -23,8 +23,8 @@ pub(crate) const VIRTUAL_WINDOW_LEN: u64 = 0x20_0000_0000;
 
 /// The window of the virtual pools: the top [`VIRTUAL_WINDOW_LEN`] bytes below `GUEST_VA_MAX` (`1 << 40`). The guest
 /// memory takes the window of guest addresses from its start, `gpu_base`, so the two never meet while the guest
-/// memory is less than 128 GiB long; Metal never hands out an address in either (`check_outside_window`). None when
-/// the guest memory reaches into it.
+/// memory is less than 128 GiB long. Metal never hands out an address in either (`check_outside_window`). None when the
+/// guest memory reaches into it.
 pub(crate) fn virtual_window(gpu_base: u64, guest_len: u64) -> Option<(u64, u64)> {
     let start = GUEST_VA_MAX - VIRTUAL_WINDOW_LEN;
     if gpu_base.saturating_add(guest_len) > start {

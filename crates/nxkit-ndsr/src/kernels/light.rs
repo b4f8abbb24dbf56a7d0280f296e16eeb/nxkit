@@ -3,8 +3,8 @@
 //!
 //! There is one kernel per program of the pack: seven ratios (1.2, 4/3, 1.5, 12/7, 2, 2.4, 3), two programs each (A
 //! encodes sRGB, B writes linear) and a third for 3.0 (C, linear with an f32 luma). The kernel reads the output tile's
-//! mapping, the offset, the output size and the sharpening strength from the game's push block, so a plan serves every
-//! input and output size; only the threadgroup count follows the input size. The tile (words 18, 19) must be the
+//! mapping, the offset, the output size and the sharpening strength from the game's push block. Thus a plan serves
+//! every input and output size. Only the threadgroup count follows the input size. The tile (words 18, 19) must be the
 //! kernel's grid, which the plan checks.
 
 use super::{OUT, PUSH, TEX0};
@@ -185,7 +185,7 @@ pub const LIGHT_KERNELS: [LightSpec; 15] = [
     light("ndsr_light_r3_c", 4, 12, [16, 16], 6, true, false, [16, 1]),
 ];
 
-/// The kernel of a vr_light program: by scale, tile and variant (A: sRGB; B: linear; C: linear, f32 luma).
+/// The kernel of a vr_light program: by scale, tile and variant (A: sRGB, B: linear, C: linear and f32 luma).
 #[must_use]
 pub fn find(net: &Net) -> Option<&'static LightSpec> {
     let srgb = net.variant == Variant::A;

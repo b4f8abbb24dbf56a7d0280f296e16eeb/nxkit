@@ -1,6 +1,6 @@
-//! Frostbite's game data (`frostbite.py`, `frostbite_jobs`, `frostbite_shaders`; EA SPORTS FC 27): the shaders are
-//! the CompiledBytecode resources of the bundles the superbundle tables (`.toc`) list, stored in the cas files, Oodle
-//! Leviathan blocks decoded with the game's own decoder ([`crate::oodle`]).
+//! Frostbite's game data (`frostbite.py`, `frostbite_jobs` and `frostbite_shaders`, for EA SPORTS FC 27): the shaders
+//! are the CompiledBytecode resources of the bundles the superbundle tables (`.toc`) list, stored in the cas files,
+//! Oodle Leviathan blocks decoded with the game's own decoder ([`crate::oodle`]).
 //!
 //! `Data/layout.toc` names the install chunks (a DbObject), each superbundle `.toc` under `Data/NX` and `Patch/NX`
 //! lists its bundles: entry 0 the manifest in a cas file, then its items (ebx, res, chunks).

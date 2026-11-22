@@ -26,7 +26,7 @@ fn arrays(count: u32, instances: u32) -> DrawArgs {
 }
 
 /// A render pass of three draws (commands 1 to 3). The samples of draws 0 and 1 are counted between reports at
-/// `addr` and `addr + 16`; the vertices up to draw 0 are reported at `addr + 32`, between them.
+/// `addr` and `addr + 16`. The vertices up to draw 0 are reported at `addr + 32`, between them.
 fn frame(addr: u64) -> Frame {
     let mut s = CmdStream::new();
     let mut rt = RtSet::default();

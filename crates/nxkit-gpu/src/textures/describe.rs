@@ -24,7 +24,7 @@ pub(super) fn kind_of(t: Target) -> Option<TextureKind> {
 pub(crate) const MAX_2D: u32 = 16384;
 
 /// The width and height of the 2D texture that holds a texture buffer of `elements` texels: rows of [`MAX_2D`]
-/// texels, element `x` at (x % 16384, x / 16384), as the translator wraps a 1D fetch. The last row may be short; its
+/// texels, element `x` at (x % 16384, x / 16384), as the translator wraps a 1D fetch. The last row may be short. Its
 /// tail reads the bytes after the buffer. None when the rows do not fit a 2D texture.
 pub(crate) fn buffer_rows(elements: u32) -> Option<(u32, u32)> {
     let h = elements.div_ceil(MAX_2D).max(1);

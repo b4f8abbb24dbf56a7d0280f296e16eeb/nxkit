@@ -10,7 +10,8 @@ use crate::info::SubresourceRange;
 use super::Vk;
 use super::state::{Image, State};
 
-/// `GENERAL`, `TRANSFER_SRC_OPTIMAL` or `SHARED_PRESENT_KHR` for a source; `TRANSFER_DST_OPTIMAL` for a destination.
+/// `GENERAL`, `TRANSFER_SRC_OPTIMAL` or `SHARED_PRESENT_KHR` for a source, and `TRANSFER_DST_OPTIMAL` for a
+/// destination.
 fn transfer_layout(layout: u32, dst: bool) -> bool {
     let own = if dst { 7 } else { 6 };
     layout == 1 || layout == own || layout == 1_000_111_000
@@ -248,7 +249,7 @@ impl Vk {
         self.record(cb, |_| Some(Cmd::ClearAttachments { attachments, rects }));
     }
 
-    /// `vkCmdExecuteCommands`: the secondary command buffers by handle; their commands are read at submit.
+    /// `vkCmdExecuteCommands`: the secondary command buffers by handle. Their commands are read at submit.
     pub fn cmd_execute_commands(&self, cb: u64, secondaries: &[u64]) {
         self.record(cb, |_| Some(Cmd::ExecuteCommands(secondaries.to_vec())));
     }

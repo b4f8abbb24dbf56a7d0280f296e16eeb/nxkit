@@ -2,7 +2,7 @@
 //!
 //! A title says which guest thread does what (render, audio, loading) by name, priority and entry address. The words
 //! are the title API's own, so a title module needs no runtime crate. The kernel of the host (`nxkit-hos`) has the
-//! matching table that sets the QoS class of a role; the host maps these rules onto it.
+//! matching table that sets the QoS class of a role. The host maps these rules onto it.
 
 /// What a guest thread does for the game.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

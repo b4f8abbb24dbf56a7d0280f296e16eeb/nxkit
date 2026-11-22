@@ -6,9 +6,9 @@ use super::*;
 /// frame is complete when [`encoded`] reports its batch done.
 ///
 /// With the mirror (`NXKIT_PRIVATE=1`) it also makes the pages that the frame's bindings touch members, copies the pages
-/// that the CPU wrote into a staging buffer and returns the overlay of the frame: its pool snapshot resolves member
+/// that the CPU wrote into a staging buffer and returns the overlay of the frame. Its pool snapshot resolves member
 /// ranges to the mirror, and the first command buffer copies the staged pages into the mirror. `drain` waits for every
-/// frame in flight; it is called when a page becomes a member that such a frame may still write in guest memory.
+/// frame in flight. It is called when a page becomes a member that such a frame may still write in guest memory.
 pub(crate) fn at_flush(
     detail: &FrameDetail,
     fence: u64,

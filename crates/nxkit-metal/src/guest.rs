@@ -62,7 +62,7 @@ unsafe extern "C" {
 /// Maps `len` zeroed bytes, read and write, with `hint` as the address hint (0 for none). The system may place the
 /// mapping elsewhere. None when the system has no memory.
 fn map_anon(hint: u64, len: usize) -> Option<NonNull<u8>> {
-    // SAFETY: an anonymous private mapping without `MAP_FIXED` replaces nothing; the hint is only a hint.
+    // SAFETY: an anonymous private mapping without `MAP_FIXED` replaces nothing. The hint is only a hint.
     let p = unsafe {
         mmap(
             hint as *mut std::ffi::c_void,
@@ -127,8 +127,9 @@ impl GuestMemory {
 
     /// Maps `len` zeroed bytes (rounded up to whole pages) that end at or below `limit`, and wraps them. The memory is an
     /// anonymous mapping of its own, outside every other mapping of the process, and it is unmapped on drop. The hints
-    /// are tried in order (0 lets the system choose); a mapping that ends above `limit` is given back and the next hint
-    /// is tried. A caller whose GPU addresses must fit an address space of its own (`1 << 39` for the Switch) uses it.
+    /// are tried in order (0 lets the system choose). When a mapping ends above `limit`, the call gives it back and
+    /// tries the next hint. A caller whose GPU addresses must fit an address space of its own (`1 << 39` for the
+    /// Switch) uses it.
     pub fn map_below(ctx: &Context, len: u64, limit: u64, hints: &[u64]) -> Result<Self> {
         let len = len.max(1).div_ceil(PAGE_SIZE) * PAGE_SIZE;
         let size =

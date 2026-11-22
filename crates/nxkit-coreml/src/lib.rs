@@ -6,7 +6,7 @@
 //!   loads it for the CPU and the Neural Engine (never the GPU). It blocks, so call it on a background thread.
 //! - [`Model::compute_plan`], [`PlanReport`]: which device each operation of the program prefers. A caller that wants
 //!   the Neural Engine only refuses a model with [`PlanReport::all_on_neural_engine`] false.
-//! - [`SharedTensor`]: an f16 tensor on an IOSurface (a `CVPixelBuffer` of `OneComponent16Half`; the channels are
+//! - [`SharedTensor`]: an f16 tensor on an IOSurface (a `CVPixelBuffer` of `OneComponent16Half`, with the channels
 //!   stacked as rows). Core ML reads inputs and writes outputs there, and `nxkit-metal` wraps the same pages as a
 //!   texture, so a picture goes from the GPU to the Neural Engine and back without a copy.
 //! - [`Model::predict_async`]: one prediction with several inputs and several outputs. The outputs are

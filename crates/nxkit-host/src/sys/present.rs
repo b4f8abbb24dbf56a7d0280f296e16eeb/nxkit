@@ -3,10 +3,10 @@
 //! With `NXKIT_OVERLAY=1` (a launcher in full screen, NX2Apple's console mode) the game does not open a Space of its
 //! own. Its window is borderless, covers the screen and joins every Space, the launcher's full-screen Space too
 //! (`fullScreenAuxiliary`), so it opens over the launcher with no Space change. It stays transparent until the game's
-//! picture shows something (a game presents black pictures while it boots; `nxkit_gpu::when_shown` looks at them) and
-//! then fades in over the launcher's own starting screen; the launcher hears it as `org.nxkit.shown.<pid>`. Only then
-//! does the application ask for the front: active with no window on the launcher's Space, it would take the player to
-//! the desktop. When the game ends, the window fades out before the application quits, and the launcher is
+//! picture shows something (a game presents black pictures while it boots, and `nxkit_gpu::when_shown` looks at them)
+//! and then fades in over the launcher's own starting screen. The launcher hears it as `org.nxkit.shown.<pid>`. Only
+//! then does the application ask for the front: active with no window on the launcher's Space, it would take the player
+//! to the desktop. When the game ends, the window fades out before the application quits, and the launcher is
 //! right under it. The loading screen of the start is the launcher's, which gets the progress (`loading.rs`).
 //!
 //! Without it the window is the titled window of `appkit.rs`. Both get a black background, so nothing white shows before
@@ -34,7 +34,7 @@ const SHOW_ANYWAY: Duration = Duration::from_secs(45);
 /// `NSFloatingWindowLevel`: above the launcher's full-screen window on its Space.
 const FLOATING: isize = 3;
 
-// Process-wide (W26): the first picture is done on the thread of a Metal completion handler, which has no context; the
+// Process-wide (W26): the first picture is done on the thread of a Metal completion handler, which has no context. The
 // display tick on the main thread reads it.
 static FIRST_PICTURE: AtomicBool = AtomicBool::new(false);
 
@@ -181,7 +181,7 @@ pub(super) fn tick(mtm: MainThreadMarker) {
     });
 }
 
-/// The game is to end. True when the application may quit now; an overlay fades out first and says so a fade later.
+/// The game is to end. True when the application may quit now. An overlay fades out first and says so a fade later.
 pub(super) fn may_end() -> bool {
     PRESENT.with(|p| {
         let mut p = p.borrow_mut();

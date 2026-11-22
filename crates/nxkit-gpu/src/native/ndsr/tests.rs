@@ -181,7 +181,7 @@ fn each_size_and_network_gets_its_own_tag() {
     assert_ne!(a, tag(VR_A, &p2, Format::Rgba8Unorm), "input size");
     assert_ne!(a, tag(VR_B, &p1, Format::Rgb10A2Unorm), "network");
     assert_eq!(&a[2..6], &[1536, 864, 1920, 1080]);
-    // The words the kernel does not read do not make a new plan; the strength does.
+    // The words the kernel does not read do not make a new plan. The strength does.
     let mut q = p1.clone();
     q[0] ^= 0xff;
     q[12 * 4] ^= 0xff;
@@ -193,7 +193,7 @@ fn each_size_and_network_gets_its_own_tag() {
 #[test]
 fn the_formats_must_be_the_variants() {
     let p = push(1536, 864, 1920, 1080);
-    // Variant A writes 8 bit; a 10 bit image is variant B's.
+    // Variant A writes 8 bit. A 10 bit image is variant B's.
     let s = shape_of(&info(VR_A, &p, Format::Rgb10A2Unorm, [1920, 1080]));
     assert!(s.refusal.is_some_and(|r| r.contains("img1")));
     // The capture still gets the tag.

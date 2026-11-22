@@ -264,7 +264,7 @@ impl Renamer {
                 if rw && s.size <= MAX_BYTES {
                     st.candidate(s.address, s.size);
                 } else if rw {
-                    // Too large to rename; a snapshot that is written is state.
+                    // Too large to rename. A snapshot that is written is state.
                     st.demote(s.address);
                 } else {
                     st.watch_read_only(s.address, s.size);

@@ -242,7 +242,7 @@ impl Input {
     }
 
     /// What the keyboard and the mouse give player 1 in the layout of the title: the bound buttons and sticks, and
-    /// the mouse camera on the right stick. `scripted` are the held actions of the input file; they join the bound
+    /// the mouse camera on the right stick. `scripted` are the held actions of the input file. They join the bound
     /// ones before the sticks are worked out, so opposite directions cancel. The keyboard and the mouse give nothing
     /// while the window has no focus, the scripted actions stay.
     fn keyboard_mouse(&self, mut scripted: Vec<Action>) -> RawKeys {

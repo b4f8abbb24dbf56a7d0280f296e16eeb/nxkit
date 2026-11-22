@@ -1,6 +1,6 @@
 //! The queue: submits, waits, fences, semaphores, events and query pools.
 //!
-//! Every queue is one serial queue. A submit gets the next serial; a fence given to it is done when that serial has
+//! Every queue is one serial queue. A submit gets the next serial. A fence given to it is done when that serial has
 //! completed, and so is an event that a command sets and a query that a command writes. Semaphores order nothing: the
 //! submits run in order, so every wait is already met.
 
@@ -93,7 +93,7 @@ fn gather(s: &State, cmds: &[Cmd], sub: &mut Submission, depth: u32) {
 }
 
 impl Vk {
-    /// `vkQueueSubmit`: the command buffers of every submit info in order, as one submission; the fence (0 for none)
+    /// `vkQueueSubmit`: the command buffers of every submit info in order, as one submission. The fence (0 for none)
     /// is done when it completes.
     pub fn submit(&self, command_buffers: &[Vec<u64>], fence: u64) -> VkResult<()> {
         let mut clock = self
@@ -311,7 +311,7 @@ impl Vk {
         Ok(())
     }
 
-    /// `vkCreateQueryPool`. Only occlusion and timestamp queries are written; other types are reported.
+    /// `vkCreateQueryPool`. Only occlusion and timestamp queries are written. Other types are reported.
     pub fn create_query_pool(&self, ty: u32, count: u32) -> VkResult<u64> {
         let qt = match ty {
             query_type::OCCLUSION => QueryType::Occlusion,
@@ -344,7 +344,7 @@ impl Vk {
         }
     }
 
-    /// The values of queries `first..first + count`; `wait` waits for the ones that a submit wrote. A query that no
+    /// The values of queries `first..first + count`. `wait` waits for the ones that a submit wrote. A query that no
     /// submit has written stays unavailable instead of waiting for ever.
     pub fn query_values(
         &self,

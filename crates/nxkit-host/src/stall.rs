@@ -4,8 +4,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-/// The time of the latest present that went on screen, on the clock of the NVN layer (`nxkit_rt::nvn::clock_ns`);
-/// 0 before the first. A Vulkan game's presents are on another clock, so the watch is for NVN games.
+/// The time of the latest present that went on screen, on the clock of the NVN layer (`nxkit_rt::nvn::clock_ns`),
+/// or 0 before the first. A Vulkan game's presents are on another clock, so the watch is for NVN games.
 // Process-wide (W26): the shown hook of the screen is a plain function without context.
 static LAST_SHOWN_NS: AtomicU64 = AtomicU64::new(0);
 

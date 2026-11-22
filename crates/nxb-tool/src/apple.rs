@@ -3,7 +3,7 @@
 //! The tools are resolved once (`xcrun -sdk <sdk> -find`) and called directly with the exact environment
 //! (`EnvPolicy::apple`, `SDKROOT` of the target). The source always goes on stdin (`-x metal -`), never as a file name:
 //! clang names a source's static initializer after its file, so a name would change the library (`dmsh_pch.py`).
-//! [`Io::Files`] writes the AIR to a temp file like the Python chain; [`Io::Pipes`] streams it (design-v2 9.3).
+//! [`Io::Files`] writes the AIR to a temp file like the Python chain. [`Io::Pipes`] streams it (design-v2 9.3).
 
 use crate::env::EnvPolicy;
 use crate::invocation::{Completed, Invocation};

@@ -134,7 +134,7 @@ def run_batch(jobs, out_dir, workers=6, extra=(), max_hangs=4, log=print):
                 pending = victims
                 continue
             break
-        # a hang: the culprit is the job whose own case reports "Caused GPU Hang" or a timeout; jobs that were
+        # a hang: the culprit is the job whose own case reports "Caused GPU Hang" or a timeout. Jobs that were
         # victims (discarded command buffers, ignored submissions) or never ran go to the next chunk
         def culprit(r):
             return any(('Hang Error' in (c.get('error') or '') or 'timeout' in (c.get('error') or '')) for c in r.get('cases', []))

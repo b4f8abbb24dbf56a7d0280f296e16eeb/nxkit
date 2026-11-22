@@ -21,7 +21,7 @@ pub struct Settings {
     /// monotonic clock of the host, as for NVN.
     pub clock_ns: fn() -> u64,
     /// The big-stack stubs of the functions that need the big host stack, by the address of the function. The loader
-    /// puts a stub into an import slot itself; `vkGet*ProcAddr` gives the stub of a function that has one here. The
+    /// puts a stub into an import slot itself. `vkGet*ProcAddr` gives the stub of a function that has one here. The
     /// host fills it from the big-stack rows of `nxkit_rt::entries_for(Graphics::Vulkan)` on the loader thread.
     pub stubs: HashMap<usize, usize>,
 }

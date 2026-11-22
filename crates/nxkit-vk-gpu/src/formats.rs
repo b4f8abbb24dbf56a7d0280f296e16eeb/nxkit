@@ -219,7 +219,7 @@ pub(crate) fn sampler(d: &SamplerDesc) -> nxkit_metal::SamplerDesc {
     nxkit_metal::SamplerDesc {
         min: filter(d.min_filter),
         mag: filter(d.mag_filter),
-        // Vulkan always has mip levels; `maxLod` 0.25 is how a game asks for none.
+        // Vulkan always has mip levels. `maxLod` 0.25 is how a game asks for none.
         mip: if d.mipmap_mode == 1 {
             MipFilter::Linear
         } else {

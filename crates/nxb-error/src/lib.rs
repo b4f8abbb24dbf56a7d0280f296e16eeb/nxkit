@@ -11,7 +11,8 @@
 //! | [`ErrorClass::Env`] | the machine | abort, no stamp, no reuse key, never retried |
 //! | [`ErrorClass::Internal`] | one task | a caught panic: `internal error` for the shader |
 //!
-//! Every crate keeps its own error enum with a `class()` mapping into [`ErrorClass`]; this crate holds the shared parts.
+//! Every crate keeps its own error enum with a `class()` mapping into [`ErrorClass`]. This crate holds the shared
+//! parts.
 
 mod env;
 mod tool;

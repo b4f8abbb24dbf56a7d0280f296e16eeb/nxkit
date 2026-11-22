@@ -22,7 +22,7 @@ impl PipelineCache {
 
     /// Hands the capture over: from now on new compiles run on a new compiler with a fresh serializer, the old
     /// serializer waits (up to 20 s) until the compiles that were running on its compiler are done, and then writes its
-    /// archive to `path`. The serializer's internal store is limited (about 10 MB); a full one hands Metal nil data and
+    /// archive to `path`. The serializer's internal store is limited (about 10 MB). A full one hands Metal nil data and
     /// the compiler crashes, so the host rotates well before. If compiles are still running after the wait, nothing is
     /// written (their capture is lost, but the serializer is not touched under them).
     pub fn rotate_archive(&self, path: &Path) -> Result<()> {

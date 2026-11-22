@@ -61,7 +61,7 @@ impl Platform {
     }
 }
 
-// Process-wide (W26): the console of the game, set once at load; read by the NVN procs, which the game calls through a
+// Process-wide (W26): the console of the game, set once at load. The NVN procs read it. The game calls them through a
 // C function with no Rust context.
 static PLATFORM: AtomicU8 = AtomicU8::new(0);
 

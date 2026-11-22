@@ -7,20 +7,20 @@
 //! | state | protection | meaning |
 //! |---|---|---|
 //! | free | as the guest set it | not tracked |
-//! | clean | read only | tracked; the CPU has not written it since the last flush |
+//! | clean | read only | tracked: the CPU has not written it since the last flush |
 //! | dirty | read and write | the CPU wrote it since the last flush |
 //! | gpu(frame) | none | a frame that may write the page is in flight, the number is the frame |
 //!
-//! A write to a clean page faults; the handler marks the page dirty, logs it, opens it and returns, so the store
-//! runs again. A flush ([`Pages::flush`]) takes the log, protects the dirty pages read only again, and protects the
-//! pages that the new frame may write against all access. A page that the CPU touches while it is protected that way
-//! is counted as an access in flight and opened (read only for a read, read and write for a write). Guest memory stays
-//! the truth in this mode: nothing is copied, nothing waits. The completion of the frame ([`Pages::complete`]) puts the
+//! A write to a clean page faults. The handler marks the page dirty, logs it, opens it and returns, so the store runs
+//! again. A flush ([`Pages::flush`]) takes the log, protects the dirty pages read only again, and protects the pages
+//! that the new frame may write against all access. A page that the CPU touches while it is protected that way is
+//! counted as an access in flight and opened (read only for a read, read and write for a write). Guest memory stays the
+//! truth in this mode: nothing is copied, nothing waits. The completion of the frame ([`Pages::complete`]) puts the
 //! pages that are still protected read only.
 //!
 //! The fault path is a signal, `SIGBUS` or `SIGSEGV` (the host installs no Mach exception port). The handler runs
 //! before the crash report of the host: it takes a fault on a tracked page and hands every other fault to the handler
-//! that was installed before it. It reads and writes atomics, calls `mprotect` and reads the clock; it takes no lock
+//! that was installed before it. It reads and writes atomics, calls `mprotect` and reads the clock. It takes no lock
 //! and allocates nothing. Everything outside the handler that changes the table or the protection of a run holds one
 //! mutex, which no handler takes.
 //!
@@ -29,14 +29,14 @@
 //! of `nxkit_abi::guest`, which opens the tracked pages in the range first.
 //!
 //! Limits: the frame numbers are kept in 29 bits. The kind of access comes from the write bit of the exception
-//! syndrome; an atomic read-modify-write that faults on a protected page counts as a read first and as a write at its
+//! syndrome. An atomic read-modify-write that faults on a protected page counts as a read first and as a write at its
 //! second fault. A thread that does not know the host marks no pages as internal, so its accesses count as the game's.
 //!
 //! Step 4 (mirrored mode): a page tagged with a frame knows the 64-byte blocks that the frames since its last copy from
-//! the mirror may have written (the stale blocks). A copy from the mirror moves those blocks only. A CPU access to a
-//! page of a frame in flight that lies outside the stale blocks is done by the handler itself through a second mapping
-//! of guest memory ([`Pages::make_alias`], [`a64`]), without waiting and without opening the page; a store of that
-//! kind is logged, and the next flush stages the page without its stale blocks.
+//! the mirror may have written (the stale blocks). A copy from the mirror moves those blocks only. A CPU access can go
+//! to a page of a frame in flight and lie outside the stale blocks. The handler itself does such an access through a
+//! second mapping of guest memory ([`Pages::make_alias`], [`a64`]), without waiting and without opening the page. The
+//! handler logs a store of that kind, and the next flush stages the page without its stale blocks.
 
 pub(crate) mod a64;
 mod access;
@@ -108,7 +108,7 @@ const DIRTY: u32 = 2;
 const GPU: u32 = 3;
 /// A thread is copying the page from the mirror into guest memory (mirrored mode).
 const SYNC: u32 = 4;
-/// Like `GPU`, but a host thread opened the page for reading while its frame was in flight (mirrored mode); the
+/// Like `GPU`, but a host thread opened the page for reading while its frame was in flight (mirrored mode). The
 /// completion of the frame protects it again.
 const OPEN: u32 = 5;
 const STATE_MASK: u32 = 7;
@@ -311,7 +311,7 @@ struct LateCopy {
     frame: u64,
     /// The pages, sorted. Page `pages[i]` is at `i * page` in each copy.
     pages: Vec<u32>,
-    /// The host addresses of the copy at the start and at the end; 0 until the encoder registered them.
+    /// The host addresses of the copy at the start and at the end. They are 0 until the encoder registered them.
     start: u64,
     end: u64,
 }

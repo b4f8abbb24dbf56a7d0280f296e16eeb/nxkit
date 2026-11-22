@@ -1,6 +1,6 @@
 //! Golden values from the Python model `refvr.py` on a synthetic texture and blob (no game data): see
 //! `tests/fixtures/golden.txt`. The texture is `((3x + 5y + 61c + (hash(x, y, c) & 63)) mod 256) / 256` clamped to the
-//! picture; the blob is an LCG of halves in -0.5 .. 0.5.
+//! picture. The blob is an LCG of halves in -0.5 .. 0.5.
 
 use super::*;
 use crate::half;

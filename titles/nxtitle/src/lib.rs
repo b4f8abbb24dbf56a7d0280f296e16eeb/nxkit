@@ -10,8 +10,8 @@
 //! Families and titles answer questions through hooks ([`BuildHooks`], [`RuntimeHooks`]). Every answer is a
 //! [`Fact`], a value with its [`Evidence`]. `None` means "no opinion", and the question goes one layer down:
 //! title, then engine family, then graphics family, then the core default. A title names its engine by id, as data,
-//! and its graphics API as a fact ([`Title::graphics`]); the graphics family follows from the API. A title does not depend on a family
-//! crate, and no family depends on another, so each can be built and tested alone.
+//! and its graphics API as a fact ([`Title::graphics`]). The graphics family follows from the API. A title does not
+//! depend on a family crate, and no family depends on another, so each can be built and tested alone.
 //!
 //! The [`Catalog`] composes families and titles for one game ([`Catalog::resolve`]). The crate `nxtitles` builds
 //! the catalog from the modules that are switched on by cargo features. The core uses this crate and the catalog

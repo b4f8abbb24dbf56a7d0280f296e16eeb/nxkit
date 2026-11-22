@@ -199,7 +199,7 @@ fn real_build() {
 #[test]
 fn a_pull_shader_gets_its_stage_input_base_from_the_b_library() {
     let d = dir("seen_pull");
-    // the host draws this shader through `_b` with a vertex layout unless pulling is on; `_bp` is the plain base
+    // the host draws this shader through `_b` with a vertex layout unless pulling is on, and `_bp` is the plain base
     library(
         &d,
         "v1_b",

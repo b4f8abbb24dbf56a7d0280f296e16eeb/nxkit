@@ -32,7 +32,7 @@ pub use vt::{Installed, install};
 
 /// The engine region asks for `regs[param]` bytes (and `x1`, the request of `AllocateAddressRegion`). When that is
 /// more than `room`, both registers get `room`. Returns `(asked, given)` when it capped them. `param` names a
-/// register x1 to x28 other than x18; any other leaves the registers alone.
+/// register x1 to x28 other than x18. Any other leaves the registers alone.
 pub fn cap_region(regs: &mut [u64], param: u32, room: u64) -> Option<(u64, u64)> {
     let p = param as usize;
     if !(1..=28).contains(&p) || p == 18 || regs.len() <= p {

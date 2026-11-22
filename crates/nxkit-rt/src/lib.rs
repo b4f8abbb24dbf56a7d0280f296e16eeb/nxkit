@@ -145,7 +145,7 @@ pub enum Graphics {
 /// the API's layer (for NVN the loader, for Vulkan every `vk*` function) and the SDK take-overs of `gfx`, which do not
 /// depend on the API. The SDK take-overs of the kernel service come after the offline entries.
 pub fn entries_for(graphics: Graphics) -> &'static [Entry] {
-    // Process-wide (W26): one table per graphics API; the loader and the C lookups read them.
+    // Process-wide (W26): one table per graphics API. The loader and the C lookups read them.
     static TABLES: [OnceLock<Vec<Entry>>; 2] = [OnceLock::new(), OnceLock::new()];
     TABLES[graphics as usize].get_or_init(|| table(graphics))
 }

@@ -175,7 +175,7 @@ pub enum Cmd {
         bind: BindPoint,
         /// `firstSet`.
         first: u32,
-        /// The set handles (at most 8); their contents are in the submission.
+        /// The set handles (at most 8). Their contents are in the submission.
         sets: Vec<u64>,
         /// The dynamic offsets, in the order of the sets and their dynamic bindings.
         dynamic_offsets: Vec<u32>,
@@ -208,7 +208,7 @@ pub enum Cmd {
         /// The rectangles.
         rects: Vec<Rect2D>,
     },
-    /// `vkCmdSetLineWidth` (Metal draws lines one pixel wide; kept for completeness).
+    /// `vkCmdSetLineWidth` (Metal draws lines one pixel wide, and the command is kept for completeness).
     SetLineWidth(f32),
     /// `vkCmdSetDepthBias`: constant factor, clamp, slope factor.
     SetDepthBias([f32; 3]),
@@ -370,7 +370,7 @@ pub enum Cmd {
         /// The rectangles.
         rects: Vec<ClearRect>,
     },
-    /// `vkCmdExecuteCommands`: secondary command buffers, replayed in place; their commands are in the submission.
+    /// `vkCmdExecuteCommands`: secondary command buffers, replayed in place. Their commands are in the submission.
     ExecuteCommands(Vec<u64>),
     /// `vkCmdResetQueryPool`.
     ResetQueryPool {

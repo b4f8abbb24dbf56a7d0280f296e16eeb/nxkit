@@ -4,7 +4,7 @@ use super::*;
 
 fn set_prot_raw(start: u64, end: u64, prot: c_int) -> bool {
     SHARED.mprotects.fetch_add(1, Ordering::Relaxed);
-    // SAFETY: the run lies in guest memory that `attach` named; the run is whole host pages. `mprotect` only changes
+    // SAFETY: the run lies in guest memory that `attach` named. The run is whole host pages. `mprotect` only changes
     // the access to them.
     let ok = unsafe { mprotect(start as *mut c_void, (end - start) as usize, prot) == 0 };
     if !ok {
@@ -128,8 +128,8 @@ pub(super) fn fault_regs(uctx: *mut c_void) -> (u64, bool) {
     if uctx.is_null() {
         return (0, false);
     }
-    // SAFETY: the kernel passes a valid `ucontext_t` to an SA_SIGINFO handler. Its `uc_mcontext` pointer is at byte 48;
-    // the `__darwin_mcontext64` it points at starts with the exception state (`far` at 0, `esr` at 8) and holds the
+    // SAFETY: the kernel passes a valid `ucontext_t` to an SA_SIGINFO handler. Its `uc_mcontext` pointer is at byte 48.
+    // The `__darwin_mcontext64` it points at starts with the exception state (`far` at 0, `esr` at 8) and holds the
     // program counter at byte 272. The fields are read, not written.
     unsafe {
         let mc = *uctx.cast::<u8>().add(48).cast::<*const u8>();
@@ -150,7 +150,7 @@ pub(super) unsafe fn thread_regs(uctx: *mut c_void) -> Option<(a64::Regs, *mut u
     if uctx.is_null() {
         return None;
     }
-    // SAFETY: the `ucontext_t` is valid; its `uc_mcontext` pointer is at byte 48. The `__darwin_mcontext64` it points
+    // SAFETY: the `ucontext_t` is valid. Its `uc_mcontext` pointer is at byte 48. The `__darwin_mcontext64` it points
     // at holds the exception state (16 bytes), then x0 to x30 (31 words in a row, `fp` and `lr` are x29 and x30), the
     // stack pointer at byte 264, the program counter at 272, `cpsr` and a pad word, and the SIMD registers v0 to v31 at
     // byte 288. The pointers stay valid until the handler returns.

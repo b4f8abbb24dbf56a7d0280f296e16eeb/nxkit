@@ -192,7 +192,7 @@ impl State {
 
 impl TextureStore {
     /// Drops the Metal textures that another texture overwrote (see the module). Runs every [`SCAN_EVERY`] frames.
-    /// Returns how many Metal textures it dropped; they are in `retired`.
+    /// Returns how many Metal textures it dropped. They are in `retired`.
     pub(super) fn supersede_scan(&mut self) -> usize {
         if !self.sup.enabled || !self.frame.is_multiple_of(SCAN_EVERY) || crate::knob("nosupersede")
         {

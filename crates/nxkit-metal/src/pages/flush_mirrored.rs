@@ -3,7 +3,7 @@
 use super::*;
 
 impl Pages {
-    /// The flush of frame `frame` when there is a mirror ([`set_mirror`](Self::set_mirror)); the mirror of every page
+    /// The flush of frame `frame` when there is a mirror ([`set_mirror`](Self::set_mirror)). The mirror of every page
     /// in `members` must be readable and writable.
     ///
     /// 1. The pages of `members` (host address and length) that are not tracked yet become tracked and read only, and
@@ -70,9 +70,9 @@ impl Pages {
         }
         for (s, e) in runs_of(&newly) {
             protect_pages(s, e, PROT_READ, true);
-            // SAFETY: both ranges lie inside guest memory and its mirror (page numbers are clipped to the table); the
-            // guest pages are readable (just protected read only), the mirror pages are writable (the caller made them
-            // usable) and the two are different mappings.
+            // SAFETY: both ranges lie inside guest memory and its mirror (page numbers are clipped to the table). The
+            // guest pages are readable (just protected read only). The mirror pages are writable (the caller made them
+            // usable). The two are different mappings.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     (base + u64::from(s) * p) as *const u8,
@@ -189,7 +189,7 @@ impl Pages {
         st.staged += st.emu_staged;
         st.stage_ns = tick();
         // The writable pages: each is compared with the bytes staged for it last, and staged when it differs. A page that
-        // did not change for [`HOT_QUIET`] flushes is protected again; the compare after the protection catches a store
+        // did not change for [`HOT_QUIET`] flushes is protected again. The compare after the protection catches a store
         // that came in between.
         st.promoted = to_hot.len() as u32;
         for pg in to_hot {
@@ -212,9 +212,9 @@ impl Pages {
                     gone.push(pg);
                     continue;
                 }
-                // SAFETY: the page lies in guest memory and is readable and writable (it is dirty); the CPU may store
-                // to it at the same time, which the staging accepts: the shadow is what is staged, so a later store is
-                // found at the next flush.
+                // SAFETY: the page lies in guest memory and is readable and writable (it is dirty). The CPU may store
+                // to it at the same time, and the staging accepts that. The shadow is what is staged, so the next flush
+                // finds a later store.
                 let live = unsafe {
                     std::slice::from_raw_parts((base + u64::from(pg) * p) as *const u8, p as usize)
                 };
@@ -266,7 +266,7 @@ impl Pages {
                 protect_pages(s, e, PROT_READ, true);
             }
             for (pg, shadow) in &demote {
-                // SAFETY: as above; the page is read only now, so nothing changes under the compare.
+                // SAFETY: as above. The page is read only now, so nothing changes under the compare.
                 let live = unsafe {
                     std::slice::from_raw_parts((base + u64::from(*pg) * p) as *const u8, p as usize)
                 };
@@ -330,7 +330,7 @@ impl Pages {
                             }
                         }
                         SYNC if tries < 1000 => {
-                            // A thread copies the page right now; let it finish.
+                            // A thread copies the page right now. Let it finish.
                             tries += 1;
                             std::thread::yield_now();
                         }
@@ -407,7 +407,7 @@ impl Pages {
                         if stale[(b / 64) as usize] >> (b % 64) & 1 == 0 {
                             continue;
                         }
-                        // SAFETY: the page is writable now and lies in guest memory; the block lies in the page.
+                        // SAFETY: the page is writable now and lies in guest memory. The block lies in the page.
                         unsafe {
                             std::slice::from_raw_parts_mut(
                                 (base + u64::from(pg) * p + b * BLOCK) as *mut u32,

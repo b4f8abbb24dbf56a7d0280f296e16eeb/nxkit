@@ -286,7 +286,7 @@ fn textures_the_kernel_cannot_write_go_through_a_buffer() {
 
 #[test]
 fn buffered_levels_round_each_level_to_whole_blocks_and_keep_the_depth() {
-    // A 64x64x64 BC4 3D texture is 16x16 blocks deep 64; a 2D chain keeps 1x1 blocks for its tail levels.
+    // A 64x64x64 BC4 3D texture is 16x16 blocks deep 64. A 2D chain keeps 1x1 blocks for its tail levels.
     assert_eq!(
         buffered::level_blocks(&[[64, 64, 64]], (4, 4)),
         vec![[16, 16, 64]]

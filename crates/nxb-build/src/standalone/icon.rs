@@ -1,7 +1,7 @@
 //! The app icon: the game's cover (`icon.jpg` of the control data, 256x256) as `Contents/Resources/AppIcon.icns`.
 //! The cover lies on the macOS icon grid (a 824-pixel shape in a 1024-pixel canvas) with the rounded corners of
 //! the system's shape, so the Dock and Finder show it as a Mac icon and not in a grey frame. `sips` scales the
-//! JPEG and writes the sizes, `iconutil` packs them; the shape is drawn here.
+//! JPEG and writes the sizes, `iconutil` packs them. This module draws the shape.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,7 +41,7 @@ fn run(cmd: &mut Command) -> Result<(), String> {
     ))
 }
 
-/// Writes `AppIcon.icns` from the cover `jpg` into `resources`; `scratch` holds the intermediate files.
+/// Writes `AppIcon.icns` from the cover `jpg` into `resources`. `scratch` holds the intermediate files.
 pub(crate) fn write(jpg: &Path, resources: &Path, scratch: &Path) -> Result<String, String> {
     let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
     let _ = std::fs::remove_dir_all(scratch);
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn a_bottom_up_24_bit_bmp_reads_top_down() {
-        // 2x2: bottom row blue, red; top row green, white (rows padded to 8 bytes)
+        // 2x2: bottom row blue and red, top row green and white (rows padded to 8 bytes)
         let mut b = b"BM".to_vec();
         b.extend([0; 8]);
         b.extend(54u32.to_le_bytes());

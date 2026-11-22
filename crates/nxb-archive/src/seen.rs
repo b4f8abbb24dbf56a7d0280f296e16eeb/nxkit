@@ -289,7 +289,7 @@ pub(crate) fn layout_invalid(
         }
     }
     for (i, format, offset, buffer) in attributes {
-        // the compiler checks the attributes that the vertex function reads; the others pass as they are
+        // the compiler checks the attributes that the vertex function reads, and the others pass as they are
         if used.is_some_and(|u| !u.contains(i)) {
             continue;
         }
@@ -451,7 +451,7 @@ pub(crate) fn vertex_inputs(lib_dir: &Path, stem: &str) -> Option<HashSet<u32>> 
 /// A pair is accepted when the plan accepts it under the rules of a plain base (reflection of this chain, no mesh
 /// stage, no function constants, no layer output, no primitive ID, the libraries have their functions), as the host
 /// draws it with stage inputs (the `_b` library) or pulling (the `_bp` library). The state's own functions must be in
-/// the libraries without function constants; they need not be the entries the plan chose: the host draws a pair with
+/// the libraries without function constants. They need not be the entries the plan chose: the host draws a pair with
 /// the integer entry (`main0_u`) when its targets are integer formats.
 pub(crate) struct Acceptor<'a> {
     lib_dir: &'a Path,

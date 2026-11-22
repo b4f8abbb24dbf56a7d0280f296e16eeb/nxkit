@@ -1,6 +1,6 @@
 //! The GPU's share of the Neural Engine path (`docs/plans/ndve-ane.md`): the epilogue that turns `final` and `delta`
 //! into the game's RGBA8 image. The kernels are in `msl/ane.metal`. The tensors are bound from the slot that holds the
-//! picture's result ([`plan::ANE_FINAL`], [`plan::ANE_DELTA`]); the game's own resources are those of the Metal plan.
+//! picture's result ([`plan::ANE_FINAL`], [`plan::ANE_DELTA`]). The game's own resources are those of the Metal plan.
 //! The model's input is not the GPU's: the host writes it from the decoded picture, ahead of the game.
 
 use crate::plan::{self, Binding, GameResource, Plan, Source, Step};
@@ -89,7 +89,7 @@ mod tests {
             let at = src
                 .find(&format!("kernel void {}(", s.kernel))
                 .unwrap_or_else(|| panic!("no kernel {}", s.kernel));
-            // The signature ends at the body's brace; an attribute such as `[[texture(0)]]` has its own parentheses.
+            // The signature ends at the body's brace. An attribute such as `[[texture(0)]]` has its own parentheses.
             let sig = &src[at..at + src[at..].find('{').unwrap_or(0)];
             for b in &s.buffers {
                 assert!(sig.contains(&format!("buffer({})", b.index)), "{sig}");

@@ -2,7 +2,7 @@
 //!
 //! Two ways to join a key:
 //! - [`SingleFlight::claim`] (preferred inside the executor): the first caller becomes the leader and gets a
-//!   [`Leader`] to complete; later callers register a continuation and return at once, so no worker blocks.
+//!   [`Leader`] to complete. Later callers register a continuation and return at once, so no worker blocks.
 //! - [`SingleFlight::get_or_run`]: blocking convenience for code outside the executor or for cheap work.
 //!
 //! Results are memoised for the life of the `SingleFlight`, keep `V` small (a digest or an `Arc`).

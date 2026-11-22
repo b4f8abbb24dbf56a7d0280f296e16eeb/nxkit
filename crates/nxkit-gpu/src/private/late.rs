@@ -12,7 +12,7 @@ pub(super) type DiagSets = (Vec<(u64, u64, u8)>, Vec<(u64, u64)>, Vec<(u64, u64,
 /// the signals come (the data those submits read is written until then).
 #[derive(Default)]
 struct LateFrame {
-    /// The signals the frame still waits for; negative when signals came before the flush counted them.
+    /// The signals the frame still waits for. The value is negative when signals came before the flush counted them.
     waiting: i32,
     /// The flush counted the signals.
     expected: bool,
@@ -96,10 +96,10 @@ pub(crate) fn late_signal(fence: u64) {
 /// command buffer is committed:
 ///
 /// - a frame whose flush ran submits before the CPU signals they wait for waits here (at most [`LATE_WAIT`]) until the
-///   signals came, and gets the pages the CPU wrote until the last of them: those submits read what the CPU wrote for
-///   them, which the flush could not capture;
+///   signals came. It gets the pages the CPU wrote until the last of them: those submits read what the CPU wrote for
+///   them, which the flush could not capture.
 /// - with the knob `privlatestage`, every frame gets the pages the CPU wrote since the flush, whatever they were written
-///   for (for comparing; with the CPU ahead of the encoder it also hands the frame the data of the next one).
+///   for (for comparing). With the CPU ahead of the encoder, it also hands the frame the data of the next one.
 pub(crate) fn late_stage(o: &GuestOverlay) -> Vec<CopyJob> {
     if !mirrored() {
         return Vec::new();

@@ -125,7 +125,7 @@ impl Clock {
 
 impl GpuBackend {
     /// Waits for the batches of the fences up to `upto` that were kept and returns the numbers of each, with the fence.
-    /// The flag is false when a batch failed; its fence has no entry.
+    /// The flag is false when a batch failed. The fence of that batch has no entry.
     pub(super) fn finish_batches(&self, upto: u64) -> (Vec<(u64, CommandBufferStats)>, bool) {
         let batches: Vec<_> = {
             let mut q = locked(&self.inflight);
@@ -150,9 +150,10 @@ impl GpuBackend {
     /// finished, by fence.
     ///
     /// - A `TIMESTAMP_TOP` gets the GPU start of the batch of its own fence and a `TIMESTAMP` its end, with a counter of
-    ///   0. The game takes its GPU time from the difference and picks its frame interval from it; without the reports it
-    ///   saw no GPU time and kept a 30 fps step on frames that took longer, which ran the game in slow motion. Fences
-    ///   that finish together each get their own times. A fence without GPU time takes the last time written.
+    ///   0. The game takes its GPU time from the difference and picks its frame interval from it. Without the reports,
+    ///   the game saw no GPU time. It then kept a 30 fps step on frames that took longer, and the game ran in slow
+    ///   motion. Fences that finish together each get their own times. A fence without GPU time takes the last time
+    ///   written.
     /// - A `ReportValue` writes its 32-bit value as the counter (zero-extended, as the GPU writes the payload of a
     ///   four-word report) and the end time. The render conditions of later frames read it (`nxkit_nvn::rendercond`).
     /// - The GPU counters (samples passed, vertices, primitives) are written and landed by `queries`, with the end time
