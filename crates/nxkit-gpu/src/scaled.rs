@@ -125,6 +125,22 @@ impl ScaledUploads {
         });
     }
 
+    /// Queues the scaling of the contents of a scaled texture into its native successor `to`. False when the resampler
+    /// cannot write `to`.
+    pub(crate) fn queue_carry(&mut self, from: &Texture, to: &Res) -> bool {
+        if !Resampler::supports(&to.desc) {
+            return false;
+        }
+        let d = from.desc();
+        self.pending.push(Pending {
+            staging: from.clone(),
+            target: to.tex.clone(),
+            levels: d.mip_levels.min(to.desc.mip_levels),
+            slices: d.slice_count().min(to.desc.slice_count()),
+        });
+        true
+    }
+
     /// Encodes the queued scalings into one compute pass of `cb`. Returns how many textures it scaled and how many it
     /// lost. The pass waits for the earlier passes of the queue, which hold the uploads of the staging textures.
     pub(crate) fn flush(&mut self, cb: &mut CommandBuffer) -> (u32, u32) {

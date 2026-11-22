@@ -198,6 +198,14 @@ impl Transfer {
         Ok(())
     }
 
+    /// Queues the scaling of a scaled texture's contents into its native successor (`TextureStore::take_carries`).
+    pub(crate) fn queue_carry(&self, from: &nxkit_metal::Texture, to: &Res) -> bool {
+        self.scaled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .queue_carry(from, to)
+    }
+
     /// Encodes the scalings of this frame's scaled uploads. Returns the textures scaled and the textures lost.
     pub(crate) fn flush_scaled(&self, cb: &mut CommandBuffer) -> (u32, u32) {
         self.scaled

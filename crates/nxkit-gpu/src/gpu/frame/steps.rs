@@ -353,12 +353,27 @@ impl Gpu {
         }
 
         zeroer.report();
-        if !scaled_queued.is_empty() {
+        // The scaled textures that became native keep their contents: the same pass scales them down. Their records
+        // stay as they are, since the GPU copy is still the newer one.
+        let mut carried = Vec::new();
+        for (from, to) in self.store.take_carries() {
+            if self.transfer.queue_carry(&from, &to) {
+                carried.push(to.barrier_id);
+            } else {
+                stats.skip(Skip::Transfer);
+            }
+        }
+        if !scaled_queued.is_empty() || !carried.is_empty() {
             let (scaled, lost) = self.transfer.flush_scaled(first);
+            let scaled = scaled.min(scaled_queued.len() as u32);
             stats.scaled_uploads += scaled;
             stats.uploads += scaled;
             stats.scaled_upload_lost += lost;
             stats.compute_passes += 1;
+            for barrier_id in carried {
+                self.barriers
+                    .seed(barrier_id, Stages::DISPATCH | Stages::BLIT);
+            }
             // The scaling writes the texture with compute stages, like the plain upload. A texture that lost part of
             // its write still changed, so every queued texture gets the seed.
             for (id, barrier_id) in scaled_queued {

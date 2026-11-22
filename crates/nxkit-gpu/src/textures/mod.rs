@@ -104,6 +104,11 @@ struct Heat {
     renders: u32,
 }
 
+/// A render target with a side shorter than this keeps its size at a render scale. Such targets hold data that shaders
+/// read texel by texel: Pokopia renders its exposure into 2x1 targets and its fog colour curves into 256x3 ones, and at
+/// scale 2 the title screen came out overexposed.
+const MIN_SCALED_SIDE: u32 = 32;
+
 /// The CPU writes a texture in at least this many frames before it can stay native.
 const HEAT_MIN_WRITES: u32 = 8;
 /// ... and in at least this many times as many frames as the GPU renders into it.
@@ -134,6 +139,9 @@ pub(crate) struct TextureStore {
     /// The block shadows of compressed attachments by generation, level, layer and view format (`blocks`).
     shadows: Mutex<FastMap<(u64, u32, u32, u32), Texture>>,
     retired: Vec<Texture>,
+    /// The scaled textures that became native this frame with their contents, and the new native texture of each
+    /// (`take_carries`).
+    carries: Vec<(Texture, Res)>,
     /// The storage ranges of the textures made so far, for the `contain` diagnostic.
     spans: Mutex<Vec<(u64, u64, TexId, TextureDesc)>>,
     /// The frames the store has seen end.
@@ -180,6 +188,7 @@ impl TextureStore {
             views: Mutex::new(FastMap::default()),
             shadows: Mutex::new(FastMap::default()),
             retired: Vec::new(),
+            carries: Vec::new(),
             spans: Mutex::new(Vec::new()),
             frame: 0,
             evict_after: evict::frames_from_env(),
@@ -280,7 +289,9 @@ impl TextureStore {
         // A compressed texture keeps its size: its attachments render blocks, which a scale would not keep.
         let compressed =
             texture_format(rec.desc.format).is_some_and(|m| m.format().is_compressed());
-        let scaled = !compressed && self.is_scaled(id, scale);
+        // A target with a side under `MIN_SCALED_SIDE` holds data, not a picture, and keeps its size.
+        let data = rec.desc.width < MIN_SCALED_SIDE || rec.desc.height < MIN_SCALED_SIDE;
+        let scaled = !compressed && !data && self.is_scaled(id, scale);
         let (mut desc, widened) = describe(rec, if scaled { scale } else { 1.0 }, u)?;
         let place = self.place_of(rec, &desc, scaled, widened, u);
         if place.is_some() {
@@ -433,6 +444,15 @@ impl TextureStore {
             r
         };
         if let Some(old) = self.entries.insert(id, r.clone()) {
+            // A scaled texture that becomes native (a CPU read pins it) keeps what the GPU rendered into it.
+            if old.scaled
+                && !r.scaled
+                && r.fresh
+                && rec.residency == Residency::GpuNewer
+                && old.desc.kind == r.desc.kind
+            {
+                self.carries.push((old.tex.clone(), r.clone()));
+            }
             self.retired.push(old.tex);
         }
         self.used(r.generation, rec.residency == Residency::GpuNewer);
@@ -443,6 +463,13 @@ impl TextureStore {
             rec.residency == Residency::GpuNewer,
         );
         Ok(r)
+    }
+
+    /// The scaled textures that became native since the last call, each with its new texture. The caller scales the
+    /// contents down before the frame uses them. Pokopia renders its fog colour curves into a 256x3 texture once and
+    /// reads them back: at scale 2 the read pinned the texture at its own size, and the new texture held zeros.
+    pub(crate) fn take_carries(&mut self) -> Vec<(Texture, Res)> {
+        std::mem::take(&mut self.carries)
     }
 
     /// Forgets the Metal texture of `id` (the game created or finalized the texture again).
