@@ -4,6 +4,17 @@ use objc2::rc::Retained;
 use objc2_foundation::{NSDictionary, NSString};
 use objc2_quartz_core::CAMetalLayer;
 
+/// Turns Metal's HUD on for the process when `on`. The layer property of [`show`] alone shows nothing: Metal draws the
+/// HUD only in a process that starts its first device with `MTL_HUD_ENABLED=1` in the environment. The host sets it
+/// here, before any Metal device exists and before it starts a thread of its own, so no other thread reads the
+/// environment at the same time.
+pub(crate) fn enable(on: bool) {
+    if on {
+        // SAFETY: called on the main thread before the host starts any thread (the log pipe, the crash handler, Metal).
+        unsafe { std::env::set_var("MTL_HUD_ENABLED", "1") };
+    }
+}
+
 /// Shows Metal's HUD on `layer` when `on`, through `developerHUDProperties` (`mode` = `default`).
 pub(super) fn show(layer: &CAMetalLayer, on: bool) {
     if !on {

@@ -4,6 +4,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- `NXKIT_METAL_HUD=1` shows the Metal performance HUD. The host sets `MTL_HUD_ENABLED=1` in its own environment
+  before it makes a Metal device. The `developerHUDProperties` of the window's layer alone showed nothing.
+
 ## 0.15.0 - 2026-11-22
 
 ### Added

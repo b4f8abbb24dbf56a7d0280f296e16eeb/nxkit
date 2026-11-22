@@ -13,7 +13,7 @@ mod fullscreen;
 pub mod homepreview;
 mod homeui;
 mod homeviews;
-mod hud;
+pub(crate) mod hud;
 mod kernel;
 pub mod loading;
 pub mod logpipe;

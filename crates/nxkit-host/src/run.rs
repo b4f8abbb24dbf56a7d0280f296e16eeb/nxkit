@@ -93,6 +93,7 @@ pub fn run(opts: &Options) -> Result<()> {
     run.install()
         .map_err(|e| HostError::Settings(e.to_string()))?;
     let env = &run.host;
+    sys::hud::enable(env.metal_hud);
     sys::crashsig::install(env);
     // From here the log goes through a pipe, so a slow disk under stderr never holds a game thread (`logpipe`).
     sys::logpipe::install();
