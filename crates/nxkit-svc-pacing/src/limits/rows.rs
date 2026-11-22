@@ -103,6 +103,14 @@ pub fn ms_want(fps: u32) -> f32 {
     1000.0 / fps as f32 - if fps == 60 { 0.5 } else { 0.0 }
 }
 
+/// The frame rate that a float limit gets at `fps`. At 120 it is 5 % higher: a limiter at exactly 1/120 s pads each
+/// frame to the tick, and the work after the limiter made every frame a little late, so the load-driven step held two
+/// ticks where most frames fit (OCTOPATH TRAVELER, 2026-11-22). Slightly higher, the host's pacing sets the pace, as
+/// the margin of [`ms_want`] at 60.
+pub fn fps_want(fps: u32) -> f32 {
+    if fps == 120 { 126.0 } else { fps as f32 }
+}
+
 /// A new 4-byte value for `cur`, with the text of the change. `None` when the value is already the wanted one or is not
 /// set yet.
 pub fn change32(kind: Kind, target: u32, cur: u32) -> Option<(u32, String, String)> {
@@ -110,11 +118,15 @@ pub fn change32(kind: Kind, target: u32, cur: u32) -> Option<(u32, String, Strin
     match kind {
         Kind::FpsF32 | Kind::MsF32 => {
             let ms = kind == Kind::MsF32;
-            let w = if ms { ms_want(target) } else { target as f32 };
+            let w = if ms {
+                ms_want(target)
+            } else {
+                fps_want(target)
+            };
             let ok = if ms {
                 (8.0..=100.0).contains(&f)
             } else {
-                (10.0..=120.0).contains(&f)
+                (10.0..=fps_want(120)).contains(&f)
             };
             if cur == w.to_bits() || !ok {
                 return None;
@@ -126,6 +138,8 @@ pub fn change32(kind: Kind, target: u32, cur: u32) -> Option<(u32, String, Strin
             };
             let now = if ms {
                 format!("{:.3} ms ({target} fps)", ms_want(target))
+            } else if fps_want(target) != target as f32 {
+                format!("{} ({target} fps)", fps_want(target))
             } else {
                 format!("{target} fps")
             };
@@ -281,6 +295,24 @@ mod tests {
         );
         assert_eq!(change32(Kind::FpsF32, 60, bits(0.0)), None, "no limit yet");
         assert_eq!(change32(Kind::FpsF32, 60, bits(60.0)), None, "already set");
+    }
+
+    #[test]
+    fn a_float_rate_at_120_keeps_a_margin() {
+        assert_eq!(
+            change32(Kind::FpsF32, 120, bits(30.0)).map(|c| c.0),
+            Some(bits(126.0))
+        );
+        assert_eq!(
+            change32(Kind::FpsF32, 120, bits(126.0)),
+            None,
+            "already set"
+        );
+        assert_eq!(
+            change32(Kind::FpsF32, 60, bits(126.0)).map(|c| c.0),
+            Some(bits(60.0)),
+            "back to 60"
+        );
     }
 
     #[test]

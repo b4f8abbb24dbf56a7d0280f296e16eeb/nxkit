@@ -38,6 +38,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   `-ResX={w} -ResY={h}`. OCTOPATH TRAVELER renders at the chosen size, from the swap chain to every scene pass.
 - A game with an engine frame limit can run at 120 fps when its title module sets `fps_max` to 120. The link and the
   vsync of the step run at 120 Hz, the limit gets 120, and the load-driven step holds a frame for two ticks when it does not fit 1/120 s (R30b).
+- OCTOPATH TRAVELER offers 120 fps (`fps_max` 120). A run at 120 kept the speed of a run at 60. In Atlasdam it runs at
+  about 80 fps: frames that take more than 8.3 ms of CPU time show for two ticks.
 - The host logs what it writes into a frame limit (`nxkit-pacing: Unreal t.MaxFPS (game thread) 30 -> 60 fps`) and
   the notices of the pacing service at the start.
 
@@ -72,6 +74,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   stop the host as a closed window does, so a killed load keeps what it compiled.
 - Octopath Traveler: the load after confirming a traveler no longer stalls for about 50 s. GPU counter and timestamp
   reports are written when their batch completes on the GPU, also when no CPU wait follows.
+- A float frame limit is written 5 % above a target of 120 (126 for 120). A limit of exactly 1/120 s padded each
+  frame to the tick, the work after the limiter made it a little late, and the load-driven step held two ticks where
+  most frames fit.
 - The host passes the `args` setting of the title module to the game as its program arguments (`argv` after
   `game`), as the old engine passed `game_args`. Before, `argv` was `game` alone and `args` went unread.
 - A buffer texture may have up to 2^27 texels, the size the device reports. The layout check and the texture header

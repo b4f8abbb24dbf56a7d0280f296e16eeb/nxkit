@@ -47,6 +47,18 @@ const FONT_RULE: Evidence = Evidence::Recorded {
     read: "2026-11-12",
 };
 
+/// The highest frame rate the launcher offers. Unreal steps the game by the time that really passed. A run at a target
+/// of 120 (`t.MaxFPS` 126, in Atlasdam about 80 fps, between 60 and 120 by the cost of the frames, menus at 120) walked,
+/// animated and played its sound at the speed of a run at 60, judged by the player on 2026-11-22.
+const FPS_MAX: Fact<u32> = Fact::new(
+    120,
+    Evidence::Recorded {
+        source: "nxkit run of v327680 on an M2 Max with NXKIT_FPS_TARGET=120, the Metal HUD and NXKIT_DIAG=judder \
+                 (run-fps-user120c.log); the speed judged against a run at 60 by the player",
+        read: "2026-11-22",
+    },
+);
+
 /// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The display
 /// version is the one of the build row of v327680.
 const SETTINGS: Fact<Settings> = Fact::new(
@@ -63,6 +75,8 @@ const SETTINGS: Fact<Settings> = Fact::new(
         display_versions: &[("67dacc049ceee8585b1583336c565b43", "1.0.5")],
         // The game's config sets t.MaxFPS to 30. The limit rule of the family `unreal` writes the target into it.
         fps_target: 60,
+        // Not from game.tsv: a run checked the game's speed above 60 ([`FPS_MAX`]).
+        fps_max: FPS_MAX.value,
         fps_cvar: Some("t.MaxFPS"),
         tex_flush_upload: true,
         tex_dirty_upload: true,
