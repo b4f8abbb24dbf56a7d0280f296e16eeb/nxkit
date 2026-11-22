@@ -11,7 +11,7 @@
 //! chain of the runtime for each present). The count starts at 0 with the process, so loading screens count too. A
 //! recording in frame timing gives each change to the frame of the game that saw it.
 //!
-//! Without a verb the service does the work that it did before: [`add`] and [`observe`] return at once.
+//! Without a verb the service does the work that it did before: `add` and `observe` return at once.
 
 use std::fs::File;
 use std::io::Write;
