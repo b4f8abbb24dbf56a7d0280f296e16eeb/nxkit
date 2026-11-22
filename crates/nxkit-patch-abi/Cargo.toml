@@ -1,6 +1,6 @@
 [package]
 name = "nxkit-patch-abi"
-description = "The patch module contract of the nxkit host (W37): the C ABI of the hook points, the answers a patch gives and the registry of the loaded patches"
+description = "The patch module contract of the nxkit host (W38): the C ABI of the hook points, the answers a patch gives and the registry of the loaded patches"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

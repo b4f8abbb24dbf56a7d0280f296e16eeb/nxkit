@@ -1,4 +1,4 @@
-//! The loaded patches and the dispatch of the hook points (W37).
+//! The loaded patches and the dispatch of the hook points (W38).
 //!
 //! The encoder asks [`active`] first. That is one relaxed load of an atomic, so a run without a patch pays nothing
 //! else. A hook then takes the read lock of the list and calls each patch in load order.

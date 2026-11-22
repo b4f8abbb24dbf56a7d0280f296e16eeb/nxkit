@@ -1,4 +1,4 @@
-//! The `patch` verb of the control socket (W37): load, unload, list and reload patch modules while the game runs.
+//! The `patch` verb of the control socket (W38): load, unload, list and reload patch modules while the game runs.
 //!
 //! `patch load PATH` copies the `cdylib` at `PATH`, checks its ABI version and installs it. A patch of the same name
 //! is replaced at once, so a reload has no moment without a patch. `patch unload [NAME]` takes the patch out (all
@@ -15,7 +15,7 @@ use crate::control::{Answer, Control};
 const USAGE: &str = "patch load PATH | unload [NAME] | list | reload [NAME]";
 
 /// Adds the `patch` verb to the control.
-pub fn add_verbs(control: &mut Control) {
+pub fn add(control: &mut Control) {
     control.verb(
         "patch load|unload|list|reload",
         "patch modules: load PATH, unload [NAME], list, reload [NAME] (docs/diagnostics.md)",

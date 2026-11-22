@@ -242,7 +242,7 @@ pub(crate) fn render_pass(
         Ok(s) => s,
         Err(why) => return lost(stats, why),
     };
-    // A patch module (W37) may skip the pass, change its loads, mark it for capture and ask for a full barrier.
+    // A patch module (W38) may skip the pass, change its loads, mark it for capture and ask for a full barrier.
     let patch = crate::patch::pass(sh, pass, index, &range, &s.desc);
     if let Some(a) = &patch {
         if a.flags & nxkit_patch_abi::PASS_SKIP != 0 {

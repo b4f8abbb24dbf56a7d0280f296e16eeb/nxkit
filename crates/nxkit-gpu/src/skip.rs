@@ -35,7 +35,7 @@ pub enum Skip {
     Encode,
     /// The pipeline is still compiling on a background thread. The draw is left out until it is ready.
     Pending,
-    /// The draw's program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`, or a patch module (W37) skips the
+    /// The draw's program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`, or a patch module (W38) skips the
     /// draw or its pass.
     Listed,
 }

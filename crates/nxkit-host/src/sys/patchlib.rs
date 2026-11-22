@@ -1,4 +1,4 @@
-//! Loads a patch module (W37): a `cdylib` with the symbols of `nxkit-patch-abi`.
+//! Loads a patch module (W38): a `cdylib` with the symbols of `nxkit-patch-abi`.
 //!
 //! The library is copied to a path of its own before `dlopen`, so a rebuild of the same file is a new image and does
 //! not hit the dyld cache of the old one. The copy is deleted once the library is mapped. The ABI version is checked

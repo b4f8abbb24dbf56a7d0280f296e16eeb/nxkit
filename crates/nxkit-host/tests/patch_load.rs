@@ -1,5 +1,5 @@
 //! Loads the example patch module (`tools/patch-example`) as a real `cdylib`: build, load, call the hooks, replace,
-//! unload (W37). The test runs `cargo build` for the example in a target folder of its own.
+//! unload (W38). The test runs `cargo build` for the example in a target folder of its own.
 #![cfg(target_os = "macos")]
 #![allow(unsafe_code)]
 

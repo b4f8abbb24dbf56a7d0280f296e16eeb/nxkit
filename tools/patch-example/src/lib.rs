@@ -1,4 +1,4 @@
-//! An example patch module of the nxkit host (W37).
+//! An example patch module of the nxkit host (W38).
 //!
 //! It does two things:
 //!

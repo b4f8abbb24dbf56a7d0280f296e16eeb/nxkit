@@ -325,7 +325,7 @@ pub(super) fn draw(
     if crate::diag::skip_list_on() && listed_skip(&d.program) {
         return stats.skip_draw(Some(&d.args), Skip::Listed);
     }
-    // A patch module (W37) may skip the draw or change its blend state, textures and stencil reference.
+    // A patch module (W38) may skip the draw or change its blend state, textures and stencil reference.
     let patched;
     let d = match crate::patch::draw(sh, DIAG_PASS.with(std::cell::Cell::get), n, d) {
         crate::patch::Draw::Keep => d,

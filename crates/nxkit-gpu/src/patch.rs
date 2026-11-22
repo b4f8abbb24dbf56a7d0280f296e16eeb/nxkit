@@ -1,4 +1,4 @@
-//! The hook points of the patch modules (W37, `nxkit-patch-abi`, `docs/diagnostics.md`).
+//! The hook points of the patch modules (W38, `nxkit-patch-abi`, `docs/diagnostics.md`).
 //!
 //! The encode path asks [`pass_on`] and [`draw_on`] first. Each is one relaxed atomic load, so a run without a patch
 //! builds nothing and changes nothing. With a patch the encoder builds the read-only info structs here, calls the

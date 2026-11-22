@@ -1,5 +1,5 @@
 #!/bin/sh
-# Makes and builds patch modules of the nxkit host (W37, "Patch modules" in docs/diagnostics.md).
+# Makes and builds patch modules of the nxkit host (W38, "Patch modules" in docs/diagnostics.md).
 #
 # Usage: tools/nxkit-patch new NAME [DIR]   copies tools/patch-example to DIR (default tools/patches/NAME)
 #        tools/nxkit-patch build [DIR]      cargo build --release in DIR (default: this folder), prints the dylib path

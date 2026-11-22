@@ -1,4 +1,4 @@
-//! The patch module contract of the nxkit host (W37).
+//! The patch module contract of the nxkit host (W38).
 //!
 //! An AI agent or a person tests a change of the host's behaviour in a running game. The host cannot replace its own
 //! Rust code: Rust has no stable ABI, and the state lives in objects and statics. Instead the host has a few fixed

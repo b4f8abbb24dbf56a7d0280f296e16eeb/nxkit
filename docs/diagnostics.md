@@ -300,7 +300,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 
 ## Patch modules
 
-A patch module lets you test a change of the host's behaviour in a running game. You do not build the host again. You do not restart the game. The state stays in the host, so the game keeps its scene. A fix that a patch proves goes into the host for good (W37).
+A patch module lets you test a change of the host's behaviour in a running game. You do not build the host again. You do not restart the game. The state stays in the host, so the game keeps its scene. A fix that a patch proves goes into the host for good (W38).
 
 The host cannot replace its own Rust code. Rust has no stable ABI, and the host keeps its state in objects and statics. So the host has fixed hook points and a small C ABI. A patch module is a separate crate that builds to a dynamic library. The control socket loads it.
 
