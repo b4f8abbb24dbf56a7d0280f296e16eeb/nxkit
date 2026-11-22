@@ -31,6 +31,8 @@ pub mod reloc;
 pub mod saveplace;
 pub mod savesync;
 pub mod settings;
+#[cfg(target_os = "macos")]
+mod shaderctl;
 pub mod stop;
 
 #[cfg(target_os = "macos")]

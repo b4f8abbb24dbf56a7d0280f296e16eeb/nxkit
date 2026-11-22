@@ -395,6 +395,57 @@ The walker counts only when it reads a record. A recording that plays from the t
 
 To add a reason, add it to `reasons!` in `nxkit-nvn/src/diag.rs`, call `nxkit_nvn::diag::note` where the work is dropped, and add a line to the table above.
 
+## Shader hot swap
+
+You can change the MSL of a program while the game runs. The next frame draws the scene again with the new code. Use it to find a drawing bug and to test a fix. A fix that works goes into the translator (`nxb-xlate`) afterward. The verbs are on the control socket (W35, W36):
+
+```bash
+tools/nxkit-ctl shader list
+```
+
+```bash
+tools/nxkit-ctl shader dump 0123456789abcdef
+```
+
+The override folder is `<diag_dir>/shaders` (`NXKIT_DIAG_DIR`, default `/tmp/fmap`). `shader status` prints it.
+
+| verb | effect |
+|---|---|
+| `shader list [FILTER]` | Counts the next 3 frames. It prints a line `KEY STAGE DRAWS` for each program: the draws and dispatches for each frame. The stage is `vs`, `fs`, `ts`, `ms`, `gs` or `cs`. A program with a swap has a `*` at the end. `FILTER` keeps the keys that contain it. It fails when the game draws no frame in 5 s. |
+| `shader dump KEY` | Writes the MSL of the program to `<override>/KEY.metal`. It does not replace a file that exists, so your edits stay. |
+| `shader load KEY` | Compiles `<override>/KEY.metal` and puts it in place of the library of the program. It fails when the file does not compile or lacks a function that the host calls. The answer has the first error lines. The whole text of Metal is in `<override>/KEY.errors.txt`. A failed load changes nothing. |
+| `shader reset KEY` or `shader reset all` | Goes back to the shipped function. The file stays in the override folder. |
+| `shader status` | Prints the override folder and the programs that have a swap. |
+
+To skip a program, use `tools/nxkit-ctl set NXKIT_SKIP_PROGRAMS=KEY`. That key is live too.
+
+### Where the MSL comes from
+
+The app has the compiled libraries only. The host cannot translate a shader again, because it does not contain the translator. So `dump` reads the source from `<run>/shader-src/<key>_b.metal`. A normal build does not write that folder. Build the game with `NXB_KEEP_MSL=1` to get it:
+
+```bash
+NXB_KEEP_MSL=1 nxb build ...
+```
+
+The sources about double the size of `<run>/shaders`. Without them, `dump` says so and names the tool `xlate-msl` of `nxb-xlatedev`. That tool translates a shader of a split package and writes its MSL. You can write `<override>/KEY.metal` by hand from its output.
+
+With `NXKIT_PULL=1`, a vertex shader that has a `pull` field is drawn through its `_bp` library. `dump` and `load` then use the `_bp` source. The host uses one library for each program, so the source that you load replaces the library that the host uses now.
+
+### Rules for the source
+
+- Keep the names of the functions. The host calls `main0` and its variants (`main0_u`, `main0_m`, `main0_l`, `main0_z` and `main0_lz`) by name. `load` refuses a source that lacks one.
+- Keep the bindings. The argument buffer, the buffer slots and the stage inputs are the contract with the encoder. Change the code inside the functions.
+- Task and mesh shaders cannot be swapped yet. `load` refuses them.
+- Metal compiles the source with its default options at run time. The build compiles it with its own flags. So `dump` followed by `load` without an edit can give a slightly different result. Compare an edit with that baseline.
+
+### What happens in the host
+
+A swapped program has its own pipelines. The host builds them when a draw needs them, on the encode thread, before it encodes the draw. The first frame after `load` can take longer, because one compile takes some milliseconds for each state of the program. The pipelines of the shipped library stay in the cache, so `reset` is fast.
+
+A swapped pipeline is never saved. It does not go into the runtime pipeline cache, into the list of recorded states or into an archive. The next start of the game uses the shipped shaders again. Your files in the override folder stay, and you must `load` them again.
+
+Without a swap, the cost is one atomic load for each frame and two integer compares for each draw. The picture of the game does not change.
+
 ## Archive coverage
 
 The pipeline archive of the build holds one pipeline for each shader pair, with the state that the build assumes. This state is eight unspecialized colour attachments, no vertex layout, no primitive class, one sample, no alpha to coverage and no ICB support. At run time a pipeline is the pair and the state of the draw. An archive lookup finds only the state it holds, so a lookup with the formats and blend of a draw misses. The host therefore asks the archive once for the unspecialized pipeline of the pair (a *base*). It makes each draw's pipeline with `MTL4Compiler newRenderPipelineStateBySpecializationWithDescriptor:pipeline:`. This call fills in the colour attachments and costs a fraction of a compile. Only colour attachment state can be specialized. A draw with a vertex layout, several samples, alpha to coverage or ICB support needs a base of its own, which the archive does not have. With `NXKIT_PIPELINE_BASES=1` the host compiles such a base, and the base of a pair the archive lacks, once with its colour attachments unspecialized. Every colour state of it after that is a specialization too (a vertex function that writes the point size gets a base without a class, as a full compile does). A pipeline without a base is compiled from the functions. It compiles on a background thread and the draw waits (`skip.pending`).

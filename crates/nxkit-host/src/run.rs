@@ -86,7 +86,11 @@ fn start_control(board: nxkit_abi::live::Board, game: &crate::manifest::Game, ru
     ));
     #[cfg(not(target_os = "macos"))]
     let _ = run;
-    let control = crate::control::Control::new(board, info);
+    // Not `mut` where no part adds a verb.
+    #[allow(unused_mut)]
+    let mut control = crate::control::Control::new(board, info);
+    #[cfg(target_os = "macos")]
+    crate::shaderctl::shader_verbs(&mut control, &run.shader_hub);
     match crate::control::start(control) {
         Ok(path) => eprintln!("nxkit-host: control socket {}", path.display()),
         Err(e) => eprintln!("nxkit-host: no control socket: {e}"),
