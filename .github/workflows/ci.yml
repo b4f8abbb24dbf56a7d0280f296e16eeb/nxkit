@@ -32,6 +32,8 @@ jobs:
       - name: Cache the dependencies
         uses: Swatinem/rust-cache@v2
         with:
+          # one cache per matrix entry: clippy, test and doc build different artefacts
+          key: ${{ matrix.steps }}
           # pull requests read the cache of main but do not write their own
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch dependencies
