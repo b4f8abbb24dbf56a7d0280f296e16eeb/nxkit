@@ -225,6 +225,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | knob | effect |
 |---|---|
 | `nodepth` | Turns off the depth and stencil tests. |
+| `nostencil` | Turns off the stencil test and leaves the depth test. |
 | `nocull` | Turns off culling. |
 | `nooffset` | Sets the depth bias to zero. |
 | `noeq` | Changes the depth test `equal` to `always`. |

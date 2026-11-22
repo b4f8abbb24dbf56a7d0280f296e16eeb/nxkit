@@ -238,6 +238,9 @@ pub(crate) fn fixed(
         ds.depth_test = false;
         ds.stencil_test = false;
     }
+    if crate::knob("nostencil") {
+        ds.stencil_test = false;
+    }
     let depth_stencil_desc = translate::depth_stencil(&ds);
     let depth_stencil = sh.pipelines.depth_stencil(&depth_stencil_desc)?;
     let [factor, units, clamp] = if crate::knob("nooffset") {

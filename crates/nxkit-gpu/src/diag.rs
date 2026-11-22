@@ -65,6 +65,8 @@ const KNOBS: &[&str] = &[
     "privpoison",
     // The depth and stencil tests are off.
     "nodepth",
+    // Turns the stencil test off and leaves the depth test.
+    "nostencil",
     // Culling is off.
     "nocull",
     // The depth bias is zero.
