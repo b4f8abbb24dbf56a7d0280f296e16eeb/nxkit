@@ -36,7 +36,8 @@ pub struct TemporalDesc {
     pub depth: Format,
     /// The format of the motion texture (two channels).
     pub motion: Format,
-    /// The format of the output texture.
+    /// The format of the output texture. It is the colour format: MetalFX did not finish a frame from `Bgra8Unorm`
+    /// into `Rgba8Unorm`.
     pub output_format: Format,
     /// The format of the reactive mask, `None` for a scaler without one.
     pub reactive: Option<Format>,
@@ -110,6 +111,12 @@ impl TemporalUpscaler {
         if !desc.depth.is_depth() {
             return Err(MetalError::Invalid(
                 "the depth input of the temporal scaler needs a depth format",
+            ));
+        }
+        // A Bgra8Unorm colour into an Rgba8Unorm output never finished on the GPU (2026-11-22, macOS 27.2).
+        if desc.output_format != desc.color {
+            return Err(MetalError::Invalid(
+                "the output of the temporal scaler needs the format of its colour input",
             ));
         }
         if !Self::supported(ctx) {

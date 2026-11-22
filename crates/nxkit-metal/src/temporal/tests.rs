@@ -6,10 +6,10 @@ fn desc() -> TemporalDesc {
     TemporalDesc {
         input: (32, 32),
         output: (64, 64),
-        color: Format::Rgba8Unorm,
-        depth: Format::Depth32Float,
+        color: Format::Bgra8Unorm,
+        depth: Format::Depth32FloatStencil8,
         motion: Format::Rg16Float,
-        output_format: Format::Rgba8Unorm,
+        output_format: Format::Bgra8Unorm,
         reactive: None,
         hdr: false,
     }
@@ -90,6 +90,9 @@ fn a_size_of_zero_or_a_colour_depth_is_refused_before_metal_is_asked() {
     assert!(TemporalUpscaler::new(&ctx, d).is_err());
     let mut d = desc();
     d.depth = Format::R32Float;
+    assert!(TemporalUpscaler::new(&ctx, d).is_err());
+    let mut d = desc();
+    d.output_format = Format::Rgba8Unorm;
     assert!(TemporalUpscaler::new(&ctx, d).is_err());
 }
 
