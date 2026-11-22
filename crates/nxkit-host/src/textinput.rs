@@ -183,9 +183,11 @@ pub fn step(rows: &[Row], (row, key): (usize, usize), dir: Dir) -> (usize, usize
 
 /// Where a key is: its row and index.
 pub fn find(rows: &[Row], wanted: Key) -> Option<(usize, usize)> {
-    rows.iter()
-        .enumerate()
-        .find_map(|(r, row)| row.iter().position(|(k, _)| *k == wanted).map(|i| (r, i)))
+    rows.iter().enumerate().find_map(|(r, row)| {
+        row.iter()
+            .position(|(k, _)| *k == wanted)
+            .map(|i| (r, i))
+    })
 }
 
 /// `text` after typing `c`, upper case with `shift`, within `max` UTF-16 units (0: no limit). `None` when it would

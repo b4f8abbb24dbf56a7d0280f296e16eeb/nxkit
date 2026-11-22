@@ -16,10 +16,10 @@ use objc2::runtime::AnyObject;
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSAnimationContext, NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua,
-    NSBezierPath, NSBox, NSEvent, NSFocusRingType, NSFontWeightLight, NSImage,
-    NSImageSymbolConfiguration, NSImageView, NSLineBreakMode, NSLineCapStyle, NSResponder,
-    NSTextAlignment, NSTextField, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
-    NSVisualEffectState, NSVisualEffectView,
+    NSBezierPath, NSEvent, NSFontWeightLight, NSImage, NSImageSymbolConfiguration, NSImageView,
+    NSBox, NSFocusRingType, NSLineBreakMode, NSLineCapStyle, NSResponder, NSTextAlignment,
+    NSTextField, NSView,
+    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSDictionary, NSObject, NSString};
@@ -646,10 +646,7 @@ pub(super) fn keyboard(mtm: MainThreadMarker, bounds: CGRect, k: &Keyboard<'_>) 
         / f64::from(crate::textinput::COLUMNS);
     let mut key_h = (unit * 0.92).min(look.pick(56.0, 44.0)).floor();
     let mut hint_h = look.pick(26.0, 22.0);
-    let key_rows = k
-        .pad
-        .as_ref()
-        .map_or(0.0, |p| p.rows.len().saturating_sub(1) as f64);
+    let key_rows = k.pad.as_ref().map_or(0.0, |p| p.rows.len().saturating_sub(1) as f64);
     let actions_h = |key_h: f64, hint_h: f64| match &k.pad {
         Some(_) => {
             let hints = if hint_h > 0.0 { gap + hint_h } else { 0.0 };
@@ -657,8 +654,7 @@ pub(super) fn keyboard(mtm: MainThreadMarker, bounds: CGRect, k: &Keyboard<'_>) 
         }
         None => bh,
     };
-    let rest =
-        |sym_h: f64| pad + sym_h + ts.height + msg_h + field_block + gap + look.buttons_top() + pad;
+    let rest = |sym_h: f64| pad + sym_h + ts.height + msg_h + field_block + gap + look.buttons_top() + pad;
     let mut sym_h = sym_h;
     // A short window keeps the keyboard and its actions whole: first the symbol goes, then the hints, then the keys
     // get lower, to a floor.
@@ -714,12 +710,7 @@ pub(super) fn keyboard(mtm: MainThreadMarker, bounds: CGRect, k: &Keyboard<'_>) 
     // The field at its own height, centred in the box: in the window the field editor draws the text and the caret
     // within that height, so the caret sits in the middle of the box.
     let line = field.fittingSize().height.ceil();
-    field.setFrame(rect(
-        x + 18.0,
-        y + (field_h - line) / 2.0,
-        inner - 36.0,
-        line,
-    ));
+    field.setFrame(rect(x + 18.0, y + (field_h - line) / 2.0, inner - 36.0, line));
     scrim.addSubview(&field);
     y += field_h + 8.0;
     counter.setAlignment(NSTextAlignment::Right);
@@ -773,18 +764,8 @@ pub(super) fn keyboard(mtm: MainThreadMarker, bounds: CGRect, k: &Keyboard<'_>) 
         None => [rect(x, y, each, bh), rect(x + each + 14.0, y, each, bh)],
     };
     if let (Some(p), Some(kl), true) = (&k.pad, &keys, hint_h > 0.0) {
-        let bottom = kl
-            .frames
-            .last()
-            .and_then(|r| r.first())
-            .map_or(y, |f| f.origin.y + f.size.height);
-        hints(
-            mtm,
-            &scrim,
-            rect(x, bottom + gap, inner, hint_h),
-            p.hints,
-            look,
-        );
+        let bottom = kl.frames.last().and_then(|r| r.first()).map_or(y, |f| f.origin.y + f.size.height);
+        hints(mtm, &scrim, rect(x, bottom + gap, inner, hint_h), p.hints, look);
     }
     let actions = Actions::new(mtm, local);
     fills_parent(&actions);
@@ -815,22 +796,12 @@ fn hints(
     let mut x = frame.origin.x;
     for (glyph, text) in items {
         if let Some((view, s)) = symbol(mtm, glyph, look.pick(20.0, 17.0)) {
-            view.setFrame(rect(
-                x,
-                frame.origin.y + (frame.size.height - s.height) / 2.0,
-                s.width,
-                s.height,
-            ));
+            view.setFrame(rect(x, frame.origin.y + (frame.size.height - s.height) / 2.0, s.width, s.height));
             parent.addSubview(&view);
             x += s.width + 8.0;
         }
         let (t, s) = label(mtm, text, &f, &color, frame.size.width, false);
-        t.setFrame(rect(
-            x,
-            frame.origin.y + (frame.size.height - s.height) / 2.0,
-            s.width + 2.0,
-            s.height,
-        ));
+        t.setFrame(rect(x, frame.origin.y + (frame.size.height - s.height) / 2.0, s.width + 2.0, s.height));
         parent.addSubview(&t);
         x += s.width + look.pick(28.0, 20.0);
     }
@@ -855,10 +826,7 @@ fn text_field(mtm: MainThreadMarker, look: Look, k: &Keyboard<'_>) -> Retained<N
     field.setStringValue(&NSString::from_str(k.initial));
     if !k.guide.is_empty() {
         let color = rgb(tokens::WHITE, tokens::TEXT_SECONDARY);
-        let keys = [
-            &*NSString::from_str("NSFont"),
-            &*NSString::from_str("NSColor"),
-        ];
+        let keys = [&*NSString::from_str("NSFont"), &*NSString::from_str("NSColor")];
         let values: [&AnyObject; 2] = [&f, &color];
         let attrs = NSDictionary::<NSString, AnyObject>::from_slices(&keys, &values);
         let text = NSString::from_str(k.guide);
@@ -951,10 +919,7 @@ impl KeyboardCard {
                 };
                 let focused = focus == Some((r, i));
                 let ring = rgb(tokens::ACCENT, 1.0);
-                let fill = rgb(
-                    tokens::WHITE,
-                    if focused { 0.16 } else { tokens::QUIET_FILL },
-                );
+                let fill = rgb(tokens::WHITE, if focused { 0.16 } else { tokens::QUIET_FILL });
                 let tile = surface(
                     mtm,
                     frame,
@@ -971,10 +936,7 @@ impl KeyboardCard {
                 if let Some(name) = glyph {
                     if let Some((view, s)) = symbol(mtm, name, size) {
                         if *key == Key::Back || !shift {
-                            view.setContentTintColor(Some(&rgb(
-                                tokens::WHITE,
-                                tokens::TEXT_PRIMARY,
-                            )));
+                            view.setContentTintColor(Some(&rgb(tokens::WHITE, tokens::TEXT_PRIMARY)));
                         }
                         view.setFrame(rect(
                             frame.origin.x + (frame.size.width - s.width) / 2.0,
@@ -988,18 +950,10 @@ impl KeyboardCard {
                 }
                 let (text, f, color) = match key {
                     Key::Char(c) => {
-                        let t: String = if shift {
-                            c.to_uppercase().collect()
-                        } else {
-                            c.to_string()
-                        };
+                        let t: String = if shift { c.to_uppercase().collect() } else { c.to_string() };
                         (t, &letter, rgb(tokens::WHITE, tokens::TEXT_PRIMARY))
                     }
-                    Key::Space => (
-                        space.to_owned(),
-                        &small,
-                        rgb(tokens::WHITE, tokens::TEXT_SECONDARY),
-                    ),
+                    Key::Space => (space.to_owned(), &small, rgb(tokens::WHITE, tokens::TEXT_SECONDARY)),
                     _ => continue,
                 };
                 let (t, s) = label(mtm, &text, f, &color, frame.size.width, false);
@@ -1012,8 +966,7 @@ impl KeyboardCard {
                 ));
                 kl.layer.addSubview(&t);
                 if let Key::Char(_) = key {
-                    kl.layer
-                        .addSubview(&Tap::new(mtm, frame, TAP_KEY + r * 64 + i));
+                    kl.layer.addSubview(&Tap::new(mtm, frame, TAP_KEY + r * 64 + i));
                 }
             }
         }

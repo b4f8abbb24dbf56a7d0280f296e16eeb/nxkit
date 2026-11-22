@@ -625,10 +625,7 @@ mod tests {
         use VertexFormat as V;
         // 0x2D SINT16x4, 0x2C UINT16x4, 0x27 UINT8x4, 0x25 UNORM8x4, 0x2E FLOAT32x4, 0x30 SINT32x4.
         assert_eq!(vertex_format(0x2D), Some(V::Short4));
-        assert!(
-            !stage_in_fits(0x2D, V::UInt4),
-            "Pokopia: SINT16 read as uint4"
-        );
+        assert!(!stage_in_fits(0x2D, V::UInt4), "Pokopia: SINT16 read as uint4");
         assert!(stage_in_fits(0x2D, V::Int4));
         assert!(!stage_in_fits(0x2C, V::Int4));
         assert!(!stage_in_fits(0x27, V::Float4));

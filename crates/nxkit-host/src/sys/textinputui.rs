@@ -225,10 +225,7 @@ fn show(
             message: Some(&req.sub),
             guide: &req.guide,
             initial: text,
-            pad: rows.as_deref().map(|rows| PadKeys {
-                rows,
-                hints: &hints,
-            }),
+            pad: rows.as_deref().map(|rows| PadKeys { rows, hints: &hints }),
         },
     );
     // SAFETY: the delegate implements the `NSTextFieldDelegate` methods it answers to, and lives as long as the UI.
@@ -285,9 +282,7 @@ fn set_text(shown: &Shown, t: &str) {
 /// The count, and the keys and capsules when their state changed.
 fn refresh(shown: &mut Shown, texts: &Texts, mtm: MainThreadMarker) {
     let t = text(shown);
-    shown
-        .card
-        .set_count(textinput::units(&t), shown.req.max_len);
+    shown.card.set_count(textinput::units(&t), shown.req.max_len);
     let ok = textinput::acceptable(&t, shown.req.min_len, shown.req.max_len);
     let (key_focus, action_focus, shift) = match &shown.pad {
         Some(p) => {
@@ -338,14 +333,7 @@ fn step(ui: &mut Ui, mtm: MainThreadMarker) {
         let t = old.card.field.stringValue().to_string();
         let keep = old.pad.as_ref().map(|p| p.shift);
         old.card.view.removeFromSuperview();
-        show(
-            ui,
-            mtm,
-            old.req,
-            old.title,
-            &t,
-            Some(keep.unwrap_or(t.is_empty())),
-        );
+        show(ui, mtm, old.req, old.title, &t, Some(keep.unwrap_or(t.is_empty())));
         return;
     }
     let keys = KEYS.with(|k| std::mem::take(&mut *k.borrow_mut()));

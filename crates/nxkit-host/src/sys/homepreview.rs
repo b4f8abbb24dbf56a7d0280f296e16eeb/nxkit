@@ -88,12 +88,7 @@ pub fn run(dir: &Path) -> Result<Vec<PathBuf>, String> {
             let n = crate::textinput::units(initial);
             card.set_count(n, 10);
             card.set_field_focus(field);
-            card.set_actions(
-                mtm,
-                labels,
-                focus,
-                crate::textinput::acceptable(initial, 1, 10),
-            );
+            card.set_actions(mtm, labels, focus, crate::textinput::acceptable(initial, 1, 10));
             let path = dir.join(format!("home-{name}-{tag}.png"));
             write(mtm, bounds, &card.view, &path)?;
             out.push(path);
@@ -107,13 +102,7 @@ pub fn run(dir: &Path) -> Result<Vec<PathBuf>, String> {
             card.set_count(crate::textinput::units(initial), 10);
             card.set_field_focus(true);
             let on_actions = focus.0 == rows.len() - 1;
-            card.set_keys(
-                mtm,
-                &rows,
-                (!on_actions).then_some(focus),
-                shift,
-                &t.key_space,
-            );
+            card.set_keys(mtm, &rows, (!on_actions).then_some(focus), shift, &t.key_space);
             card.set_actions(
                 mtm,
                 labels,
