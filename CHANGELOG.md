@@ -4,6 +4,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- `nxb build` replaces an app of the old engine that has only its host `Contents/MacOS/dmhost` and no launcher
+  `nxnative` (#48). Such an app at `-o` stopped the build with exit code 2.
+
 ## 0.15.1 - 2026-11-22
 
 ### Fixed

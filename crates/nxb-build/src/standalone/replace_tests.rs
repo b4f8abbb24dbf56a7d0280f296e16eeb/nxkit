@@ -36,12 +36,23 @@ fn an_app_of_the_old_engine_is_replaced() {
 }
 
 #[test]
+fn an_app_of_the_old_engine_with_only_its_host_is_replaced() {
+    // packed before the launcher existed: Contents/MacOS holds only dmhost (issue 48)
+    let out = dir("dmhost");
+    file(out.join("Contents/MacOS/dmhost"));
+    fs::create_dir_all(out.join("Contents/Resources/dm")).unwrap();
+    assert!(replaceable(&out).is_ok());
+    fs::remove_dir_all(out.parent().unwrap()).unwrap();
+}
+
+#[test]
 fn another_folder_is_kept() {
     let out = dir("other");
     fs::create_dir_all(out.join("Contents/MacOS")).unwrap();
     assert!(replaceable(&out).is_err());
-    // the old engine's launcher alone, without its dm folder, is not enough
+    // the old engine's launcher and host alone, without its dm folder, are not enough
     file(out.join("Contents/MacOS/nxnative"));
+    file(out.join("Contents/MacOS/dmhost"));
     assert!(replaceable(&out).is_err());
     fs::remove_dir_all(out.parent().unwrap()).unwrap();
 }

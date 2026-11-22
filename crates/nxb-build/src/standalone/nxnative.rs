@@ -15,9 +15,13 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-/// Whether `app` is an app of nxnative: its launcher and its `dm` folder.
+/// Whether `app` is an app of nxnative: its `dm` folder and its launcher `nxnative` or its host `dmhost`. Every app of
+/// nxnative has the host (`dm/mac/pack_app.py` signs it). An app packed before the launcher existed has only the host
+/// (issue 48).
 pub(super) fn is_app(app: &Path) -> bool {
-    app.join("Contents/MacOS/nxnative").is_file() && app.join("Contents/Resources/dm").is_dir()
+    let macos = app.join("Contents/MacOS");
+    (macos.join("nxnative").is_file() || macos.join("dmhost").is_file())
+        && app.join("Contents/Resources/dm").is_dir()
 }
 
 /// Files that macOS writes into any folder and that are not part of a save (`not_save` of the launcher).
