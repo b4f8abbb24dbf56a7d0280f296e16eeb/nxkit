@@ -40,8 +40,8 @@ struct main0_out
 expect: reject struct-forward
 struct S;
 
-=== struct-field-attr
-expect: reject field-attr:sample_id
+=== struct-field-sample-id
+expect: accept
 struct S { uint a [[sample_id]]; };
 
 === struct-field-depth-greater

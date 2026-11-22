@@ -321,6 +321,8 @@ pub struct FieldDef {
     pub offset: u32,
     /// Declared `const` (a `device const T*` member is read-only).
     pub is_const: bool,
+    /// The pointee must be accessed using volatile loads.
+    pub is_volatile: bool,
     /// Declared as `metal::array<T, n>` (the type is an [`Type::Array`]).
     pub metal_array: bool,
 }
@@ -393,6 +395,7 @@ impl Types {
                 attrs,
                 offset: off,
                 is_const,
+                is_volatile: false,
                 metal_array: false,
             });
             off += l.size;

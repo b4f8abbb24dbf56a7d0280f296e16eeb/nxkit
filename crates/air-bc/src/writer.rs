@@ -861,11 +861,11 @@ fn function_code(
                     ops.push(align_enc(*a) | (1 << 6));
                     19
                 }
-                Op::Load(t, (pt, p), a) => {
+                Op::Load(t, (pt, p), a, volatile) => {
                     pvt(pt, p, &mut ops, types)?;
                     ops.push(types.id(t)?);
                     ops.push(align_enc(*a));
-                    ops.push(0);
+                    ops.push(u64::from(*volatile));
                     20
                 }
                 Op::Store((vt, v), (pt, p), a) => {
@@ -1158,7 +1158,7 @@ fn operands(op: &Op) -> Vec<(Ty, Val)> {
     let mut v: Vec<(Ty, Val)> = Vec::new();
     match op {
         Op::Alloca(..) | Op::Br(_) | Op::Unreachable => {}
-        Op::Load(_, p, _) => v.push(p.clone()),
+        Op::Load(_, p, _, _) => v.push(p.clone()),
         Op::Store(a, p, _) => {
             v.push(p.clone());
             v.push(a.clone());
@@ -1228,7 +1228,7 @@ fn result_type(op: &Op, types: &mut Types, gtys: &HashMap<String, Ty>) -> R<Opti
     let _ = gtys;
     Ok(match op {
         Op::Alloca(t, _) => Some(Ty::Ptr(Box::new(t.clone()), 0)),
-        Op::Load(t, _, _) => Some(t.clone()),
+        Op::Load(t, _, _, _) => Some(t.clone()),
         Op::Store(..)
         | Op::Br(_)
         | Op::CondBr(..)

@@ -245,3 +245,120 @@ fn ballot_and_threadgroup_atomics_reject_invalid_forms() {
         assert!(compile_source(&source, &Target::macos(), "t").is_err(), "{body}");
     }
 }
+
+#[test]
+fn uint_ctz_lowers_with_existing_clz_and_one_operand_evaluation() {
+    let ir = emit(
+        "kernel void k(device uint* p [[buffer(0)]])
+         { p[0] = min(ctz(uint(p[1])), 15u);
+           p[2] = ctz(0u); }",
+    );
+    assert_eq!(ir.matches("load i32,").count(), 1, "{ir}");
+    assert_eq!(ir.matches("call i32 @air.clz.i32").count(), 2, "{ir}");
+    assert!(!ir.contains("@air.ctz"), "{ir}");
+    has(&ir, "declare i32 @air.clz.i32(i32, i1)");
+    has(&ir, "sub i32 32,");
+    has(&ir, "sub i32 0, 1");
+    has(&ir, "xor i32 0, -1");
+}
+
+#[test]
+fn conditional_vector_field_store_uses_selected_address_and_one_rhs() {
+    let ir = emit(
+        "struct O { float4 a; float4 b; float4 c; };
+         kernel void k(device float* p [[buffer(0)]], uint i [[thread_index_in_threadgroup]])
+         { O out = {}; (i == 0u ? out.a : i == 1u ? out.b : out.c).w = p[0]; p[1] = out.c.w; }",
+    );
+    assert_eq!(ir.matches("phi <4 x float>*").count(), 2, "{ir}");
+    assert_eq!(
+        ir.matches("load float, float addrspace(1)*").count(),
+        1,
+        "{ir}"
+    );
+    let phi = ir
+        .lines()
+        .rfind(|l| l.contains("phi <4 x float>*"))
+        .unwrap();
+    let addr = phi.trim().split_once(" = ").unwrap().0;
+    assert_eq!(
+        ir.lines()
+            .filter(|l| l.contains("store <4 x float>") && l.contains(addr))
+            .count(),
+        1,
+        "{ir}"
+    );
+}
+
+#[test]
+fn conditional_field_lvalue_does_not_admit_unrelated_forms() {
+    for (statement, key) in [
+        (
+            "(i == 0u ? out.a : float4(0.0f)).w = 1.0f;",
+            "assign-to-rvalue",
+        ),
+        (
+            "(i == 0u ? out.a : out.b).w += 1.0f;",
+            "conditional-field-compound-assignment",
+        ),
+        ("(i == 0u ? (*p).a : (*p).b).w = 1.0f;", "assign-to-rvalue"),
+    ] {
+        let source = format!(
+            "{PRE}struct O {{ float4 a; float4 b; }}; kernel void k(device O* p [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ O out = {{}}; {statement} }}"
+        );
+        assert_eq!(
+            compile_source(&source, &Target::macos(), "t.metal")
+                .unwrap_err()
+                .key(),
+            format!("unsupported:rejected:{key}"),
+            "{statement}"
+        );
+    }
+}
+
+#[test]
+fn shared_halfword_alias_store_is_one_untagged_aligned_write() {
+    let ir = emit(
+        "void half_store(threadgroup uint (&words)[4], uint byte_offset, uint bits)
+         { typedef ushort __attribute__((may_alias)) dm_ushort_alias;
+           ((threadgroup dm_ushort_alias*)&words[0])[byte_offset >> 1u] = ushort(bits); }
+         kernel void k(device uint* dst [[buffer(0)]], uint byte_offset [[thread_index_in_threadgroup]])
+         { threadgroup uint words[4]; words[0] = 0x12345678u;
+           half_store(words, byte_offset, dst[0]); dst[1] = words[0]; }",
+    );
+    let half: Vec<_> = ir
+        .lines()
+        .filter(|line| line.contains("store i16 "))
+        .collect();
+    assert_eq!(half.len(), 1, "{ir}");
+    assert!(
+        half[0].contains("i16 addrspace(3)*") && half[0].ends_with("align 2"),
+        "{ir}"
+    );
+    assert!(!ir.contains("store i8 "), "{ir}");
+    has(&ir, "getelementptr inbounds i16, i16 addrspace(3)*");
+    assert!(
+        ir.lines()
+            .any(|l| l.contains("store i32 305419896, i32 addrspace(3)*") && l.contains("!tbaa")),
+        "{ir}"
+    );
+}
+
+#[test]
+fn shared_halfword_alias_does_not_accept_device_or_plain_aliases() {
+    for replacement in [
+        ("may_alias", "unused"),
+        ("threadgroup dm_ushort_alias*", "device dm_ushort_alias*"),
+        ("[0u] = ushort(1u)", "[0u] = 1u"),
+    ] {
+        let src = format!(
+            "{PRE}kernel void k() {{ threadgroup uint words[4];
+              typedef ushort __attribute__((may_alias)) dm_ushort_alias;
+              ((threadgroup dm_ushort_alias*)&words[0])[0u] = ushort(1u); }}"
+        )
+        .replace(replacement.0, replacement.1);
+        assert!(
+            compile_source(&src, &Target::macos(), "bad.metal").is_err(),
+            "{src}"
+        );
+    }
+}

@@ -43,7 +43,8 @@ pub struct ConstArray {
     pub name: Rc<str>,
     /// The array type.
     pub ty: Type,
-    /// Element values (scalars or vectors of literals), converted to the element type.
+    /// Explicit element values converted to the element type.
+    /// Elements after this prefix are implicitly zero-initialised.
     pub init: Vec<Expr>,
 }
 
@@ -127,6 +128,13 @@ pub struct Local {
 pub enum Stmt {
     /// An expression evaluated for its effect.
     Expr(Expr),
+    /// A typed store that may alias objects of a different type.
+    MayAliasStore {
+        /// The destination.
+        place: Place,
+        /// The value stored.
+        value: Expr,
+    },
     /// A nested block.
     Block(Vec<Stmt>),
     /// A nested block that starts with `#pragma clang fp contract(off)`: no `llvm.fmuladd` inside.
@@ -264,6 +272,8 @@ pub enum SampleOpt {
     Level(Box<Expr>),
     /// `bias(x)`
     Bias(Box<Expr>),
+    /// Explicit derivatives, in x then y order.
+    Grad2d(Box<Expr>, Box<Expr>),
 }
 
 /// Kind of a texture query.
@@ -442,6 +452,8 @@ pub enum PlaceKind {
     Const(ConstId),
     /// What a pointer value points to.
     Deref(Box<Expr>),
+    /// A direct dereference of a const device volatile resource.
+    VolatileDeref(Box<Expr>),
     /// A struct field by index.
     Field(Box<Place>, u32),
     /// An array element.
@@ -452,6 +464,20 @@ pub enum PlaceKind {
     Swizzle(Box<Place>, Vec<u8>),
     /// A temporary holding the value of an rvalue.
     Temp(Box<Expr>),
+}
+
+impl Place {
+    /// A volatile resource dereference, possibly followed by field or element selection.
+    pub fn is_volatile(&self) -> bool {
+        match &self.kind {
+            PlaceKind::VolatileDeref(_) => true,
+            PlaceKind::Field(p, _)
+            | PlaceKind::Index(p, _)
+            | PlaceKind::Element(p, _)
+            | PlaceKind::Swizzle(p, _) => p.is_volatile(),
+            _ => false,
+        }
+    }
 }
 
 impl Expr {
@@ -479,6 +505,10 @@ pub fn visit_calls(stmts: &[Stmt], f: &mut dyn FnMut(FuncId)) {
 fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(FuncId)) {
     match s {
         Stmt::Expr(e) => visit_expr(e, f),
+        Stmt::MayAliasStore { place, value } => {
+            visit_place(place, f);
+            visit_expr(value, f);
+        }
         Stmt::Block(b) | Stmt::NoContract(b) => visit_calls(b, f),
         Stmt::If { cond, then, els } => {
             visit_expr(cond, f);
@@ -518,7 +548,7 @@ fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(FuncId)) {
 fn visit_place(p: &Place, f: &mut dyn FnMut(FuncId)) {
     match &p.kind {
         PlaceKind::Local(_) | PlaceKind::Const(_) => {}
-        PlaceKind::Deref(e) | PlaceKind::Temp(e) => visit_expr(e, f),
+        PlaceKind::Deref(e) | PlaceKind::VolatileDeref(e) | PlaceKind::Temp(e) => visit_expr(e, f),
         PlaceKind::Field(b, _) | PlaceKind::Swizzle(b, _) => visit_place(b, f),
         PlaceKind::Index(b, i) | PlaceKind::Element(b, i) => {
             visit_place(b, f);
@@ -593,8 +623,13 @@ fn visit_expr(e: &Expr, f: &mut dyn FnMut(FuncId)) {
                     opt(array, f);
                     opt(compare, f);
                     opt(offset, f);
-                    if let SampleOpt::Level(x) | SampleOpt::Bias(x) = so {
-                        visit_expr(x, f);
+                    match so {
+                        SampleOpt::None => {}
+                        SampleOpt::Level(x) | SampleOpt::Bias(x) => visit_expr(x, f),
+                        SampleOpt::Grad2d(dx, dy) => {
+                            visit_expr(dx, f);
+                            visit_expr(dy, f);
+                        }
                     }
                 }
                 TexOp::Read { coord, array, lod } => {

@@ -3,10 +3,10 @@ use super::*;
 const GRADIENT: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
-struct Args { texture2d_array<float> tex [[id(0)]]; sampler smp [[id(1)]]; };
+struct Args { texture3d<float> tex [[id(0)]]; sampler smp [[id(1)]]; };
 fragment float4 main0(constant Args& a [[buffer(0)]]) {
-    return a.tex.sample(a.smp, float2(0.25f, 0.5f), 0u,
-        gradient2d(float2(0.125f, 0.0f), float2(0.0f, 0.125f)));
+    return a.tex.sample(a.smp, float3(0.25f, 0.5f, 0.75f),
+        gradient3d(float3(0.125f, 0.0f, 0.0f), float3(0.0f, 0.125f, 0.25f)));
 }
 "#;
 
@@ -29,7 +29,7 @@ fn semantic_rejection_is_not_parser_rejection() {
     let result = check(parser, true);
     assert_eq!(
         result.semantic,
-        Some(Err("unsupported:sample-option:gradient2d".into()))
+        Some(Err("unsupported:sample-option:gradient3d".into()))
     );
     let (line, ok, err) = render(
         Path::new("authored.metal"),
@@ -39,7 +39,7 @@ fn semantic_rejection_is_not_parser_rejection() {
     );
     assert!(!ok && !err);
     assert!(line.contains("\"phase\": \"sema\""));
-    assert!(line.contains("unsupported:sample-option:gradient2d"));
+    assert!(line.contains("unsupported:sample-option:gradient3d"));
 }
 
 #[test]
