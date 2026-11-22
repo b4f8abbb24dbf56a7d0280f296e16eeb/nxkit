@@ -433,9 +433,22 @@ pub(crate) fn watch_ranges() -> &'static [(u64, usize)] {
     &crate::settings::live().diag_watch
 }
 
-/// The texture each handle resolved to, kept for `NXKIT_DIAG=barr` and `nanscan`: they compare the textures that the
-/// draws of a pass bind with the textures that the barrier planner thinks the pass reads.
+/// The texture each handle resolved to, kept for the diagnostics that [`tracks_handles`] names: for example `barr` and
+/// `nanscan` compare the textures that the draws of a pass bind with the textures that the barrier planner thinks the
+/// pass reads.
 static HANDLES: Mutex<Option<std::collections::HashMap<u64, TexId>>> = Mutex::new(None);
+
+/// Whether a diagnostic needs the map of [`note_handle`]: `barr`, `nanscan` and `comp` read it through [`texture_of`], and so
+/// does a trace of `NXKIT_TRACE_FS`. With all of them off, the resolve does not fill the map.
+pub(crate) fn tracks_handles() -> bool {
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| {
+        diag("barr")
+            || diag("nanscan")
+            || diag("comp")
+            || crate::settings::live().trace_fs.is_some()
+    })
+}
 
 /// Remembers which texture a handle resolved to.
 pub(crate) fn note_handle(handle: u64, id: TexId) {

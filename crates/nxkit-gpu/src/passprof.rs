@@ -23,8 +23,8 @@ const TOP: usize = 40;
 
 /// Whether the profile is on.
 pub(crate) fn on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::diag("passprof"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| crate::diag("passprof"))
 }
 
 struct Slot {

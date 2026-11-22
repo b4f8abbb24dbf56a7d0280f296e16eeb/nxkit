@@ -437,8 +437,8 @@ pub(crate) fn write_report(
 
 /// `NXKIT_DIAG=rendercond`: what the writes of the finished frames did (the first 30 lines, then every 120th).
 pub(crate) fn write_diag(st: &WriteStats) {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| crate::diag("rendercond")) {
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    if !ON.flag(|| crate::diag("rendercond")) {
         return;
     }
     static N: AtomicU64 = AtomicU64::new(0);

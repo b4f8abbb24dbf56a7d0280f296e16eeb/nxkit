@@ -13,7 +13,8 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 /// One frame in this many is traced.
 const EVERY: u64 = 300;
 
-/// Whether the category is on. The hooks for the batches of the GPU are set by [`super::flushstat`].
+/// Whether the category is on. It is start only: the hooks for the batches of the GPU, which it needs, are built once at the
+/// start by [`super::flushstat`]. A change of `NXKIT_DIAG` while the game runs has no effect on it.
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| nxkit_nvn::diag::on("gateseq"))

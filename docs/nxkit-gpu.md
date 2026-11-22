@@ -1181,6 +1181,7 @@ These are known gaps. Each shows up as a `Skip` count or is a limit of the first
 - Texel fetches with integer coordinates and `textureSize` of a 2D texture see native units through the render scale of the support buffer. Other texture types still see the scaled size (refer to the render scale section).
 - An unbound pool slot reads as zero. A pool ID that a shader reads for the first time shows its texture one frame later.
 - The depth format is not part of the pipeline key.
+- Custom border colours are never applied. The `border` binding (`BindKind::Border`) always binds the zero block, and the `_w` twin samplers (`border_bit` in the reflection) get the sampler of their main sampler. A sampler that clamps to the border therefore shows the colour that `translate::border` picks of the three that Metal has, and a program that reads the colour itself reads zero. `NXKIT_DIAG=border` lists the samplers that clamp to the border, with their colour and whether Metal can show it. A game that needs a custom colour shows a wrong edge. The fix changes the output, so it waits for a decision.
 
 ## Unverified
 

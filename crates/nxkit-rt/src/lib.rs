@@ -27,8 +27,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Whether `NXKIT_DIAG` names the `cmd` category (or `all`): the per-command-buffer lines are written only then.
 pub fn diag_on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| nxkit_nvn::diag::on("cmd"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| nxkit_nvn::diag::on("cmd"))
 }
 
 /// The lines that one call site of [`diag!`] writes at most.

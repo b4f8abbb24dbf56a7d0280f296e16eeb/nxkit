@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod trace;
+
 impl Gpu {
     pub(super) fn resolve_handles(
         &mut self,
@@ -378,9 +380,11 @@ impl Gpu {
         }
         let res = textures.get(&id).ok_or(Skip::Texture)?;
         let tex_view = self.store.view(id, res, &slot.header, stats)?;
-        if crate::diag("barr") || crate::diag("nanscan") {
+        if crate::diag::tracks_handles() {
             crate::diag::note_handle(handle, id);
         }
+        trace::trace_handle(view, handle, id, res, &slot.header);
+        trace::border_diag(handle, id, res, tsc);
         if crate::diag("bc") && res.desc.format.is_compressed() {
             static SEEN_BC: std::sync::Mutex<Vec<TexId>> = std::sync::Mutex::new(Vec::new());
             if let (Ok(rec), Ok(mut seen)) = (view.record(id), SEEN_BC.lock())

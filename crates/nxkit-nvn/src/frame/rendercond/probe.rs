@@ -5,7 +5,6 @@
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
-use std::sync::OnceLock;
 
 use super::{Read, RenderConds, Report};
 
@@ -22,8 +21,8 @@ pub(super) struct Probe {
 }
 
 pub(super) fn on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::diag::on("rendercond"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| crate::diag::on("rendercond"))
 }
 
 impl Probe {

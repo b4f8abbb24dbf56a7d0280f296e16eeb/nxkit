@@ -6,6 +6,7 @@
 //! buffer of an indirect command buffer.
 
 mod pull_diag;
+mod trace;
 
 use crate::bindless::{Sink, StageInputs};
 use crate::detail::{DrawDetail, Stage};
@@ -93,6 +94,9 @@ pub(crate) fn prepare(
         )?),
         None => None,
     };
+    if let Some(t) = &crate::settings::live().trace_fs {
+        trace::trace_draw(sh, d, t);
+    }
     Ok(Prep {
         pipeline,
         key,

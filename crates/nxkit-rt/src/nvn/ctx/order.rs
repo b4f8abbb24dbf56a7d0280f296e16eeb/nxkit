@@ -34,8 +34,8 @@ impl Words for Guest {
 
 /// Whether `NXKIT_DIAG=queues` is on.
 fn diag() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| nxkit_nvn::diag::on("queues"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| nxkit_nvn::diag::on("queues"))
 }
 
 /// The flush after a release (`RtSettings::release_flush`), and the least work (draws, dispatches and copies) that the

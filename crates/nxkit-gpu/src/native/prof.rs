@@ -38,8 +38,8 @@ fn state() -> &'static Mutex<State> {
 
 /// Whether the profile is on.
 pub(super) fn on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::diag("nativeprof"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| crate::diag("nativeprof"))
 }
 
 /// A frame's profile: the heap its steps write and the index of the next timestamp.

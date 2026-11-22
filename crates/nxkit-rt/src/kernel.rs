@@ -521,11 +521,10 @@ unsafe fn run_svc(number: u32, regs: *mut u64, frame: bool) -> i32 {
 /// `NXKIT_DIAG=svc`: one line for each svc that returns an error (at most 400), with its arguments, to find the call
 /// behind a game's abort.
 fn svc_diag(number: u32, args: &SvcRegs, regs: &SvcRegs, handled: bool) {
-    use std::sync::OnceLock;
     use std::sync::atomic::AtomicU32;
-    static ON: OnceLock<bool> = OnceLock::new();
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
     static SHOWN: AtomicU32 = AtomicU32::new(0);
-    if !*ON.get_or_init(|| nxkit_nvn::diag::on("svc")) {
+    if !ON.flag(|| nxkit_nvn::diag::on("svc")) {
         return;
     }
     let result = regs[0] as u32;

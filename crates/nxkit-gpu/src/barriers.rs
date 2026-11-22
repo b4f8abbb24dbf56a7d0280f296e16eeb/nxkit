@@ -11,6 +11,8 @@
 
 use crate::fastmap::{FastMap, FastSet};
 
+mod trace;
+
 use nxkit_metal::{Dependency, Scope, Stages, Visibility};
 use nxkit_nvn::frame::{Cmd, Frame};
 use nxkit_nvn::passes::{Pass, PassKind, PassPlan};
@@ -384,6 +386,9 @@ impl BarrierState {
             } else {
                 dep
             };
+            if Self::traced(index) {
+                self.trace_pass(frame, plan, aliases, images, index, p, &t, dep.as_ref());
+            }
             if dep.is_some() && crate::diag("barr") {
                 let d = nearest.map_or(0, |n| index.saturating_sub(n));
                 let bucket = match d {

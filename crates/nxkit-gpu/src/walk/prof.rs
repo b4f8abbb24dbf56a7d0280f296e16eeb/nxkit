@@ -18,7 +18,6 @@ use super::State;
 
 /// The counters of the walk since the last report. Everything is zero and unused while the category is off.
 pub(super) struct Prof {
-    on: bool,
     /// Submits reported so far.
     reported: Cell<u32>,
     pub(super) read_ns: Cell<u64>,
@@ -54,7 +53,6 @@ pub(super) struct Prof {
 impl Prof {
     pub(super) fn new() -> Self {
         Self {
-            on: nxkit_nvn::diag::on("walkprof"),
             reported: Cell::new(0),
             read_ns: Cell::new(0),
             apply_ns: Cell::new(0),
@@ -76,14 +74,17 @@ impl Prof {
         }
     }
 
+    /// Whether the category is on now. A change of `NXKIT_DIAG` takes effect at once.
     pub(super) fn on(&self) -> bool {
-        self.on
+        // Process-wide (W26): a memo of a live setting, one for the whole process (W35).
+        static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+        ON.flag(|| nxkit_nvn::diag::on("walkprof"))
     }
 
     /// The start of a timed part, `None` while the category is off.
     #[inline]
     pub(super) fn start(&self) -> Option<Instant> {
-        self.on.then(Instant::now)
+        self.on().then(Instant::now)
     }
 
     /// Adds the time since `t` to `total`.
@@ -97,14 +98,14 @@ impl Prof {
     /// Adds `n` to a counter while the category is on.
     #[inline]
     pub(super) fn count(&self, c: &Cell<u64>, n: u64) {
-        if self.on {
+        if self.on() {
             c.set(c.get() + n);
         }
     }
 
     /// Counts the heap blocks of a draw.
     pub(super) fn draw_built(&self, d: &crate::detail::DrawDetail) {
-        if self.on {
+        if self.on() {
             let vecs = [
                 d.attributes.capacity(),
                 d.streams.capacity(),
@@ -119,7 +120,7 @@ impl Prof {
 
     /// Counts how many banks of this draw equal those of the draw before: what a dirty bit per bank would save.
     pub(super) fn banks(&mut self, st: &State) {
-        if !self.on {
+        if !self.on() {
             return;
         }
         if let Some(p) = &self.prev {
@@ -144,7 +145,7 @@ impl Prof {
 
     /// Prints the counters of one submit and starts them again. The first 200 submits print, then every 20th.
     pub(super) fn report(&self, records: u64, draws: usize, dispatches: usize, total_ns: u64) {
-        if !self.on {
+        if !self.on() {
             return;
         }
         let n = self.reported.get();
