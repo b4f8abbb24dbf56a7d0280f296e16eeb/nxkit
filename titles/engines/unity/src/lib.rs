@@ -41,6 +41,43 @@ impl Family for Engine {
     fn detect(&self, _facts: &TitleFacts) -> Match {
         Match::Unknown
     }
+
+    fn markers(&self) -> &'static [nxtitle::Marker] {
+        &[
+            nxtitle::Marker {
+                id: "Unity",
+                at: nxtitle::MarkerAt::RomfsPath,
+                pattern: "Data/Managed/Metadata/global-metadata.dat",
+                evidence: nxtitle::Evidence::Unverified {
+                    note: "the engine's trace is believed from its public file layout and symbol names, not read from a game here: a parity run over a local game dump checks it (NXB_PARITY_ENGINE)",
+                },
+            },
+            nxtitle::Marker {
+                id: "Unity",
+                at: nxtitle::MarkerAt::RomfsPath,
+                pattern: "Data/globalgamemanagers",
+                evidence: nxtitle::Evidence::Unverified {
+                    note: "the engine's trace is believed from its public file layout and symbol names, not read from a game here: a parity run over a local game dump checks it (NXB_PARITY_ENGINE)",
+                },
+            },
+            nxtitle::Marker {
+                id: "Unity",
+                at: nxtitle::MarkerAt::RomfsPath,
+                pattern: "Data/data.unity3d",
+                evidence: nxtitle::Evidence::Unverified {
+                    note: "the engine's trace is believed from its public file layout and symbol names, not read from a game here: a parity run over a local game dump checks it (NXB_PARITY_ENGINE)",
+                },
+            },
+            nxtitle::Marker {
+                id: "Unity",
+                at: nxtitle::MarkerAt::Rodata,
+                pattern: "il2cpp_init",
+                evidence: nxtitle::Evidence::Unverified {
+                    note: "the engine's trace is believed from its public file layout and symbol names, not read from a game here: a parity run over a local game dump checks it (NXB_PARITY_ENGINE)",
+                },
+            },
+        ]
+    }
 }
 
 #[cfg(test)]

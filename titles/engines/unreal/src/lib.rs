@@ -128,6 +128,17 @@ impl Family for Engine {
             Match::No
         }
     }
+
+    fn markers(&self) -> &'static [nxtitle::Marker] {
+        &[nxtitle::Marker {
+            id: "UnrealEngine",
+            at: nxtitle::MarkerAt::RomfsPath,
+            pattern: "Content/Paks/",
+            evidence: nxtitle::Evidence::Unverified {
+                note: "the engine's trace is believed from its public file layout and symbol names, not read from a game here: a parity run over a local game dump checks it (NXB_PARITY_ENGINE)",
+            },
+        }]
+    }
 }
 
 #[cfg(test)]

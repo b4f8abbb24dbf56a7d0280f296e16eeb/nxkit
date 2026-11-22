@@ -9,6 +9,9 @@ mod analysis;
 mod auto_shaders;
 mod bundle;
 mod elf;
+#[cfg(test)]
+mod engine_parity;
+mod engine_scan;
 mod extract;
 mod files;
 pub(crate) mod fonts;
@@ -449,6 +452,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             render_args: t.render_args,
             temporal_upscale: t.temporal_upscale,
             vertex_stream_null_bind: t.vertex_stream_null_bind,
+            generic: None,
         };
         let put = |n: &str, d: &[u8]| {
             std::fs::write(run_dir.join(n), d).map_err(|e| io(&run_dir.join(n), e))

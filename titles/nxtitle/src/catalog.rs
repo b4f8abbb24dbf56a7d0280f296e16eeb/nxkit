@@ -1,9 +1,9 @@
 //! The catalog: families and titles, and how they are composed for one game.
 
 use crate::{
-    BuildHooks, ConfigKey, ConsoleSettings, ConsoleVar, Fact, Family, GraphicsApi, Layer,
-    LimitRule, Match, Need, PaceProfile, Pacing, ResourcePatch, RomfsRead, Runtime, RuntimeHooks,
-    Service, ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
+    BuildHooks, ConfigKey, ConsoleSettings, ConsoleVar, Detection, Fact, Family, GraphicsApi,
+    Layer, LimitRule, Match, Need, PaceProfile, Pacing, ResourcePatch, RomfsRead, Runtime,
+    RuntimeHooks, Service, ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
 };
 use std::collections::BTreeSet;
 
@@ -91,15 +91,49 @@ impl Catalog {
         self.resolve_title(title, facts)
     }
 
+    /// Whether a family matches the facts: its own `detect`, and when that does not know, its markers (a hit of any).
+    fn matches(f: &dyn Family, facts: &TitleFacts) -> Match {
+        match f.detect(facts) {
+            Match::Unknown if !f.markers().is_empty() && !facts.libraries.is_empty() => {
+                if f.markers().iter().any(|m| facts.has_library(m.id)) {
+                    Match::Yes
+                } else {
+                    Match::No
+                }
+            }
+            m => m,
+        }
+    }
+
+    /// The engine family of a game that no title module names. Exactly one family that matches is the answer. When
+    /// several match, a family that refines another one settles it, else there is no answer and the candidates are
+    /// listed. It never guesses.
+    pub fn detect_engine(&self, facts: &TitleFacts) -> Detection {
+        let yes: Vec<&'static dyn Family> = self
+            .families
+            .iter()
+            .copied()
+            .filter(|f| f.layer() == Layer::Engine && Self::matches(*f, facts) == Match::Yes)
+            .collect();
+        let candidates: Vec<&'static str> = yes.iter().map(|f| f.id()).collect();
+        let kept: Vec<&'static str> = candidates
+            .iter()
+            .copied()
+            .filter(|id| !yes.iter().any(|f| f.refines() == Some(*id)))
+            .collect();
+        Detection {
+            family: (kept.len() == 1).then(|| kept[0]),
+            candidates,
+        }
+    }
+
     fn resolve_title(&self, title: Option<&'static dyn Title>, facts: &TitleFacts) -> Resolved {
         let (engine, from) = match title {
             Some(t) => (self.family(Layer::Engine, t.engine()), EngineFrom::Declared),
             None => (
-                self.families
-                    .iter()
-                    .copied()
-                    .filter(|f| f.layer() == Layer::Engine)
-                    .find(|f| f.detect(facts) == Match::Yes),
+                self.detect_engine(facts)
+                    .family
+                    .and_then(|id| self.family(Layer::Engine, id)),
                 EngineFrom::Detected,
             ),
         };

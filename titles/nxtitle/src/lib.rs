@@ -27,6 +27,7 @@ mod console;
 mod evidence;
 mod facts;
 mod hooks;
+mod markers;
 mod resources;
 mod runtime;
 mod settings;
@@ -45,6 +46,7 @@ pub use hooks::{
     PresentInterval, ReflectLayout, ReflectedLimit, RenderArgs, RuntimeHooks, ShaderRole,
     ShaderStage, ShaderView, Standalone, Upscaler,
 };
+pub use markers::{Detection, Marker, MarkerAt};
 
 pub use nxb_model::{Digest, TitleId};
 pub use resources::{Edit, ResourcePatch, ZstdDictionary};
@@ -72,6 +74,16 @@ pub trait Family: BuildHooks + RuntimeHooks {
     /// Whether a game belongs to this family, from facts the core read. [`Match::Unknown`] when the facts are
     /// not enough.
     fn detect(&self, facts: &TitleFacts) -> Match;
+    /// What the engine leaves in a game ([`Marker`]). The core finds them and gives the hits as libraries of the facts.
+    /// A family with no reliable trace gives none, and its `detect` stays [`Match::Unknown`].
+    fn markers(&self) -> &'static [Marker] {
+        &[]
+    }
+    /// The id of the family that this one is a refinement of (a version of an engine against the engine). When both
+    /// match, the refinement wins.
+    fn refines(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// A title module: the facts and hooks for one game.

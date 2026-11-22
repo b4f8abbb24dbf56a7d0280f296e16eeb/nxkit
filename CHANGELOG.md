@@ -35,6 +35,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   The path also finds the engine family of the game. The family `unreal` detects it from the library `UnrealEngine`,
   which the path names when the rewriter registered an engine console variable in `main`. The manifest then has the
   family's frame limit and render size arguments, and the build logs the family.
+  The engine is found from markers that a family names (`Family::markers`, W40): byte strings in the modules and file
+  names in the RomFS, found in one pass. `Catalog::detect_engine` takes the one family that matches, or the one that
+  refines the others. Only `unreal` and `unity` have markers. `game.json` of such a build has `generic` and `engine`
+  (family, markers, candidates), and the host prints a line at its start.
 
 ## 0.15.2 - 2026-11-22
 

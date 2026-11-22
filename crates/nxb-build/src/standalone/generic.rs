@@ -100,11 +100,17 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             Ok((analyzed, note))
         },
     )?;
-    match analyzed.engine {
-        Some(id) => p.say(&format!(
-            "engine family {id}, found from the modules: its frame limit and render size arguments apply"
+    match (analyzed.engine, analyzed.engine_candidates.as_slice()) {
+        (Some(id), _) => p.say(&format!(
+            "engine family {id}, found from the markers {}: the family's frame limit and render size arguments apply",
+            analyzed.engine_hits.join(", ")
         )),
-        None => p.say("no engine family found from the modules"),
+        (None, []) => p.say("no engine family found from the modules and the RomFS"),
+        (None, many) => p.say(&format!(
+            "no engine family: the markers {} fit {}, and nothing settles it",
+            analyzed.engine_hits.join(", "),
+            many.join(", ")
+        )),
     }
     let vulkan = analyzed.graphics == nxtitle::GraphicsApi::Vulkan;
     if vulkan && !analyzed.replaced.is_empty() {

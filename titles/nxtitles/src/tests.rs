@@ -152,3 +152,62 @@ fn smbw_resolves_to_agl_and_builds_standalone() {
     assert_eq!(r.nxkit_services(), nxtitle::Service::ALL);
     assert!(r.standalone().is_some() && r.title_rules().is_some());
 }
+
+#[test]
+fn engine_markers_are_unique_and_each_family_finds_itself() {
+    use nxtitle::{Layer, TitleFacts, TitleId};
+    let c = catalog().unwrap();
+    let mut seen = std::collections::BTreeMap::new();
+    let mut libs = std::collections::BTreeMap::new();
+    for f in c.families().iter().filter(|f| f.layer() == Layer::Engine) {
+        for m in f.markers() {
+            assert!(
+                !m.pattern.is_empty(),
+                "{}: a marker with no pattern",
+                f.id()
+            );
+            assert!(m.pattern.len() <= 48, "{}: only short names", f.id());
+            // a marker is claimed by one family, unless that family refines the other
+            if let Some(other) = seen.insert(format!("{:?}:{}", m.at, m.pattern), f.id()) {
+                assert_eq!(
+                    f.refines(),
+                    Some(other),
+                    "{} and {other} share the marker {:?}",
+                    f.id(),
+                    m.pattern
+                );
+            }
+            // a library id is named by one family only
+            let owner = libs.insert(m.id, f.id());
+            if let Some(o) = owner {
+                assert_eq!(
+                    o,
+                    f.id(),
+                    "the library {} is named by {o} and {}",
+                    m.id,
+                    f.id()
+                );
+            }
+        }
+        if f.markers().is_empty() {
+            continue;
+        }
+        // facts that hold all its libraries are settled to this family, and to no other
+        let mut facts = TitleFacts::new(TitleId(0));
+        facts.libraries = f.markers().iter().map(|m| m.id.to_string()).collect();
+        let d = c.detect_engine(&facts);
+        assert_eq!(d.family, Some(f.id()), "{}: {:?}", f.id(), d.candidates);
+    }
+}
+
+#[test]
+fn a_game_with_no_marker_has_no_engine() {
+    use nxtitle::{EngineFrom, TitleFacts, TitleId};
+    let c = catalog().unwrap();
+    // nobody looked, and a game with no trace of any engine
+    for libs in [vec![], vec!["unlisted".to_string()]] {
+        let mut facts = TitleFacts::new(TitleId(0x0100_7340_1175_E000));
+        facts.libraries = libs;
+        assert_eq!(c.resolve(&facts).engine_from, EngineFrom::None);
+    }
+}

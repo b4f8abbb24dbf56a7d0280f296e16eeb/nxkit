@@ -1,6 +1,8 @@
 //! Target-independent facts and rewritten modules from the input, without a title catalog. The `sdk` module gets the
 //! SDK-wide rules, which match by function fingerprint and not by build ID.
-use super::{auto_shaders, elf, extract, graphics, layout, manifest, modules, npdm, nvn};
+use super::{
+    auto_shaders, elf, engine_scan, extract, graphics, layout, manifest, modules, npdm, nvn,
+};
 use nxtitle::GraphicsApi;
 use std::collections::BTreeSet;
 
@@ -14,6 +16,10 @@ pub(super) struct Analysis {
     pub graphics: GraphicsApi,
     /// The engine family found from the modules, as its id, and what it gives the manifest.
     pub engine: Option<&'static str>,
+    /// The markers that hit, as library ids: the evidence of the engine answer.
+    pub engine_hits: Vec<&'static str>,
+    /// Every family that matched. More than one with no `engine` means that nothing settled it.
+    pub engine_candidates: Vec<&'static str>,
     limits: Vec<nxtitle::LimitRule>,
     render_args: Option<nxtitle::RenderArgs>,
     /// The modules left out because the host's Vulkan layer replaces them (the loader and the driver).
@@ -131,20 +137,40 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
         stdalloc_cap: 0,
         alloc_big_align: false,
     };
-    // The engine: the library `UnrealEngine` is named when the rewriter registered an engine console variable in `main`.
-    let mut facts = nxtitle::TitleFacts::new(nxtitle::TitleId(game.title_id));
-    facts.version = Some(game.version);
-    facts.modules = built.iter().map(|m| m.name.clone()).collect();
+    // The engine. The core finds the markers that the families name, in the read-only data of the modules and in the
+    // names of the RomFS files, and gives the hits to the families as libraries. The family decides. The library
+    // `UnrealEngine` is also named when the rewriter registered an engine console variable in `main`.
+    let catalog = nxtitles::catalog()?;
+    let ro: Vec<&[u8]> = built
+        .iter()
+        .filter_map(|m| {
+            m.image
+                .get(m.parts[1].0..m.parts[1].0.saturating_add(m.parts[1].1))
+        })
+        .collect();
+    let paths = game
+        .files
+        .iter()
+        .filter_map(|(n, _)| n.strip_prefix("romfs/"));
+    let mut found = engine_scan::hits(&catalog, ro, paths);
     if built
         .iter()
         .any(|m| m.name == "main" && m.fixups.contains("UE_CVAR:"))
+        && !found.contains(&"UnrealEngine")
     {
-        facts.libraries.push("UnrealEngine".into());
+        found.push("UnrealEngine");
     }
-    let resolved = nxtitles::catalog()?.resolve(&facts);
+    let mut facts = nxtitle::TitleFacts::new(nxtitle::TitleId(game.title_id));
+    facts.version = Some(game.version);
+    facts.modules = built.iter().map(|m| m.name.clone()).collect();
+    facts.libraries = found.iter().map(|s| s.to_string()).collect();
+    let detection = catalog.detect_engine(&facts);
+    let resolved = catalog.resolve(&facts);
     let engine = resolved.engine;
     Ok(Analysis {
         engine: engine.map(|f| f.id()),
+        engine_hits: found,
+        engine_candidates: detection.candidates,
         limits: engine
             .map(|f| f.limits().iter().map(|l| l.value).collect())
             .unwrap_or_default(),
@@ -184,6 +210,11 @@ impl Analysis {
             render_args: self.render_args,
             temporal_upscale: None,
             vertex_stream_null_bind: false,
+            generic: Some(manifest::Generic {
+                engine: self.engine,
+                hits: self.engine_hits.clone(),
+                candidates: self.engine_candidates.clone(),
+            }),
         })
     }
 }

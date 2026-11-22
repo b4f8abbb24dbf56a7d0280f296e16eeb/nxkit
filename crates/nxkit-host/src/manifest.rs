@@ -92,6 +92,9 @@ pub struct Game {
     /// The program arguments that set the render size, with `{w}` and `{h}` (`render_args.size`). `None`: the game has
     /// none.
     pub render_size_args: Option<String>,
+    /// Set when `nxb build` found no title module for the game (`generic`, `engine`): the line the host prints at its
+    /// start, which a report carries. The app runs on values read from the game's own files.
+    pub generic: Option<String>,
 }
 
 /// One entry of an export list.
@@ -215,6 +218,40 @@ fn main_thread(v: &Value) -> Result<MainThread> {
     })
 }
 
+/// The start line of a game built without a title module, from the keys `generic` and `engine` of `game.json`.
+fn generic_line(v: &Value) -> Option<String> {
+    if v.get("generic").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let engine = v.get("engine");
+    let names = |key: &str| {
+        engine
+            .and_then(|e| e.get(key))
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default()
+    };
+    let family = engine
+        .and_then(|e| e.get("family"))
+        .and_then(Value::as_str)
+        .map_or_else(
+            || match names("candidates").as_str() {
+                "" => "no engine family found".to_string(),
+                c => format!("no engine family (candidates: {c})"),
+            },
+            |f| format!("engine family {f}"),
+        );
+    Some(format!(
+        "built without a title module: {family}, markers [{}]. Values come from the game's files, with no title patches. It is not verified",
+        names("markers")
+    ))
+}
+
 impl Game {
     /// Reads `<root>/game.json`.
     pub fn read(root: &Path, env: &crate::hostenv::HostEnv) -> Result<Game> {
@@ -272,6 +309,7 @@ impl Game {
                 Some(r) => Some(text(r, "size", "render_args")?),
                 None => None,
             },
+            generic: generic_line(&v),
         };
         let page = num(&v, "page_size", ctx)?;
         if page != PAGE {
@@ -454,6 +492,25 @@ mod tests {
 
     fn parse(extra: &str) -> Result<Game> {
         Game::parse(Path::new("/x"), &sample(extra, NEAR))
+    }
+
+    #[test]
+    fn a_build_without_a_title_module_gives_a_start_line() {
+        assert_eq!(parse("").unwrap().generic, None);
+        let g = parse(r#""generic": true, "engine": {"family": "unity", "markers": ["Unity"], "candidates": ["unity"]},"#)
+            .unwrap();
+        let line = g.generic.unwrap();
+        assert!(
+            line.contains("engine family unity") && line.contains("[Unity]"),
+            "{line}"
+        );
+        let g = parse(r#""generic": true, "engine": {"family": null, "markers": [], "candidates": ["a", "b"]},"#)
+            .unwrap();
+        assert!(
+            g.generic
+                .unwrap()
+                .contains("no engine family (candidates: a, b)")
+        );
     }
 
     #[test]

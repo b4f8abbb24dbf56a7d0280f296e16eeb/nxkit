@@ -79,6 +79,34 @@ Every answer is a `Fact`, a value with its `Evidence`.
 
 The core can refuse an unverified answer, for example in a release build.
 
+## Engine detection
+
+A game with a title module has its engine family from `Title::engine`. A game without one gets it by detection
+(`Catalog::detect_engine`), and the build says so in the log and in `game.json` (`generic`, `engine`).
+
+1. A family names its markers (`Family::markers`): a byte string in the read-only data of the modules (`Rodata`), or a
+   file in the RomFS (`RomfsPath`, a folder when the pattern ends with `/`). The id of a marker is a library name.
+2. The core scans once for the markers of all families, in the modules and in the RomFS file names
+   (`nxb-build`, `engine_scan`). The hits are the `libraries` of `TitleFacts`. The rewriter's finder of the engine
+   console variables also names the library `UnrealEngine`.
+3. `detect` of each family decides from the libraries. A family that only lists markers matches when one of them hit.
+   Exactly one match is the answer. When several match, the family that `refines` another settles it. Else there is no
+   answer and the build lists every candidate with its markers. Nothing is guessed. Nobody looked, or no marker hit:
+   no engine family, and only the graphics family applies.
+4. The generic path gives the manifest the frame limit and the render size arguments of the family. The host prints one
+   line at its start. The family's console variables (the pak) are not made for such a game yet.
+
+| Family | Markers | Evidence | Status |
+|---|---|---|---|
+| `unreal` | the rewriter found an engine console variable in `main` (`UE_CVAR:`), the folder `Content/Paks/` in the RomFS | the finder runs on recorded games, the folder is the engine's layout | in use |
+| `unity` | `Data/Managed/Metadata/global-metadata.dat`, `Data/globalgamemanagers`, `Data/data.unity3d` in the RomFS, `il2cpp_init` in a module | the engine's public file layout, not read from a game here | unverified |
+
+The other families have no marker. No trace of their engine is known that does not need a game to find it, and a guessed
+marker gives a wrong answer. Their `detect` stays `Unknown`. A family gets markers when a game of it shows a reliable
+trace. The test `engine_markers_are_unique_and_each_family_finds_itself` of `nxtitles` keeps the markers apart. The
+`#[ignore]` test `the_detected_engine_is_the_declared_one` of `nxb-build` compares the detection with `Title::engine`
+over game dumps (`NXB_PARITY_ENGINE`, one folder per title with `exefs/` and `romfs/`) and prints a confusion list.
+
 ## Rules for a module
 
 Each fact has one place. Use this table to find it.
