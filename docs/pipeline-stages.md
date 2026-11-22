@@ -271,13 +271,18 @@ A plain base has no vertex layout, one sample, no alpha to coverage and no ICB s
 
 The plan (`plan::plan`) and the script (`plan::script_text_with`) give every base the same state: eight colour attachments with every field `Unspecialized`, and nothing else (no vertex descriptor, no topology class, one sample, no alpha to coverage). Nothing in the profile sets it. A pair is left out when its vertex shader has stage inputs and is not a pull shader (`left[2]`), when the fragment shader uses the primitive ID, when the vertex shader writes the layer, when the library has function constants (these go to `rest`), and when it is a mesh shader. `NXKIT_DIAG=stats` of the host says at run time which of these states the archive misses (see [diagnostics.md](diagnostics.md#archive-coverage)).
 
-The profile's data that holds real states:
+### Pipeline seeds of a title
 
-- `pso_manifest.tsv` has `S` rows (shaders), `C` rows (compute shaders, used by the archive) and `R` rows. An `R` row is the hex of a `pso_skey` (`nvn_pso_skey.h` of NX2Apple): the two shader keys, the colour formats of eight slots, the depth and stencil formats, the sample count, the blend enable and write masks, the alpha to coverage flag, eight blend states, 16 vertex attributes and 16 vertex streams, and the fragment variant flags. The formats and blend factors are NVN values. The Ocarina profile has 1,112 such rows. The archive does not read them.
-- `shader_seen.tsv` lists shader keys seen in play (7,279 lines for Ocarina). It is a list of shaders and not of pipelines. Only `--seen-shaders` reads it.
-- `shader_facts.tsv` has the answers for translation queries (thread group, shared memory), not pipeline state.
+A title module can name the pipelines its game uses: `pipelines.seeds` beside the module, returned by `BuildHooks::pipeline_seeds` (format in `nxkit-pipestate` `seeds.rs`). A seed is the state of one pipeline as the game set it: the shader keys, the colour targets with format, NVN blend state and write mask, the sample count, alpha to coverage and the NVN vertex attributes and streams that the vertex shader reads. A `D` line names the depth mode of the game. `S` lines name shaders seen in play, and the shader step translates the shaders of the seeds first.
 
-To use the `R` rows the build has to translate their NVN formats, blend states and vertex layouts into Metal descriptor fields. The table for that is in `nxkit-gpu` (`translate.rs`, `format_map.rs`), a macOS-only runtime crate (R3) that `nxb-archive` cannot depend on (a build crate uses only the runtime contract R0, W25). It needs a shared table first. Not done.
+The build resolves a seed into the pipeline a draw of that state makes on the host (`nxb-archive` `seeded.rs`). It uses the facts of the translated shaders (`<key>_b.json`: entry functions, vertex inputs, written colours) and the rules that the host draws with (`nxkit-pipestate` `draw.rs` and `nvn.rs`). The host and the build call the same functions, so a resolved seed is the pipeline the draw asks for. A seed is resolved for the depth mode of the `D` line, or for both modes without one, and for drawing without vertex pulling (the host's default).
+
+- The pairs of the seeds join the archive's pairs, and each group of the streamed archive resolves the seeds of its pairs when its shaders are done and compiles them as exact pipelines. The compute seeds join the compute list.
+- The build writes the resolved list without keys to `pipelines/shipped.list` of the app. The host makes it at every start (see shader-step.md, "The runtime pipeline cache").
+- Mesh pipelines are in the shipped list but not in the archive: the host compiles them at the start.
+- A seed has no topology and no ICB flag. It is resolved for triangles without ICB support. Lines, points and ICB draws of a seeded pair are made at run time as before.
+
+The seeds of 64 titles were imported once from the old engine (`nxb-seeds import --engine <checkout>`, upstream/main b4588a53): its `pso_manifest.tsv` (`S`, `C`, `R` and `M` rows), `shader_seen.tsv` and the `depth_mode` of `game.tsv`. Only `nxb-seeds` knows the engine's `pso_skey` (`nvn_pso_skey.h`). Its colour formats are `MTLPixelFormat` values and its blend and vertex state NVN values. Rows of passes that the engine merged and of target formats without a name in `nxkit-pipestate` are left out, and the file counts them. The shader keys of the engine and of `nxb-split` are the same hash (`skey` in both). 59 titles of the engine have no title module here, 19 of them with render rows (the importer lists them).
 
 ### Cost of the compile
 

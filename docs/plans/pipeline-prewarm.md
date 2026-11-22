@@ -16,6 +16,7 @@ The host owns a cache next to the title (details: `docs/shader-step.md` "The run
 4. The list is not in that folder. It is kept in `pipecache/seen-<scheme>.list` across builds, because it depends on the key scheme only. A rebuild drops the archives (binaries of the old build) but starts with the full list.
 5. The build side: `nxb build` reads the list of the app it replaces (or `--pipeline-list`) and adds a base for each recorded state that the plain base cannot serve (vertex layout, samples, alpha to coverage, ICB support) to the archive script, so the new app ships them compiled for the GPU. The host finds them in the archive and specializes them.
 6. A start with a list that its build has not made waits for all of it (a loading screen shows the count), then writes `prewarm.done`.
+7. A title's first start: the app ships `pipelines/shipped.list`, the seeds of its title module resolved and archived by the build. Every start makes it first and waits for all of it (archive loads), then the carried list. The carried list notes only what the shipped list lacks.
 
 Choices:
 
@@ -25,12 +26,14 @@ Choices:
 
 ## Not done
 
-- Pairs whose vertex shader has stage inputs were left out of the build's archive. They are now covered when a list of recorded states exists: the base with the vertex layout of the state is in the archive. Without a list (the first build of a title) they compile at the first start, once.
+- Pairs whose vertex shader has stage inputs were left out of the build's archive. They are covered when a list of recorded states or seeds of the title module exists: the exact pipeline with the vertex layout of the state is in the archive. A title without either compiles them at the first draw.
 - Mesh and compute pipelines of the list are not added to the archive by the list (compute has its own list from the profile; mesh pipelines are built by the host).
 - The recorded colour state is not used by the build: the host specializes colours. A state that Metal cannot specialize from the base compiles at run time.
 - The shard of a state is the shard of its pair unless a very large group is cut between them; a lookup in the wrong shard misses and the pipeline compiles.
 
 ## Open points
+
+- Key scheme 2 (the vertex layout holds only the attributes the shader reads) does not read the lists of scheme 1. A player's list starts again after the update, and the shipped list covers the seeded titles.
 
 - Whether `serializeAsArchiveAndFlushToURL` writes only what was captured since the last call or everything. The code assumes the first (a file per write, new content only). If it writes everything, the `rt-` files repeat each other and the size cut removes the oldest; check the file sizes after a long run.
 - Whether the serializer captures a pipeline that Metal found in a lookup archive or made by specialization. If it does not capture a specialization, the archive holds the base and the start specializes it (still no compile). The `compiled` count of the second run tells.

@@ -29,7 +29,7 @@ A family and a title answer questions through hooks. `None` means no opinion.
 |---|---|---|
 | `standalone` | `BuildHooks` | what `nxb build` needs to make the game: the version, the modules with their build IDs, the NVN function list, the shader split settings, the run settings and memory layout of the game (`game.json` keys `settings` and `memory`) and a romfs marker. A title that answers it builds without `--engine` |
 | `shader_role` | `BuildHooks` | what a shader does for the frame, for example the game's own upscaler |
-| `seeds` | `BuildHooks` | shaders to prepare before the first frame |
+| `pipeline_seeds` | `BuildHooks` | the pipeline seeds (`pipelines.seeds`), which the build archives and ships, see [pipeline-stages.md](pipeline-stages.md#pipeline-seeds-of-a-title) |
 | `rewrite_rules` | `BuildHooks` | rewriter rules as TOML text |
 | `resource_patches` | `BuildHooks` | edits of one member of a game archive that `nxb build` applies to the app's RomFS, by a build option (`--resource-patch <option>=<value>`) or the patch's default. Lists of all layers add up |
 | `console_vars` | `BuildHooks` | console variables (`ConsoleVar`, a name and a value) that the build sets. Lists of all layers add up, the title's after the family's, and a later value of a name wins |

@@ -48,7 +48,7 @@ flowchart TD
   R4 --> R3 --> R2 --> R1 --> R0
   R2 --> R0
   R0 -.->|R crates may use| BL0["build L0: nxb-model"]
-  BL3["build L2 and L3: nxb-archive, nxb-build"] -.->|only the contract| R0
+  BL3["build L2 and L3: nxb-archive, nxb-build, nxb-seeds"] -.->|only the contract| R0
 ```
 
 The rules:
@@ -134,7 +134,8 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxb-cli | L3 | no | impl | the program `nxb` with all commands |
 | nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ and NUP. The commands are `nxb extract` and `nxb split` |
 | nxb-pack | L3 | no | impl | the ad-hoc signer and the staging of a file set into a bundle (`nxb sign`) |
-| nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
+| nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge, and the pipeline seeds of a title resolved against the build's shaders (`seeded`) |
+| nxb-seeds | L3 | no | impl | `nxb-seeds import`: reads the pipeline lists of the old engine once and writes the `pipelines.seeds` of the title modules. The only crate that knows the engine's `pso_skey` |
 | nxb-build | L3 | no | impl | the orchestrator `nxb build`: it builds only games that have a title module, into an app with `nxkit-host`. For a game on Vulkan the shader stage makes `vk_shaders.metallib` and `vk_shaders.tsv` with `nxb-spirv` (`standalone::vk_shaders`), with no shader split and no pipeline archive |
 | nxkit-nvn | R2 | no | impl | the NVN front end of the nxkit host: GPU addresses, texture layout and descriptors, recording in command memory and render pass inference. Pure Rust, no Metal. Refer to [nxkit-nvn.md](nxkit-nvn.md) |
 | nxkit-vk | R2 | no | impl | the Vulkan front end of the nxkit host (R64): the device the game sees (Tegra X1, Vulkan 1.1), formats, handles and objects, descriptor sets, typed recorded commands and the `Backend` seam for `nxkit-vk-gpu`. Pure Rust, no Metal, no C ABI |
