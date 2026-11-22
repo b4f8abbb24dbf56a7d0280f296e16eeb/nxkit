@@ -71,7 +71,7 @@ pub(crate) fn unpack(
 /// Puts every file of the folder `src` into `dest` (replaced) without copying bytes: a hard link, or where that fails
 /// (another volume) `std::fs::copy`, which clones on APFS. The files of a build's work folder are written once and
 /// never rewritten in place, so the app and the work folder can share them. A file the `overlay` folder also has
-/// (same relative path) is taken from there. Returns the number of files and bytes.
+/// (same relative path) is taken from there, and a file only the overlay has is added. Returns the number of files and bytes.
 pub(super) fn link_tree(
     src: &Path,
     overlay: Option<&Path>,
@@ -98,6 +98,31 @@ pub(super) fn link_tree(
                 files.push((r, size));
             } else {
                 return Err(format!("{}: not a file or a folder", e.path().display()));
+            }
+        }
+    }
+    // files the RomFS does not have, from the overlay
+    if let Some(o) = overlay {
+        let have: std::collections::BTreeSet<PathBuf> = files.iter().map(|f| f.0.clone()).collect();
+        let mut stack = vec![PathBuf::new()];
+        while let Some(rel) = stack.pop() {
+            let here = o.join(&rel);
+            for e in std::fs::read_dir(&here).map_err(|e| io(&here, e))? {
+                let e = e.map_err(|e| io(&here, e))?;
+                let t = e.file_type().map_err(|x| io(&e.path(), x))?;
+                let r = rel.join(e.file_name());
+                if t.is_dir() {
+                    if !dirs.contains(&r) {
+                        dirs.push(r.clone());
+                    }
+                    stack.push(r);
+                } else if t.is_file()
+                    && !have.contains(&r)
+                    && r != Path::new(crate::resource_patch::STAMP)
+                {
+                    let size = e.metadata().map_err(|x| io(&e.path(), x))?.len();
+                    files.push((r, size));
+                }
             }
         }
     }
@@ -160,5 +185,31 @@ mod tests {
             d.join("Pack/a.pack")
         );
         assert!(target(d, &entry("/../etc/passwd")).is_err());
+    }
+
+    #[test]
+    fn the_overlay_replaces_and_adds_files() {
+        let d = std::env::temp_dir().join(format!("nxb-link-overlay-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (src, over, dest) = (d.join("src"), d.join("over"), d.join("dest"));
+        for (root, path, data) in [
+            (&src, "A/old.bin", "old"),
+            (&src, "A/keep.bin", "keep"),
+            (&over, "A/old.bin", "new"),
+            (&over, "B/C/added.bin", "added"),
+            (&over, crate::resource_patch::STAMP, "stamp"),
+        ] {
+            let f = root.join(path);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, data).unwrap();
+        }
+        let (n, _) = link_tree(&src, Some(&over), &dest, 2, |_, _| {}).unwrap();
+        let read = |p: &str| std::fs::read_to_string(dest.join(p)).unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(read("A/old.bin"), "new");
+        assert_eq!(read("A/keep.bin"), "keep");
+        assert_eq!(read("B/C/added.bin"), "added");
+        assert!(!dest.join(crate::resource_patch::STAMP).exists());
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }

@@ -19,6 +19,7 @@
 //! A title module does not work around a core bug. A fix that helps more than one game belongs in the core.
 
 mod catalog;
+mod console;
 mod evidence;
 mod facts;
 mod hooks;
@@ -28,6 +29,7 @@ mod settings;
 pub mod threads;
 
 pub use catalog::{Catalog, FamilyFrom, Resolved};
+pub use console::{ConsoleFiles, ConsoleVar, RomfsEntry, RomfsRead, merge_console_vars};
 pub use evidence::{Evidence, Fact};
 pub use facts::{Match, TitleFacts};
 pub use hooks::{

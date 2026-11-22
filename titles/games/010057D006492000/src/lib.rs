@@ -10,13 +10,18 @@
 //! not a hand list: the build reads the names from the modules' own strings (an empty list asks for that). All nine
 //! services run on nxkit.
 //!
+//! The game ignores `-ExecCmds` (Shipping build). The module lists console variables ([`BuildHooks::console_vars`]), and
+//! the family `unreal` writes them into an extra pak that the game mounts (`Kingship-Switch_1_P.pak` with an edited
+//! `DefaultDeviceProfiles.ini`). They serve the MetalFX temporal upscaler: the game renders at half the back buffer
+//! size per side and every frame is jittered.
+//!
 //! The rewrite rules are data in `rules/010057D006492000.toml`: the build row of v327680 and the engine's SDK-wide
 //! rules for the `sdk` module (12 implementations of the node area of 62 MB and of the 2 MB alignment of large
 //! regions).
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, ConsoleVar, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -72,7 +77,52 @@ const NVN_FUNCTIONS: Fact<&'static str> = Fact::new(
     },
 );
 
+/// A hand-made pak with these lines in `[Switch DeviceProfile]` took effect in a run on 2026-11-22: the scene rendered at
+/// half size, and temporal anti-aliasing turned on.
+const CVAR_RUN: Evidence = Evidence::Recorded {
+    source: "manual run of OCTOPATH TRAVELER v327680 with Kingship/Content/Paks/Kingship-Switch_1_P.pak, \
+             r.ScreenPercentage=50 and r.DefaultFeature.AntiAliasing=2 (/Volumes/NX/nxkit-work/taa)",
+    read: "2026-11-22",
+};
+
+/// The default sample count of the temporal upscaler is 8. The value is stated, so the pak does not depend on it.
+const TAA_SAMPLES: Evidence = Evidence::Unverified {
+    note: "8 is the engine's default for r.TemporalAASamples. A run that reads the console variable back checks that \
+           the pak sets it.",
+};
+
+/// For the MetalFX temporal upscaler: `r.ScreenPercentage=50` renders at half the back buffer size per side,
+/// `r.DefaultFeature.AntiAliasing=2` is temporal anti-aliasing, which jitters every frame, and
+/// `r.TemporalAASamples=8` is the jitter sequence length.
+const CONSOLE_VARS: &[Fact<ConsoleVar>] = &[
+    Fact::new(
+        ConsoleVar {
+            name: "r.ScreenPercentage",
+            value: "50",
+        },
+        CVAR_RUN,
+    ),
+    Fact::new(
+        ConsoleVar {
+            name: "r.DefaultFeature.AntiAliasing",
+            value: "2",
+        },
+        CVAR_RUN,
+    ),
+    Fact::new(
+        ConsoleVar {
+            name: "r.TemporalAASamples",
+            value: "8",
+        },
+        TAA_SAMPLES,
+    ),
+];
+
 impl BuildHooks for Octo {
+    fn console_vars(&self) -> &'static [Fact<ConsoleVar>] {
+        CONSOLE_VARS
+    }
+
     fn standalone(&self) -> Option<Standalone> {
         Some(Standalone {
             version: 327_680,
@@ -157,6 +207,23 @@ mod tests {
         assert!(s.romfs_marker.is_empty() || s.romfs_marker.starts_with('/'));
         assert!(s.settings.evidence.is_checked());
         assert_eq!(s.settings.value.display_versions[0].0, s.modules[0].1);
+    }
+
+    #[test]
+    fn the_console_vars_serve_the_temporal_upscaler() {
+        let vars: Vec<_> = OCTO
+            .console_vars()
+            .iter()
+            .map(|f| (f.value.name, f.value.value))
+            .collect();
+        assert_eq!(
+            vars,
+            [
+                ("r.ScreenPercentage", "50"),
+                ("r.DefaultFeature.AntiAliasing", "2"),
+                ("r.TemporalAASamples", "8")
+            ]
+        );
     }
 
     #[test]

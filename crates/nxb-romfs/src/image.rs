@@ -128,6 +128,34 @@ impl Index {
         None
     }
 
+    /// The entries of the directory at `dir` (`/` separated, `""` is the root) as (name, is a file), or `None` when
+    /// there is no such directory.
+    pub fn list(&self, dir: &str) -> Option<Vec<(String, bool)>> {
+        let mut at = 0usize;
+        for part in dir.split('/').filter(|p| !p.is_empty()) {
+            let (first, count, _, file) = self.entry(at)?;
+            if file {
+                return None;
+            }
+            let first = usize::try_from(first).ok()?;
+            let count = usize::try_from(count).ok()?;
+            at = (first..first.checked_add(count)?)
+                .find(|&k| self.entry(k).is_some_and(|e| e.2 == part.as_bytes()))?;
+        }
+        let (first, count, _, file) = self.entry(at)?;
+        if file {
+            return None;
+        }
+        let first = usize::try_from(first).ok()?;
+        let count = usize::try_from(count).ok()?;
+        (first..first.checked_add(count)?)
+            .map(|k| {
+                let e = self.entry(k)?;
+                Some((String::from_utf8_lossy(e.2).into_owned(), e.3))
+            })
+            .collect()
+    }
+
     /// Moves a file: its entry gets a new offset and size. The name table stays the same.
     pub fn set_file(&mut self, entry: usize, offset: u64, size: u64) -> Result<(), ImageError> {
         if self.entry(entry).is_none_or(|e| !e.3) {
@@ -171,6 +199,18 @@ mod tests {
         };
         let i = Index::parse(&h, idx).unwrap();
         (h, i)
+    }
+
+    #[test]
+    fn directories_are_listed() {
+        let (_, i) = sample();
+        assert_eq!(
+            i.list(""),
+            Some(vec![("a".into(), false), ("b".into(), true)])
+        );
+        assert_eq!(i.list("/a/"), Some(vec![("x".into(), true)]));
+        assert_eq!(i.list("b"), None);
+        assert_eq!(i.list("c"), None);
     }
 
     #[test]

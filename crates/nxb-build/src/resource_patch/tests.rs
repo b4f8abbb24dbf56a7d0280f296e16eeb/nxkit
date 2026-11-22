@@ -151,3 +151,28 @@ fn explicit_options_never_apply_defaults_and_reject_unknown_names() {
         assert!(choose_explicit(&[p], &invalid).is_err());
     }
 }
+
+#[test]
+fn a_loose_romfs_lists_and_reads_ranges() {
+    let d = std::env::temp_dir().join(format!("nxb-romfs-read-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("G/Paks")).unwrap();
+    std::fs::write(d.join("G/Paks/a.pak"), b"0123456789").unwrap();
+    let r = Romfs::Dir(d.clone());
+    let names = |dir: &str| -> Vec<(String, bool)> {
+        r.list(dir)
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.name, e.dir))
+            .collect()
+    };
+    assert_eq!(names(""), [("G".to_string(), true)]);
+    assert_eq!(names("G/Paks"), [("a.pak".to_string(), false)]);
+    assert_eq!(r.list("G/none").unwrap(), None);
+    assert_eq!(r.len("G/Paks/a.pak").unwrap(), Some(10));
+    assert_eq!(r.read_range("G/Paks/a.pak", 3, 4).unwrap(), b"3456");
+    assert!(r.read_range("G/Paks/a.pak", 8, 4).is_err());
+    assert!(r.len("../x").is_err());
+    std::fs::remove_dir_all(&d).unwrap();
+}

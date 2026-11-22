@@ -18,6 +18,32 @@ impl BuildHooks for Fam {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some("family")
     }
+    fn console_vars(&self) -> &'static [Fact<ConsoleVar>] {
+        const V: &[Fact<ConsoleVar>] = &[
+            Fact::new(
+                ConsoleVar {
+                    name: "a",
+                    value: "1",
+                },
+                REC,
+            ),
+            Fact::new(
+                ConsoleVar {
+                    name: "b",
+                    value: "2",
+                },
+                REC,
+            ),
+        ];
+        V
+    }
+    fn console_var_files(
+        &self,
+        vars: &[ConsoleVar],
+        _romfs: &dyn RomfsRead,
+    ) -> Option<Result<Vec<(String, Vec<u8>)>, String>> {
+        Some(Ok(vec![("f".into(), vars.len().to_string().into_bytes())]))
+    }
 }
 impl RuntimeHooks for Fam {
     fn needs(&self) -> &'static [Fact<Need>] {
@@ -83,6 +109,25 @@ impl Family for Fam {
 
 struct Game(u64, Option<&'static str>);
 impl BuildHooks for Game {
+    fn console_vars(&self) -> &'static [Fact<ConsoleVar>] {
+        const V: &[Fact<ConsoleVar>] = &[
+            Fact::new(
+                ConsoleVar {
+                    name: "a",
+                    value: "9",
+                },
+                REC,
+            ),
+            Fact::new(
+                ConsoleVar {
+                    name: "c",
+                    value: "3",
+                },
+                REC,
+            ),
+        ];
+        V
+    }
     fn graphics_api(&self) -> Option<Fact<GraphicsApi>> {
         (self.0 == 2).then_some(Fact::new(GraphicsApi::Vulkan, REC))
     }
@@ -257,4 +302,33 @@ fn each_service_runs_where_the_title_then_the_family_says() {
 fn service_ids_are_unique() {
     let ids: std::collections::BTreeSet<_> = Service::ALL.iter().map(|s| s.id()).collect();
     assert_eq!(ids.len(), Service::ALL.len());
+}
+
+struct NoRomfs;
+impl RomfsRead for NoRomfs {
+    fn list(&self, _: &str) -> Result<Option<Vec<RomfsEntry>>, String> {
+        Ok(None)
+    }
+    fn len(&self, _: &str) -> Result<Option<u64>, String> {
+        Ok(None)
+    }
+    fn read_range(&self, _: &str, _: u64, _: usize) -> Result<Vec<u8>, String> {
+        Err("none".into())
+    }
+}
+
+#[test]
+fn console_vars_add_up_and_a_later_value_wins() {
+    let c = catalog();
+    let r = c.resolve(&TitleFacts::new(TitleId(1)));
+    let vars: Vec<_> = r
+        .console_vars()
+        .iter()
+        .map(|f| (f.value.name, f.value.value))
+        .collect();
+    assert_eq!(vars, [("a", "9"), ("b", "2"), ("c", "3")]);
+    let files = r.console_var_files(&[], &NoRomfs).unwrap().unwrap();
+    assert_eq!(files, [("f".to_string(), b"0".to_vec())]);
+    let lone = c.resolve(&TitleFacts::new(TitleId(2)));
+    assert!(lone.console_var_files(&[], &NoRomfs).is_none());
 }

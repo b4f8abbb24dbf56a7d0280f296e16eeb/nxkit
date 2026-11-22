@@ -6,6 +6,9 @@
 //! a zstd frame of raw blocks, so no compressor is needed, and the game's dictionary decoder accepts a frame without
 //! a dictionary ID. Files with other digests (another game version) are left as they are, with a warning.
 //!
+//! The title's console variables (`BuildHooks::console_vars`) go through the same overlay: the family turns them into new
+//! RomFS files (`BuildHooks::console_var_files`), which the RomFS does not have yet, and the overlay adds them.
+//!
 //! The standalone build does not clone the extract folder: [`overlay`] writes only the patched files into a small
 //! folder, and the romfs stage takes a file from there when the overlay has one.
 //!
@@ -19,7 +22,7 @@ use std::path::{Path, PathBuf};
 use nxb_extract::fileext::FileExt;
 use nxb_model::{Digest, FileDigest};
 use nxb_romfs::image::{Header, Index};
-use nxtitle::{Edit, ResourcePatch};
+use nxtitle::{ConsoleVar, Edit, Resolved, ResourcePatch, RomfsEntry, RomfsRead};
 
 use crate::Args;
 use crate::graph::Build;
@@ -31,8 +34,8 @@ type Read<'a> = dyn Fn(&str) -> Result<Option<Vec<u8>>, String> + 'a;
 
 /// The value that leaves a patch off.
 const STOCK: &str = "stock";
-/// The stamp in a patched folder: what it was made from.
-const STAMP: &str = ".resource-patches";
+/// The stamp in a patched folder: what it was made from. It is not a game file.
+pub(crate) const STAMP: &str = ".resource-patches";
 
 /// The patches of a title with their values: the build options first, then each patch's default. Options the title
 /// has no patch for come back as warnings. A value the patch does not take is an error.
@@ -41,6 +44,18 @@ fn choices(
     options: &[(String, String)],
 ) -> Result<(Vec<Chosen>, Vec<String>), String> {
     choose(&patches_for(title)?, options)
+}
+
+/// The title's resolved layers and its console variables, when it has any.
+type Console = (Resolved, Vec<ConsoleVar>);
+
+fn console_for(title: &str) -> Result<Option<Console>, String> {
+    let Ok(id) = u64::from_str_radix(title, 16) else {
+        return Ok(None);
+    };
+    let r = nxtitles::catalog()?.resolve(&nxtitle::TitleFacts::new(nxtitle::TitleId(id)));
+    let vars: Vec<ConsoleVar> = r.console_vars().iter().map(|f| f.value).collect();
+    Ok((!vars.is_empty()).then_some((r, vars)))
 }
 
 fn patches_for(title: &str) -> Result<Vec<ResourcePatch>, String> {
@@ -133,7 +148,8 @@ pub(crate) fn overlay(
     for w in &warnings {
         say(w);
     }
-    write_overlay(b, say, ex, loose, &chosen)
+    let console = console_for(&b.title)?;
+    write_overlay(b, say, ex, loose, &chosen, console.as_ref())
 }
 
 /// Like [`overlay`], but applies only explicitly requested patches and rejects unknown options.
@@ -148,7 +164,7 @@ pub(crate) fn overlay_explicit(
         return Ok(None);
     }
     let chosen = choose_explicit(&patches_for(&b.title)?, &a.resource_patches)?;
-    write_overlay(b, say, ex, loose, &chosen)
+    write_overlay(b, say, ex, loose, &chosen, None)
 }
 
 fn write_overlay(
@@ -157,6 +173,7 @@ fn write_overlay(
     ex: &Path,
     loose: &Path,
     chosen: &[Chosen],
+    console: Option<&Console>,
 ) -> Result<Option<PathBuf>, String> {
     let work = ex.parent().and_then(Path::parent).unwrap_or(&b.work);
     let res = work.join("resources");
@@ -172,7 +189,7 @@ fn write_overlay(
         }
         Ok(None)
     };
-    if chosen.is_empty() {
+    if chosen.is_empty() && console.is_none() {
         return none();
     }
     let img = ex.join("RomFS.img");
@@ -187,13 +204,37 @@ fn write_overlay(
         ));
         return none();
     };
-    let stamp = stamp_of(&romfs, chosen)?;
+    let vars: &[ConsoleVar] = console.map_or(&[], |c| &c.1);
+    let stamp = stamp_of(&romfs, chosen, vars)?;
     if std::fs::read_to_string(out.join(STAMP)).is_ok_and(|s| s == stamp) {
         return Ok(Some(out));
     }
-    let (files, warnings) = edited(&|path| romfs.read(path), chosen);
+    let (mut files, warnings) = if chosen.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        edited(&|path| romfs.read(path), chosen)
+    };
     for w in &warnings {
         say(w);
+    }
+    if let Some((resolved, vars)) = console {
+        let names: Vec<&str> = vars.iter().map(|v| v.name).collect();
+        match resolved.console_var_files(vars, &romfs) {
+            Some(made) => {
+                let made = made.map_err(|e| format!("console vars: {e}"))?;
+                let at: Vec<&str> = made.iter().map(|f| f.0.as_str()).collect();
+                say(&format!(
+                    "console vars: {} in {}",
+                    names.join(", "),
+                    at.join(", ")
+                ));
+                files.extend(made);
+            }
+            None => say(&format!(
+                "console vars: {}: no family knows how to set them, the game keeps its own values",
+                names.join(", ")
+            )),
+        }
     }
     if files.is_empty() {
         return none();
@@ -271,8 +312,89 @@ impl Romfs {
     }
 }
 
-/// What a patched folder is made from: the RomFS (size and time), each patch's option, value and archive digest.
-fn stamp_of(romfs: &Romfs, chosen: &[(ResourcePatch, f32)]) -> Result<String, String> {
+impl RomfsRead for Romfs {
+    fn list(&self, dir: &str) -> Result<Option<Vec<RomfsEntry>>, String> {
+        match self {
+            Romfs::Image { index, .. } => Ok(index.list(dir).map(|v| {
+                v.into_iter()
+                    .map(|(name, file)| RomfsEntry { name, dir: !file })
+                    .collect()
+            })),
+            Romfs::Dir(root) => {
+                let p = inside(root, dir)?;
+                if !p.is_dir() {
+                    return Ok(None);
+                }
+                let mut out = Vec::new();
+                for e in std::fs::read_dir(&p).map_err(|e| format!("{}: {e}", p.display()))? {
+                    let e = e.map_err(|e| format!("{}: {e}", p.display()))?;
+                    let t = e.file_type().map_err(|x| format!("{}: {x}", p.display()))?;
+                    out.push(RomfsEntry {
+                        name: e.file_name().to_string_lossy().into_owned(),
+                        dir: t.is_dir(),
+                    });
+                }
+                out.sort_by(|a, b| a.name.cmp(&b.name));
+                Ok(Some(out))
+            }
+        }
+    }
+
+    fn len(&self, path: &str) -> Result<Option<u64>, String> {
+        match self {
+            Romfs::Image { index, .. } => Ok(index.find(path).map(|f| f.size)),
+            Romfs::Dir(root) => {
+                let p = inside(root, path)?;
+                Ok(p.is_file()
+                    .then(|| std::fs::metadata(&p).map(|m| m.len()))
+                    .transpose()
+                    .map_err(|e| format!("{}: {e}", p.display()))?)
+            }
+        }
+    }
+
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, String> {
+        let mut d = vec![0u8; len];
+        match self {
+            Romfs::Image { file, index } => {
+                let f = index
+                    .find(path)
+                    .ok_or_else(|| format!("RomFS image: no {path}"))?;
+                if offset.checked_add(len as u64).is_none_or(|e| e > f.size) {
+                    return Err(format!(
+                        "RomFS image, {path}: the range is outside the file"
+                    ));
+                }
+                file.read_exact_at(&mut d, f.offset + offset)
+                    .map_err(|e| format!("RomFS image, {path}: {e}"))?;
+            }
+            Romfs::Dir(root) => {
+                let p = inside(root, path)?;
+                std::fs::File::open(&p)
+                    .and_then(|f| f.read_exact_at(&mut d, offset))
+                    .map_err(|e| format!("{}: {e}", p.display()))?;
+            }
+        }
+        Ok(d)
+    }
+}
+
+/// `rel` below `root`. A path that leaves the folder is refused.
+fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let rel = rel.trim_start_matches('/');
+    if rel.split('/').any(|c| c == "..") {
+        return Err(format!("RomFS path {rel} leaves the RomFS"));
+    }
+    Ok(root.join(rel))
+}
+
+/// What a patched folder is made from: the RomFS (size and time), each patch's option, value and archive digest, and
+/// the console variables.
+fn stamp_of(
+    romfs: &Romfs,
+    chosen: &[(ResourcePatch, f32)],
+    vars: &[ConsoleVar],
+) -> Result<String, String> {
     let meta = match romfs {
         Romfs::Image { file, .. } => file.metadata(),
         Romfs::Dir(d) => std::fs::metadata(d),
@@ -302,6 +424,9 @@ fn stamp_of(romfs: &Romfs, chosen: &[(ResourcePatch, f32)]) -> Result<String, St
                 .map_or(0, |d| d.as_nanos());
             s.push_str(&format!("{} {} {t}\n", p.archive, m.len()));
         }
+    }
+    for v in vars {
+        s.push_str(&format!("cvar {}={}\n", v.name, v.value));
     }
     Ok(s)
 }

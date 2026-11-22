@@ -633,6 +633,8 @@ dependencies = [
 name = "nxfamily-unreal"
 version = "0.15.0"
 dependencies = [
+ "nxb-model",
+ "nxb-sys",
  "nxtitle",
 ]
 

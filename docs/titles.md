@@ -32,6 +32,8 @@ A family and a title answer questions through hooks. `None` means no opinion.
 | `seeds` | `BuildHooks` | shaders to prepare before the first frame |
 | `rewrite_rules` | `BuildHooks` | rewriter rules as TOML text |
 | `resource_patches` | `BuildHooks` | edits of one member of a game archive that `nxb build` applies to the app's RomFS, by a build option (`--resource-patch <option>=<value>`) or the patch's default. Lists of all layers add up |
+| `console_vars` | `BuildHooks` | console variables (`ConsoleVar`, a name and a value) that the build sets. Lists of all layers add up, the title's after the family's, and a later value of a name wins |
+| `console_var_files` | `BuildHooks` | turns the variables into new or changed RomFS files, for an engine that reads them from its files. The first layer that returns `Some` wins. It reads the game's files through `RomfsRead` (list a directory, size of a file, a range of a file) |
 | `needs` | `RuntimeHooks` | host behaviours the game depends on, with the setting. `nxb build` writes the need `vertex_stream_null_bind` with the setting `ignore` as the key of that name in `settings` of `game.json`. |
 | `upscaler` | `RuntimeHooks` | keep the game's upscaler, render at the output size, or use MetalFX |
 | `pacing` | `RuntimeHooks` | the game, the display or a fixed rate paces the frames |
@@ -40,6 +42,14 @@ A family and a title answer questions through hooks. `None` means no opinion.
 | `runtime` | `RuntimeHooks` | whether the nxkit runtime runs one service of the game |
 
 A role names what a shader does. The core decides what to do with it. A title module does not change the core's code path for a shader.
+
+### Console variables through a pak (family `unreal`)
+
+A Shipping build of an Unreal game ignores `-ExecCmds`. The family sets console variables with an extra pak instead. `nxb build` reads the paks in `*/Content/Paks` of the RomFS (pak versions 3 and 4, zlib or uncompressed, never an encrypted index). It takes `Config/DefaultDeviceProfiles.ini` of the project from the pak with the highest priority and sets `+CVars=<name>=<value>` in the section `[<Platform> DeviceProfile]`. A line of that name is replaced, otherwise a line is added. The platform is the one in the pak file names `<Project>-<Platform>[_<n>][_P].pak`. The build fails when the section is missing.
+
+The copy goes into a new pak `<Project>-<Platform>_<n+1>_P.pak` of version 4 with one uncompressed entry. The engine reads a file from the pak that was mounted last. A `_P` pak ranks over a plain one, and a higher number `_<n>_P` over a lower one. A `_P` pak without a number counts as 0. `n` is the highest patch number, or 0 when there is no patch pak.
+
+The build writes the pak into the overlay folder beside the extract and adds it to the app's RomFS. It logs `console vars: <names> in <pak path>`. A title without console variables builds as before.
 
 ## Which engine runs a game
 

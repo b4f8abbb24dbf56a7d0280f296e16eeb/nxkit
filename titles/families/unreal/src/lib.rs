@@ -10,14 +10,23 @@
 //! thread. Unreal steps the game by the time that really passed, so a higher limit gives more frames at the same speed.
 //! A game whose speed at a rate is checked says so with `fps_max` in its title module.
 //!
+//! Console variables are not read from the program arguments: a Shipping build ignores `-ExecCmds`. The family writes
+//! them as `+CVars=<name>=<value>` lines of the section `[<Platform> DeviceProfile]` in a copy of the project's
+//! `Config/DefaultDeviceProfiles.ini`. The copy goes into a new pak that the engine mounts after the game's paks
+//! (see [`BuildHooks::console_var_files`]). [`CVAR_PAK`] records a run of this on a title.
+//!
 //! The back buffer size comes from the program arguments `-ResX=` and `-ResY=`: the Switch platform code of the engine
 //! reads them in `nninitStartup` into the display size (1280x720 when absent), the platform application reports that
 //! size as the display, and `UGameEngine::DetermineGameWindowResolution` gives the game window the display size. The
 //! renderer scales its view by `r.ScreenPercentage` of the device profile on top of that size.
 
+mod cvarpak;
+mod ini;
+mod pak;
+
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Family, LimitKind, LimitRow, LimitRule, LimitSite, Match,
-    RenderArgs, RuntimeHooks, TitleFacts,
+    BuildHooks, ConsoleFiles, ConsoleVar, Evidence, Fact, Family, LimitKind, LimitRow, LimitRule,
+    LimitSite, Match, RenderArgs, RomfsRead, RuntimeHooks, TitleFacts,
 };
 
 /// The family.
@@ -56,7 +65,24 @@ const RES_ARGS: Evidence = Evidence::Recorded {
     read: "2026-11-22",
 };
 
-impl BuildHooks for Unreal {}
+/// A hand-made pak with `r.ScreenPercentage=50` in `[Switch DeviceProfile]` rendered OCTOPATH TRAVELER at half size, and
+/// `r.DefaultFeature.AntiAliasing=2` turned on temporal anti-aliasing. The pak was written by the reference tool
+/// `mkpak.py` (version 4, uncompressed, the same layout as the writer in `cvarpak`).
+pub const CVAR_PAK: Evidence = Evidence::Recorded {
+    source: "manual run of OCTOPATH TRAVELER v327680 with Kingship/Content/Paks/Kingship-Switch_1_P.pak (tools \
+             /Volumes/NX/nxkit-work/taa/pak.py and mkpak.py)",
+    read: "2026-11-22",
+};
+
+impl BuildHooks for Unreal {
+    fn console_var_files(
+        &self,
+        vars: &[ConsoleVar],
+        romfs: &dyn RomfsRead,
+    ) -> Option<Result<ConsoleFiles, String>> {
+        Some(cvarpak::files(vars, romfs))
+    }
+}
 
 impl RuntimeHooks for Unreal {
     fn limits(&self) -> &'static [Fact<LimitRule>] {
@@ -109,6 +135,12 @@ mod tests {
             }
         );
         assert_eq!((row.kind, row.copies), (LimitKind::FpsF32, 2));
+    }
+
+    #[test]
+    fn the_pak_route_has_run_evidence() {
+        assert!(CVAR_PAK.is_checked());
+        assert!(UNREAL.console_vars().is_empty());
     }
 
     #[test]

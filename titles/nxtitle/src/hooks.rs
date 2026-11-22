@@ -1,6 +1,6 @@
 //! The questions a family or title answers. Every method has a default of "no opinion".
 
-use crate::{Fact, ResourcePatch, Runtime, Service};
+use crate::{ConsoleFiles, ConsoleVar, Fact, ResourcePatch, RomfsRead, Runtime, Service};
 
 /// A shader stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -296,6 +296,21 @@ pub trait BuildHooks: Sync {
     /// patch's default). Lists of all layers add up.
     fn resource_patches(&self) -> &'static [Fact<ResourcePatch>] {
         &[]
+    }
+    /// Console variables the build sets for the game. Lists of all layers add up, the title's after the family's.
+    /// A later layer's value for the same name wins.
+    fn console_vars(&self) -> &'static [Fact<ConsoleVar>] {
+        &[]
+    }
+    /// Turns console variables into new or changed RomFS files (path from the RomFS root, bytes), for an engine that
+    /// reads them from its files. `None`: this layer does not know how, and the next layer is asked. `Some(Err)`: it
+    /// knows and the game's files do not allow it.
+    fn console_var_files(
+        &self,
+        _vars: &[ConsoleVar],
+        _romfs: &dyn RomfsRead,
+    ) -> Option<Result<ConsoleFiles, String>> {
+        None
     }
 }
 

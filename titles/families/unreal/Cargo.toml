@@ -12,6 +12,8 @@ layer = "T"
 in_v = false
 
 [dependencies]
+nxb-model.workspace = true
+nxb-sys.workspace = true
 nxtitle.workspace = true
 
 [lints]
