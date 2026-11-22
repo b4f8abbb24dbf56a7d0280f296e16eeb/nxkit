@@ -31,6 +31,7 @@ mod nxnative;
 #[cfg(test)]
 mod nxnative_tests;
 mod pipelist;
+mod plist;
 #[cfg(test)]
 mod replace_tests;
 mod romfs;
@@ -301,7 +302,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         PathBuf::from(n)
     };
     let _ = std::fs::remove_dir_all(&stage_dir);
-    let run_dir = bundle::skeleton(&stage_dir, &host, &plist(a, &t))?;
+    let run_dir = bundle::skeleton(&stage_dir, &host, &plist::plist(a, &t))?;
     p.plan(7);
     let nup = b.src.source == Source::Nup;
     let what = match (nup, b.split) {
@@ -435,7 +436,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             title_id: t.id,
             name: t.name,
             version,
-            version_name: shown_version(&t),
+            version_name: plist::shown_version(&t),
             modules: &mods,
             services: t.services.clone(),
             graphics: t.graphics.id(),
@@ -592,26 +593,4 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     })?;
     p.say(&format!("app: {}", out.display()));
     Ok(())
-}
-
-fn plist(a: &Args, t: &Game) -> String {
-    let id = a
-        .bundle_id
-        .clone()
-        .unwrap_or_else(|| bundle::default_bundle_id(t.id));
-    let shown = shown_version(t);
-    bundle::info_plist(
-        &bundle::file_name(a.app_name.as_deref().unwrap_or(t.name)),
-        &id,
-        &shown,
-    )
-}
-
-/// The version as the game shows it: the display version of the title module, else the number of the update.
-fn shown_version(t: &Game) -> String {
-    t.st.settings
-        .value
-        .display_versions
-        .first()
-        .map_or_else(|| t.st.version.to_string(), |v| v.1.to_string())
 }
