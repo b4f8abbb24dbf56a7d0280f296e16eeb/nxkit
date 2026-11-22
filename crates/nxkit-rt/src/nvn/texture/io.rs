@@ -6,14 +6,16 @@
 //! next to each other in a GOB). It does not decode and encode a whole level. A read is the same walk the other way.
 //! Neither allocates. A write then tells the front end which bytes changed, so the GPU copy is loaded again at its next
 //! use. A read takes the bytes from the memory of the game. That is the current copy as long as the GPU did not write
-//! the texture. A texture that the GPU wrote last has no readback in the backend, so a read of it stops the game
-//! with a message.
+//! the texture. A read of a texture that the GPU wrote last puts a CPU read into the frame, flushes it and waits for
+//! its fence: the backend copies the texture back into guest memory, and the read takes the bytes from there. A
+//! texture that the backend cannot copy back (scaled, widened or block compressed) stops the game with a message.
 //!
 //! A linear texture is one level of one layer. Its rows are `stride` bytes apart. The GOB order is the order of the
 //! Tegra X1.
 
 use nxkit_abi::guest;
 use nxkit_nvn::format::format_info;
+use nxkit_nvn::front::FlushReason;
 use nxkit_nvn::layout::{FLAG_LINEAR, FLAG_LINEAR_RENDER_TARGET, Target};
 use nxkit_nvn::resource::Residency;
 use nxkit_nvn::swizzle::{GobOrder, block_linear_offset, level_geometry};
@@ -264,14 +266,28 @@ fn read_texels(
         return Ok(());
     };
     let g = gpu(name);
-    let residency = g.with_front(|f| {
-        g.backend().settle(f.resources_mut());
-        Ok(f.resources().get(t.id)?.residency)
-    })?;
-    if residency == Residency::GpuNewer {
-        return Err(other(
-            "the GPU wrote this texture and the backend has no readback, so the CPU cannot read it",
-        ));
+    let residency = || {
+        g.with_front(|f| {
+            g.backend().settle(f.resources_mut());
+            Ok(f.resources().get(t.id)?.residency)
+        })
+    };
+    if residency()? == Residency::GpuNewer {
+        // The GPU copy is newer: a CPU read in the frame copies it back after the work submitted before this call,
+        // and the flush and the wait make the bytes land in guest memory before they are taken.
+        let fence = {
+            let mut front = g.lock();
+            front.cpu_read(t.id);
+            g.flush_locked(&mut front, FlushReason::CpuWait)?
+        };
+        g.backend().wait_fence(fence, u64::MAX);
+        if residency()? == Residency::GpuNewer {
+            return Err(other(format!(
+                "the GPU wrote texture {:?} (format {:#x}, {}x{}, flags {:#x}, level {} layer {}) and the backend \
+                 could not copy it back, so the CPU cannot read it",
+                t.id, t.desc.format, t.desc.width, t.desc.height, t.desc.flags, p.level, p.layer0,
+            )));
+        }
     }
     take(&t, &p, dst)
 }
