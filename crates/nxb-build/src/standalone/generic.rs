@@ -100,6 +100,12 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             Ok((analyzed, note))
         },
     )?;
+    match analyzed.engine {
+        Some(id) => p.say(&format!(
+            "engine family {id}, found from the modules: its frame limit and render size arguments apply"
+        )),
+        None => p.say("no engine family found from the modules"),
+    }
     let vulkan = analyzed.graphics == nxtitle::GraphicsApi::Vulkan;
     if vulkan && !analyzed.replaced.is_empty() {
         p.say(&format!(

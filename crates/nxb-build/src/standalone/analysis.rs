@@ -12,6 +12,10 @@ pub(super) struct Analysis {
     pub thread: npdm::MainThread,
     /// The API the modules ask for by name. A game that names none is taken for NVN.
     pub graphics: GraphicsApi,
+    /// The engine family found from the modules, as its id, and what it gives the manifest.
+    pub engine: Option<&'static str>,
+    limits: Vec<nxtitle::LimitRule>,
+    render_args: Option<nxtitle::RenderArgs>,
     /// The modules left out because the host's Vulkan layer replaces them (the loader and the driver).
     pub replaced: Vec<String>,
     settings: nxtitle::Settings,
@@ -127,7 +131,24 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
         stdalloc_cap: 0,
         alloc_big_align: false,
     };
+    // The engine: the library `UnrealEngine` is named when the rewriter registered an engine console variable in `main`.
+    let mut facts = nxtitle::TitleFacts::new(nxtitle::TitleId(game.title_id));
+    facts.version = Some(game.version);
+    facts.modules = built.iter().map(|m| m.name.clone()).collect();
+    if built
+        .iter()
+        .any(|m| m.name == "main" && m.fixups.contains("UE_CVAR:"))
+    {
+        facts.libraries.push("UnrealEngine".into());
+    }
+    let resolved = nxtitles::catalog()?.resolve(&facts);
+    let engine = resolved.engine;
     Ok(Analysis {
+        engine: engine.map(|f| f.id()),
+        limits: engine
+            .map(|f| f.limits().iter().map(|l| l.value).collect())
+            .unwrap_or_default(),
+        render_args: engine.and_then(|f| f.render_args().map(|a| a.value)),
         modules: built.into_iter().zip(bases).collect(),
         thread,
         graphics,
@@ -159,8 +180,8 @@ impl Analysis {
             settings: self.settings,
             shared_font_decode: false,
             sf_services: vec![],
-            limits: vec![],
-            render_args: None,
+            limits: self.limits.clone(),
+            render_args: self.render_args,
             temporal_upscale: None,
             vertex_stream_null_bind: false,
         })

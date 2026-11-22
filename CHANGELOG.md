@@ -32,6 +32,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   step, and the host has no OpenGL layer to run it yet. A game on Vulkan leaves out the modules besides `main` and
   `sdk` that export `vk*` functions (the loader and the driver, which the host's Vulkan layer replaces) and translates
   its SPIR-V shaders. This is not checked on a Vulkan game.
+  The path also finds the engine family of the game. The family `unreal` detects it from the library `UnrealEngine`,
+  which the path names when the rewriter registered an engine console variable in `main`. The manifest then has the
+  family's frame limit and render size arguments, and the build logs the family.
 
 ## 0.15.2 - 2026-11-22
 
