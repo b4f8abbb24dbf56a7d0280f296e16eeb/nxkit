@@ -91,6 +91,10 @@ impl File {
 
     /// Writes `size` bytes from the guest buffer at `addr` to `offset`. A write that fails poisons the save, so the
     /// half-written state is never committed.
+    ///
+    /// The write goes to `offset` in every open mode: `OpenMode_AllowAppend` lets a write grow the file, it does not
+    /// move the write to the end. UE4's `SaveGameToSlot` opens with Write and AllowAppend and writes at 0; a write at
+    /// the end appended each save to the old one, and the next load read the first, stale or empty, copy.
     pub(crate) fn write(&self, offset: i64, addr: u64, size: u64) -> u32 {
         let Backing::Host { file, txn } = &self.backing else {
             return FAIL;
@@ -98,18 +102,10 @@ impl File {
         if self.mode & (MODE_WRITE | MODE_APPEND) == 0 {
             return FAIL;
         }
-        let _guard = txn.as_ref().map(|t| t.writing());
-        let at = if self.mode & MODE_APPEND != 0 {
-            match file.metadata() {
-                Ok(m) => m.len(),
-                Err(_) => return self.failed_write(),
-            }
-        } else {
-            match u64::try_from(offset) {
-                Ok(o) => o,
-                Err(_) => return FAIL,
-            }
+        let Ok(at) = u64::try_from(offset) else {
+            return FAIL;
         };
+        let _guard = txn.as_ref().map(|t| t.writing());
         if size == 0 {
             return OK;
         }
@@ -431,12 +427,12 @@ mod tests {
     }
 
     #[test]
-    fn an_append_writes_at_the_end() {
+    fn an_append_mode_write_goes_to_its_offset_and_may_grow_the_file() {
         let fs = Fs::new(config("files-append"));
         assert_eq!(fs.mount_temp(b"tmp"), OK);
-        std::fs::write(fs.cfg.temp.join("w.bin"), b"ab").unwrap();
+        std::fs::write(fs.cfg.temp.join("w.bin"), b"abcd").unwrap();
         let g = Guest::new(16);
-        g.put(0, b"cd");
+        g.put(0, b"xyz");
         let f = fs
             .file(
                 fs.open_file(b"tmp:/w.bin", MODE_WRITE | MODE_APPEND)
@@ -444,6 +440,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(f.write(0, g.addr(), 2), OK);
-        assert_eq!(std::fs::read(fs.cfg.temp.join("w.bin")).unwrap(), b"abcd");
+        assert_eq!(std::fs::read(fs.cfg.temp.join("w.bin")).unwrap(), b"xycd");
+        assert_eq!(f.write(3, g.addr(), 3), OK);
+        assert_eq!(std::fs::read(fs.cfg.temp.join("w.bin")).unwrap(), b"xycxyz");
     }
 }

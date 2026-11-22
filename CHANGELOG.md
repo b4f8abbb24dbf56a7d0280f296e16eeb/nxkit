@@ -6,6 +6,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- Octopath Traveler has sound after "New Game". A write to a file opened with `OpenMode_AllowAppend` goes to its
+  offset, as on the console; the flag only lets the write grow the file. The host wrote it at the end, so each save
+  of `KSSystemData` (opened with Write and AllowAppend, written at 0) was appended to the old one, and the next load
+  read the first copy (zeros of the presized file) and set the music and effect volumes to 0. A save file damaged
+  this way is repaired by the game's next save.
 - Octopath Traveler: the first story scene (Cyrus, Atlasdam) renders lit and sharp instead of a white plane over
   black. A depth and stencil clear honours its masks: Unreal Engine 4 clears only the stencil between its lights and
   its translucency, and the host cleared the depth with it (`ClearKeeps` in the pass plan, separate Metal load actions
