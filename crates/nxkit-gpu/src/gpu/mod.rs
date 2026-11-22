@@ -435,6 +435,11 @@ impl Gpu {
         self.store.get(id).map(|r| r.tex.clone())
     }
 
+    /// Like [`Gpu::texture`], and whether its size is the NVN size times the render scale.
+    pub fn texture_scaled(&self, id: TexId) -> Option<(Texture, bool)> {
+        self.store.get(id).map(|r| (r.tex.clone(), r.scaled))
+    }
+
     /// The newest batch that went to the GPU, to wait for it without this lock.
     pub fn last_submitted(&self) -> Option<SubmittedBatch> {
         self.last.clone()
