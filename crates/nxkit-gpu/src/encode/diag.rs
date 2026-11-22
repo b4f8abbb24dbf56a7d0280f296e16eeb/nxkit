@@ -31,7 +31,7 @@ pub(super) fn draw_diag(cat: &str, budget: &std::sync::atomic::AtomicU64) -> boo
 
 /// The `ubo` category: the uniform buffers of draw `n` as the guest memory holds them now and as the snapshot of the
 /// walk holds them, and the first floats of its first two vertex streams.
-pub(super) fn ubo_diag(sh: &EncodeCtx<'_>, n: u32, d: &crate::detail::DrawDetail) {
+pub(super) fn ubo_diag(sh: &EncodeCtx<'_>, n: u32, d: &crate::detail::DrawDetail, full: bool) {
     let floats = |addr: u64, count: usize| -> Vec<f32> {
         let mut bytes = vec![0u8; count * 4];
         match sh.guest_offset(addr, bytes.len() as u64) {
@@ -45,7 +45,7 @@ pub(super) fn ubo_diag(sh: &EncodeCtx<'_>, n: u32, d: &crate::detail::DrawDetail
         }
     };
     for u in &d.ubos {
-        let count = (u.size as usize / 4).min(16);
+        let count = (u.size as usize / 4).min(if full { 4096 } else { 16 });
         let snap: Option<Vec<f32>> = u.snapshot.as_ref().map(|b| {
             b.as_chunks::<4>()
                 .0

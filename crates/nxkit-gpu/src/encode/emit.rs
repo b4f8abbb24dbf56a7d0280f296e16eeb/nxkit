@@ -264,7 +264,7 @@ fn listed_draw(d: &crate::detail::DrawDetail) -> bool {
     let Some(key) = d.program.fragment.as_deref() else {
         return false;
     };
-    if !crate::diag::fs_programs().iter().any(|k| k == key) {
+    if !crate::diag::fs_programs().iter().any(|k| k == key) || crate::diag::knob("fsquiet") {
         return false;
     }
     let Ok(mut shown) = SHOWN.lock() else {
@@ -331,7 +331,12 @@ pub(super) fn draw(
         let targets = if crate::diag::fs_programs().is_empty() {
             String::new()
         } else {
-            format!(" targets {}", target_state(pc, d))
+            format!(
+                " pass {} size {:?} targets {}",
+                DIAG_PASS.with(std::cell::Cell::get),
+                pc.size,
+                target_state(pc, d)
+            )
         };
         eprintln!(
             "DIAG draw {n} vs {} fs {:?} args {:?} depth {:?} raster {:?} masks {:?} blend {:?} inputs {:?} streams {:?} ubos {:?} textures {:?}{targets}",
@@ -361,8 +366,8 @@ pub(super) fn draw(
         ubo_dump_draw(sh, n, d);
     }
     static UBO_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    if draw_diag("ubo", &UBO_SHOWN) {
-        ubo_diag(sh, n, d);
+    if (listed && crate::diag("ubo")) || draw_diag("ubo", &UBO_SHOWN) {
+        ubo_diag(sh, n, d, listed);
     }
     if crate::diag("tex") {
         let unresolved: Vec<_> = d

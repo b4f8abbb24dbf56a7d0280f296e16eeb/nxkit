@@ -157,6 +157,9 @@ const KNOBS: &[&str] = &[
     "waitother",
     // Every frame waits in full: the control.
     "waitall",
+    // The draws of the programs of `NXKIT_DIAG_FS` print nothing and use none of their lines: set it until the game
+    // reaches the scene to look at, then clear it.
+    "fsquiet",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

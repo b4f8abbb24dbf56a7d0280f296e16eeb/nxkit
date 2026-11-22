@@ -14,7 +14,7 @@ The code is in `nxkit_nvn::diag` (the shared `NXKIT_DIAG` parser and the health 
 | `NXKIT_KNOB` | Comma separated list of knobs (see below). Knobs change what the encoder does. |
 | `NXKIT_KNOB_FILE` | A file with the same list as `NXKIT_KNOB`. The encoder reads it again every frame, so you can change a knob while the game runs. |
 | `NXKIT_PAINT_FS` | Comma separated fragment program keys that the `paint` and `paintdir` knobs paint. When it is empty, they paint every draw into one colour target. |
-| `NXKIT_DIAG_FS` | Comma separated fragment program keys. With keys, the `draw` line prints every draw of these programs on every frame (at most 200 lines per program per run), and ends with the colour targets of its pass: for each slot the format and the blend state (`off`, or `on` with the NVN source and destination RGB factors and the RGB op). The `nanscan` category counts only the passes that hold a draw of these programs, and for them also counts the targets before the pass and the textures that the programs sample. Without the variable, `draw` prints on sampled frames only and `nanscan` counts every pass. |
+| `NXKIT_DIAG_FS` | Comma separated fragment program keys. With keys, the `draw` line prints every draw of these programs on every frame (at most 200 lines per program per run), and ends with the index of its render pass in the frame, the size of the attachments and the colour targets of its pass: for each slot the format and the blend state (`off`, or `on` with the NVN source and destination RGB factors and the RGB op). The `nanscan` category counts only the passes that hold a draw of these programs, and for them also counts the targets before the pass and the textures that the programs sample. Without the variable, `draw` prints on sampled frames only and `nanscan` counts every pass. |
 | `NXKIT_WATCH_TEX` | Comma separated texture ids. The encoder prints the passes that render into them and the copies that touch them (at most 40 each). |
 | `NXKIT_DIAG_WATCH` | With `NXKIT_DIAG=tiny`: `0xADDR:LEN,0xADDR:LEN` (GPU addresses, LEN in bytes, at most 512). On each sampled frame, after the frame completed, the guest memory of each range is printed as `DIAG tiny watch 0x.. f32 [..] hex [..]`. |
 | `NXKIT_WATCH_ADDR` | A GPU address in hex. The decoder prints the texture that each record word at this address resolves to (at most 30). There is no default address. |
@@ -165,7 +165,7 @@ The cost column shows the cost when the category is on: low, medium (extra work 
 | `pull` | gpu | with `NXKIT_PULL=1`: a pulled draw whose layout block makes `dm_fetch` read outside guest memory (`stray read`), with the location, the address and bytes, the guest range, the vertex and instance range and the streams. Arrays draws and indexed draws (it reads the indices) are checked; indirect draws are not | first 32 | medium |
 | `target` | gpu | render targets that cannot form a pass (not renderable, size mismatch, the same slot twice, no target), and alias conflicts | first 300, alias lines on sampled frames | low |
 | `draw` | gpu | the state of each draw (programs, args, depth, raster, masks, blend, inputs, streams, uniform buffers, textures) and the attachments | sampled | medium |
-| `ubo` | gpu | the uniform buffers of each draw, from guest memory now and from the snapshot of the walk, and the first floats of two vertex streams | sampled | high |
+| `ubo` | gpu | the uniform buffers of each draw, from guest memory now and from the snapshot of the walk (the first 16 floats; every float for a draw of a program of `NXKIT_DIAG_FS`), and the first floats of two vertex streams | sampled, and every listed draw | high |
 | `pixel` | gpu | nine pixels of the presented texture, and draw and texture details | every 60th present, and draws on sampled frames | medium |
 | `pixelall` | gpu | a counters line per frame and the lit pixels of each present, to match frames while bisecting with `nobar` | every 10th frame or present | medium |
 | `present` | gpu | the counters of the present path (ticks, asked, found, blitted) and the presented texture | every 120th tick or present | low |
@@ -272,6 +272,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `meshvisall` | With `NXKIT_DIAG=meshvis`, every frame is a sampled frame. |
 | `nanload` | With `NXKIT_DIAG=nanscan`, a pass that loads its float colour target counts the target before the pass too, also when `NXKIT_DIAG_FS` is empty. |
 | `ubodumpall` | With `NXKIT_DIAG=ubodump`, every dispatch of a sampled frame is dumped, not only those of the programs in `NXKIT_DIAG_FS`; the budget is 400 lines per frame. |
+| `fsquiet` | The draws of the programs of `NXKIT_DIAG_FS` print nothing and use none of their 200 lines. Set it in the file of `NXKIT_KNOB_FILE` until the game shows the scene to look at, then clear it. |
 | `nancomp` | With `NXKIT_DIAG=nanscan`, the float storage images of every compute dispatch are counted before and after the compute pass (`image` lines), also when `NXKIT_DIAG_FS` is empty. |
 
 ## The render health report

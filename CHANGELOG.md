@@ -49,6 +49,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - A GPU-written texture with `NVN_TEXTURE_FLAGS_COMPRESSIBLE` in compressible pool memory is not copied back into
   guest memory at the end of the frame. On the console its bytes are compressed, so the CPU cannot read them.
   Octopath Traveler (Unreal Engine 4) copied back about 105 MB of render targets in each frame, 2.3 ms of GPU time.
+### Added
+
+- Diagnostics: with `NXKIT_DIAG_FS`, the `draw` line names the render pass of the draw in the frame and the size of
+  its attachments, and the `ubo` category prints every float of the uniform buffers of a listed draw. The knob
+  `fsquiet` holds the listed draws back until the game shows the scene to look at.
 
 ## 0.15.0 - 2026-11-22
 
