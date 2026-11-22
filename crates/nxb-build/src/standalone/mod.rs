@@ -31,6 +31,7 @@ mod pipelist;
 mod replace_tests;
 mod romfs;
 mod shaders;
+mod version;
 mod vk_shaders;
 
 use crate::Args;
@@ -226,26 +227,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         ));
     };
     let version = t.st.version;
-    let updates: Vec<(u32, PathBuf)> = match version {
-        0 => Vec::new(),
-        v => vec![
-            src.updates
-                .iter()
-                .find(|u| u.0 == v)
-                .cloned()
-                .ok_or_else(|| {
-                    let have: Vec<String> = src.updates.iter().map(|u| format!("v{}", u.0)).collect();
-                    crate::exit::fail(
-                        4,
-                        format!(
-                            "{}: the title module is made for v{v} and the input has no update with that version (found: {})",
-                            t.name,
-                            if have.is_empty() { "none".into() } else { have.join(", ") }
-                        ),
-                    )
-                })?,
-        ],
-    };
+    let updates = version::updates_for(t.name, version, src.has_base, &src.updates)?;
     if src.updates.len() > updates.len() {
         p.say(&format!(
             "the title module is made for v{version}: the other updates in the input are not used"

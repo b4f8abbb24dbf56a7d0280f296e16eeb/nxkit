@@ -8,6 +8,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 - `nxb build` replaces an app of the old engine that has only its host `Contents/MacOS/dmhost` and no launcher
   `nxnative` (#48). Such an app at `-o` stopped the build with exit code 2.
+- `nxb build` of a title module made for v0 stops with exit code 4 and names the versions the input has when the
+  input holds only updates (#47). It stopped in the extract stage with exit code 1 and asked for a standalone update
+  version that the title module does not support.
 
 ## 0.15.1 - 2026-11-22
 
