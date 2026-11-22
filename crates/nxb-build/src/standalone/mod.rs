@@ -101,8 +101,7 @@ struct Game {
     limits: Vec<nxtitle::LimitRule>,
     /// The program arguments that set the render size (`RuntimeHooks::render_args`).
     render_args: Option<nxtitle::RenderArgs>,
-    /// The temporal upscale facts, when the engine and the title both answer (`RuntimeHooks::temporal_view` and
-    /// `temporal_draws`).
+    /// The temporal upscale facts, when the engine and the title both answer (`temporal_view`, `temporal_draws`).
     temporal_upscale: Option<(nxtitle::TemporalView, nxtitle::TemporalDraws)>,
     /// The title needs the command buffer to ignore a bind of one null range at a stream of 16 or more.
     vertex_stream_null_bind: bool,

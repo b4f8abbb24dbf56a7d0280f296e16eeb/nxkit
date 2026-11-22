@@ -246,8 +246,7 @@ pub const RENDER_SIZES: &[(&str, &str)] = &[
     ("2160", "3840x2160"),
 ];
 
-/// The width and the height of a value of [`RENDER_SIZE`], `None` for `0` (the game's own size) and a value that is not
-/// an option.
+/// The width and height of a [`RENDER_SIZE`] value: `None` for `0` (the game's own size) and for no option.
 pub fn render_size(value: &str) -> Option<(u32, u32)> {
     let h: u32 = value.parse().ok()?;
     (h != 0 && RENDER_SIZES.iter().any(|(v, _)| *v == value)).then_some((h * 16 / 9, h))
@@ -307,8 +306,7 @@ pub const OPTIONS: &[Opt] = &[
         env: RENDER_SIZE,
         kind: Kind::Choice(RENDER_SIZES),
         label: "Render resolution",
-        note: "The size the game draws its picture at, its menus included. Larger sizes are sharper and cost more GPU \
-               time.",
+        note: "The size the game draws at, menus included. Larger is sharper and costs more GPU time.",
         default: "0",
         section: "Game",
         basic: false,

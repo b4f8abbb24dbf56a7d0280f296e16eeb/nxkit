@@ -160,6 +160,7 @@ impl Tic {
                 tile_d: layout.tile_d,
             }
         };
+        let buffer = kind == TicLayout::Buffer;
         Ok(Self {
             address,
             format: desc.format,
@@ -168,16 +169,8 @@ impl Tic {
             samples: desc.samples.max(1),
             width: desc.width,
             // A buffer is one row, whatever height the builder holds (the layout takes it as 1 too).
-            height: if kind == TicLayout::Buffer {
-                1
-            } else {
-                desc.height
-            },
-            depth: if kind == TicLayout::Buffer {
-                1
-            } else {
-                desc.depth.max(1)
-            },
+            height: if buffer { 1 } else { desc.height },
+            depth: if buffer { 1 } else { desc.depth.max(1) },
             levels: u8::try_from(desc.level_count()).map_err(|_| NvnError::FieldRange("levels"))?,
             view,
             flags: u16::try_from(desc.flags).map_err(|_| NvnError::FieldRange("flags"))?,
