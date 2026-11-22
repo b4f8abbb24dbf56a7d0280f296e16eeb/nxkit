@@ -138,6 +138,8 @@ pub struct EncodeStats {
     pub icb_builds: u32,
     /// Times a render pass set another pipeline than the one before.
     pub pipeline_switches: u32,
+    /// Partial clears (a scissor or a channel mask) encoded as draws (`encode::partial`).
+    pub partial_clears: u32,
     /// Pipelines compiled this frame.
     pub pipeline_builds: u32,
     /// Barriers between passes that were emitted.
@@ -219,6 +221,7 @@ impl EncodeStats {
         self.icb_draws += o.icb_draws;
         self.kinds.add(&o.kinds);
         self.icb_executions += o.icb_executions;
+        self.partial_clears += o.partial_clears;
         self.icb_builds += o.icb_builds;
         self.pipeline_switches += o.pipeline_switches;
         self.pipeline_builds += o.pipeline_builds;

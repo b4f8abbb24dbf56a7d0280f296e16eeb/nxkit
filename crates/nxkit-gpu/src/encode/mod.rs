@@ -61,6 +61,7 @@ use crate::translate;
 mod blocks;
 mod diag;
 mod emit;
+mod partial;
 mod setup;
 #[cfg(test)]
 mod tests;
@@ -329,8 +330,25 @@ pub(crate) fn render_pass(
     };
     // The visibility offset that counts now, None while nothing counts.
     let mut counting: Option<u64> = None;
+    // The partial clears of the pass, each before the draw it precedes (`partial`).
+    let clears = partial::partial_clears(sh.frame, pass, range.start);
+    let mut next_clear = 0;
+    let mut clears_before = |rp: &mut RenderPass<'_>,
+                             tr: &mut Tracker,
+                             stats: &mut EncodeStats,
+                             n: u32| {
+        while let Some(&(_, cmd)) = clears.get(next_clear).filter(|(at, _)| *at <= n) {
+            next_clear += 1;
+            if sh.frame.skips(cmd) {
+                stats.render_cond_other += 1;
+                continue;
+            }
+            partial::encode(sh, &s.pc, rp, tr, cmd, stats);
+        }
+    };
     let mut n = range.start;
     while n < range.end {
+        clears_before(&mut rp, &mut tr, stats, n);
         if replaced && n == range.start {
             n += 1;
             continue;
@@ -344,6 +362,7 @@ pub(crate) fn render_pass(
             .run_at
             .get(&n)
             .filter(|r| n + r.draws <= range.end && !crate::diag::skip_list_on())
+            .filter(|r| !clears.iter().any(|&(at, _)| at > n && at < n + r.draws))
             && (n..n + run.draws).all(|d| !is_off(d) && counts(d).is_none())
             && set_counting(&mut rp, &mut counting, None, stats)
             && run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats)
@@ -382,6 +401,7 @@ pub(crate) fn render_pass(
         }
         n += 1;
     }
+    clears_before(&mut rp, &mut tr, stats, range.end);
     if let Some(p) = sh.prof {
         p.end_pass_render(&mut rp, index);
     }

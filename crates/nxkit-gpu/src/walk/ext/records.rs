@@ -193,8 +193,11 @@ impl Walker {
                 if slot < MAX_COLOR {
                     let kind = x.arg >> 8;
                     let c = |i: usize| clear_value(kind, x.word(1 + i));
+                    self.track.read_bit(cache::scalar_bit(sc::SCISSOR));
                     self.out.clears.push(ClearDetail {
                         color: [c(0), c(1), c(2), c(3)],
+                        scissor: st.scissor,
+                        color_mask: (x.word(0) & 0xf) as u8,
                         ..ClearDetail::default()
                     });
                 }
@@ -214,9 +217,13 @@ impl Walker {
                         );
                     }
                 }
+                self.track.read_bit(cache::scalar_bit(sc::SCISSOR));
                 self.out.clears.push(ClearDetail {
                     depth: f(x, 0),
                     stencil: x.word(2),
+                    scissor: st.scissor,
+                    depth_write: x.word(1) != 0,
+                    stencil_mask: x.word(3),
                     ..ClearDetail::default()
                 });
             }
