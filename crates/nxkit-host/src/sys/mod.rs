@@ -21,6 +21,7 @@ mod look;
 mod mouse;
 mod notify;
 pub mod paging;
+pub mod patchlib;
 mod pointer;
 mod prefs;
 mod present;
@@ -101,6 +102,7 @@ unsafe extern "C" {
     fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
     fn dlerror() -> *const c_char;
+    fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
     fn _dyld_image_count() -> u32;
     fn _dyld_get_image_name(index: u32) -> *const c_char;
     fn _dyld_get_image_header(index: u32) -> *const c_void;

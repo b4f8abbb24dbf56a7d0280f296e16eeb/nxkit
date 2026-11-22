@@ -8,7 +8,7 @@
 //! of the answer that starts with `.` gets one more `.` in front, so no line of the answer looks like a status line.
 //!
 //! The built-in verbs are `help`, `keys`, `get`, `set`, `unset`, `info` and `log`. Other parts of the host add their
-//! own verbs ([`Control::verb`]), for example the frame capture of the encoder. The control knows only the board of
+//! own verbs ([`Control::verb`]), for example the frame capture of the encoder and `patch` (the patch modules of W37, `patchctl`). The control knows only the board of
 //! the live keys and its verbs, and no part knows the socket.
 
 use std::collections::BTreeMap;

@@ -56,6 +56,8 @@ pub mod memreport;
 #[cfg(target_os = "macos")]
 pub mod obswire;
 #[cfg(target_os = "macos")]
+pub mod patchctl;
+#[cfg(target_os = "macos")]
 pub mod place;
 pub mod poolreport;
 #[cfg(target_os = "macos")]

@@ -86,7 +86,8 @@ fn start_control(board: nxkit_abi::live::Board, game: &crate::manifest::Game, ru
     ));
     #[cfg(not(target_os = "macos"))]
     let _ = run;
-    let control = crate::control::Control::new(board, info);
+    let mut control = crate::control::Control::new(board, info);
+    crate::patchctl::add_verbs(&mut control);
     match crate::control::start(control) {
         Ok(path) => eprintln!("nxkit-host: control socket {}", path.display()),
         Err(e) => eprintln!("nxkit-host: no control socket: {e}"),
