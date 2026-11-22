@@ -28,3 +28,37 @@ pub struct EncodeReport {
     /// The GPU counters of the frame, which the backend writes when the GPU finished it.
     pub(crate) queries: Option<std::sync::Arc<crate::queries::FrameQueries>>,
 }
+
+impl EncodeReport {
+    /// The textures whose GPU copy and guest bytes are the same at the end of the frame: the uploads that no pass of the
+    /// frame wrote afterwards, and the textures copied back. The uploads run before the passes, so a texture that a pass
+    /// wrote after its upload stays newer on the GPU. Pokopia makes a new texture for its fog colour curves, renders
+    /// them into it and reads them back with `nvnTextureReadTexels`.
+    pub fn synced(&self) -> Vec<TexId> {
+        let wrote: crate::fastmap::FastSet<TexId> = self.gpu_wrote.iter().copied().collect();
+        self.deswizzled
+            .iter()
+            .filter(|id| !wrote.contains(id))
+            .chain(&self.mirrored)
+            .chain(&self.copied_back)
+            .copied()
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_texture_written_after_its_upload_is_not_synced() {
+        let (up, drawn, mirrored) = (TexId(1), TexId(2), TexId(3));
+        let report = EncodeReport {
+            deswizzled: vec![up, drawn],
+            gpu_wrote: vec![drawn, mirrored],
+            mirrored: vec![mirrored],
+            ..EncodeReport::default()
+        };
+        assert_eq!(report.synced(), vec![up, mirrored]);
+    }
+}

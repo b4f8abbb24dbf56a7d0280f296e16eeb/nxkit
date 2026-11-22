@@ -391,15 +391,9 @@ impl GpuBackend {
             .chain(&report.gpu_wrote)
             .filter_map(&epoch)
             .collect();
-        let mut synced: Vec<_> = report
-            .deswizzled
-            .iter()
-            .chain(&report.mirrored)
-            .filter_map(&epoch)
-            .collect();
+        let synced = report.synced().iter().filter_map(&epoch).collect();
         if !report.copied_back.is_empty() {
             self.drain(None);
-            synced.extend(report.copied_back.iter().filter_map(&epoch));
         }
         self.note_report(&report);
         Ok(TableUpdate { wrote, synced })
@@ -451,22 +445,12 @@ impl GpuBackend {
             self.copied_fence.fetch_max(fence.0, Ordering::AcqRel);
             self.drain(None);
         }
-        let synced: crate::fastmap::FastSet<TexId> = report
-            .deswizzled
-            .iter()
-            .chain(&report.mirrored)
-            .chain(&report.copied_back)
-            .copied()
-            .collect();
-        for id in report.gpu_wrote.iter().filter(|id| !synced.contains(id)) {
+        let synced = report.synced();
+        let in_sync: crate::fastmap::FastSet<TexId> = synced.iter().copied().collect();
+        for id in report.gpu_wrote.iter().filter(|id| !in_sync.contains(id)) {
             let _ = cx.table.gpu_wrote(*id);
         }
-        for id in report
-            .deswizzled
-            .iter()
-            .chain(&report.mirrored)
-            .chain(&report.copied_back)
-        {
+        for id in &synced {
             let _ = cx.table.synced(*id);
         }
         self.note_report(&report);
