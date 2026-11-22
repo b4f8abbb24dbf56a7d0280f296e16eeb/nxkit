@@ -10,6 +10,11 @@
 //!
 //! An `<action>` is a name of `bind::action` (`a`, `zr`, `plus`, `dpad_up`, `ls_up`, `rs_left` and so on). A line that
 //! starts with `#` is a comment. The actions join those of the keyboard before the sticks are worked out.
+//!
+//! A file with a timeline command (`wait`, `press`, `release`, `stick`, or a `hold` of several buttons) is a timeline.
+//! Its lines run in order, and `hold` holds until a `release` (see `timeline.rs` for the commands). A recording of the
+//! `record` verb is a timeline. A `pulse` line of a timeline still runs from the start. When the text of the file
+//! changes, the timeline starts again.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -17,6 +22,8 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::bind::{Action, action};
+use crate::npad::{PLAYERS, RawKeys};
+use crate::timeline::{Runner, Step, parse_step};
 
 /// The file is read again when the last read is at least this old.
 const REREAD: Duration = Duration::from_millis(500);
@@ -80,10 +87,28 @@ fn parse_line(line: &str) -> Option<Entry> {
     words.next().is_none().then_some(entry)
 }
 
-/// The lines of a file text: the entries with their text (words joined by one space), and the lines that do not
-/// parse.
-pub(crate) fn parse(text: &str) -> (Vec<(String, Entry)>, Vec<String>) {
-    let mut entries = Vec::new();
+/// What a file text holds.
+pub(crate) struct Parsed {
+    /// The `hold` and `pulse` lines of a file that is not a timeline, or the `pulse` lines of a timeline. With their text
+    /// (words joined by one space).
+    pub(crate) entries: Vec<(String, Entry)>,
+    /// The commands of a timeline, in order. Empty when the file is not a timeline.
+    pub(crate) steps: Vec<Step>,
+    /// The lines that do not parse.
+    pub(crate) bad: Vec<String>,
+}
+
+/// One line before it is known whether the file is a timeline.
+enum Line {
+    Legacy(String, Entry),
+    /// A `hold`: one action is a legacy entry, and every hold is a step.
+    Hold(String, Option<Entry>, Step),
+    Step(Step),
+}
+
+/// The lines of a file text, separated by commas or lines.
+pub(crate) fn parse(text: &str) -> Parsed {
+    let mut lines = Vec::new();
     let mut bad = Vec::new();
     for line in text.split([',', '\n']) {
         let line = line.trim();
@@ -91,12 +116,37 @@ pub(crate) fn parse(text: &str) -> (Vec<(String, Entry)>, Vec<String>) {
             continue;
         }
         let norm = line.split_whitespace().collect::<Vec<_>>().join(" ");
-        match parse_line(line) {
-            Some(e) => entries.push((norm, e)),
+        let kind = norm.split(' ').next().unwrap_or("").to_ascii_lowercase();
+        let parsed = match kind.as_str() {
+            "pulse" => parse_line(line).map(|e| Line::Legacy(norm.clone(), e)),
+            "hold" => parse_step(line)
+                .ok()
+                .map(|s| Line::Hold(norm.clone(), parse_line(line), s)),
+            _ => parse_step(line).ok().map(Line::Step),
+        };
+        match parsed {
+            Some(l) => lines.push(l),
             None => bad.push(norm),
         }
     }
-    (entries, bad)
+    let timeline = lines
+        .iter()
+        .any(|l| matches!(l, Line::Step(_) | Line::Hold(_, None, _)));
+    let (mut entries, mut steps) = (Vec::new(), Vec::new());
+    for l in lines {
+        match l {
+            Line::Legacy(t, e) => entries.push((t, e)),
+            Line::Hold(_, _, s) if timeline => steps.push(s),
+            Line::Hold(t, Some(e), _) => entries.push((t, e)),
+            Line::Hold(..) => {}
+            Line::Step(s) => steps.push(s),
+        }
+    }
+    Parsed {
+        entries,
+        steps,
+        bad,
+    }
 }
 
 /// What was read last.
@@ -108,6 +158,10 @@ struct Cache {
     /// When this text was first read. The pulses count from it.
     since: Instant,
     entries: Vec<(String, Entry)>,
+    /// The timeline of the text, when it is one.
+    runner: Option<Runner>,
+    /// The message that the timeline ended was said.
+    ended: bool,
     /// What the last message named.
     shown: String,
     /// The bad lines that were reported.
@@ -133,23 +187,26 @@ impl ScriptFile {
         self.path.is_some()
     }
 
-    /// The actions held at `now`. `read` gives the text of the file (empty when it cannot be read) and is called at
-    /// most every 500 ms, and not at all when no file is named. `say` takes the messages.
-    pub(crate) fn held_at(
+    /// Reads the file when it is due, then runs `f` on the cache. `read` gives the text of the file (empty when it
+    /// cannot be read) and is called at most every 500 ms, and not at all when no file is named. `say` takes the
+    /// messages. A new text starts its timeline at `now` and `frame`.
+    fn with_cache<R>(
         &self,
         now: Instant,
+        frame: u64,
         read: impl FnOnce(&Path) -> String,
         mut say: impl FnMut(&str),
-    ) -> Vec<Action> {
-        let Some(path) = &self.path else {
-            return Vec::new();
-        };
+        f: impl FnOnce(&mut Cache, &mut dyn FnMut(&str)) -> R,
+    ) -> Option<R> {
+        let path = self.path.as_ref()?;
         let mut guard = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
         let cache = guard.get_or_insert_with(|| Cache {
             checked: None,
             text: String::new(),
             since: now,
             entries: Vec::new(),
+            runner: None,
+            ended: false,
             shown: "none".to_owned(),
             reported: HashSet::new(),
         });
@@ -160,13 +217,17 @@ impl ScriptFile {
             cache.checked = Some(now);
             let text = read(path);
             if text != cache.text {
-                let (entries, bad) = parse(&text);
-                for line in bad {
+                let parsed = parse(&text);
+                for line in parsed.bad {
                     if cache.reported.insert(line.clone()) {
                         say(&format!("nxkit-input: scripted input: skipped \"{line}\""));
                     }
                 }
-                let names: Vec<&str> = entries.iter().map(|(t, _)| t.as_str()).collect();
+                let mut names: Vec<String> =
+                    parsed.entries.iter().map(|(t, _)| t.clone()).collect();
+                if !parsed.steps.is_empty() {
+                    names.push(format!("timeline of {} steps", parsed.steps.len()));
+                }
                 let shown = if names.is_empty() {
                     "none".to_owned()
                 } else {
@@ -177,16 +238,58 @@ impl ScriptFile {
                     cache.shown = shown;
                 }
                 cache.text = text;
-                cache.entries = entries;
+                cache.entries = parsed.entries;
+                cache.runner =
+                    (!parsed.steps.is_empty()).then(|| Runner::new(parsed.steps, now, frame));
+                cache.ended = false;
                 cache.since = now;
             }
         }
-        let elapsed = now.saturating_duration_since(cache.since).as_millis() as u64;
-        cache
-            .entries
-            .iter()
-            .filter_map(|(_, e)| e.held(elapsed))
-            .collect()
+        Some(f(cache, &mut say))
+    }
+
+    /// The actions held at `now`: the `hold` and `pulse` lines of a file that is not a timeline, and the `pulse` lines
+    /// of a timeline.
+    pub(crate) fn held_at(
+        &self,
+        now: Instant,
+        frame: u64,
+        read: impl FnOnce(&Path) -> String,
+        say: impl FnMut(&str),
+    ) -> Vec<Action> {
+        self.with_cache(now, frame, read, say, |cache, _| {
+            let elapsed = now.saturating_duration_since(cache.since).as_millis() as u64;
+            cache
+                .entries
+                .iter()
+                .filter_map(|(_, e)| e.held(elapsed))
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    /// What the timeline of the file gives each player at `now`, with `frame` frames presented.
+    pub(crate) fn overlays_at(
+        &self,
+        now: Instant,
+        frame: u64,
+        read: impl FnOnce(&Path) -> String,
+        say: impl FnMut(&str),
+    ) -> [RawKeys; PLAYERS] {
+        self.with_cache(now, frame, read, say, |cache, say| {
+            let Some(runner) = cache.runner.as_mut() else {
+                return [RawKeys::default(); PLAYERS];
+            };
+            let out = runner.poll(now, frame);
+            if runner.done() && !cache.ended {
+                cache.ended = true;
+                say(&format!(
+                    "nxkit-input: scripted input: the timeline ended at frame {frame}"
+                ));
+            }
+            out
+        })
+        .unwrap_or([RawKeys::default(); PLAYERS])
     }
 }
 
@@ -204,6 +307,17 @@ pub(crate) fn active() -> bool {
 pub(crate) fn held(now: Instant) -> Vec<Action> {
     global().held_at(
         now,
+        crate::frame::frames(),
+        |p| std::fs::read_to_string(p).unwrap_or_default(),
+        |m| eprintln!("{m}"),
+    )
+}
+
+/// What the timeline of the input file gives each player at `now`. Nothing without the variable.
+pub(crate) fn overlays(now: Instant) -> [RawKeys; PLAYERS] {
+    global().overlays_at(
+        now,
+        crate::frame::frames(),
         |p| std::fs::read_to_string(p).unwrap_or_default(),
         |m| eprintln!("{m}"),
     )
@@ -218,6 +332,11 @@ mod tests {
 
     const A: Action = Action::Button(btn::A);
 
+    fn legacy(text: &str) -> (Vec<(String, Entry)>, Vec<String>) {
+        let p = parse(text);
+        (p.entries, p.bad)
+    }
+
     fn keys(name: &str) -> KeySet {
         let mut keys = KeySet::default();
         for s in sources(name).unwrap_or_default() {
@@ -229,11 +348,11 @@ mod tests {
     }
 
     #[test]
-    fn hold_and_pulse_lines_parse() {
-        let (e, bad) = parse("hold a");
+    fn hold_and_pulse_lines_legacy() {
+        let (e, bad) = legacy("hold a");
         assert_eq!(e[0].1, Entry::Hold(A));
         assert!(bad.is_empty());
-        let (e, _) = parse("pulse a 100 1500");
+        let (e, _) = legacy("pulse a 100 1500");
         assert_eq!(
             e[0].1,
             Entry::Pulse {
@@ -246,7 +365,7 @@ mod tests {
 
     #[test]
     fn several_entries_by_comma_or_line() {
-        let (e, bad) = parse("hold  zr, pulse b 50 400\nhold ls_up\n# a comment\n");
+        let (e, bad) = legacy("hold  zr, pulse b 50 400\nhold ls_up\n# a comment\n");
         let texts: Vec<&str> = e.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(texts, ["hold zr", "pulse b 50 400", "hold ls_up"]);
         assert_eq!(e[2].1, Entry::Hold(Action::LeftStick(Dir::Up)));
@@ -255,8 +374,8 @@ mod tests {
 
     #[test]
     fn bad_lines_are_skipped() {
-        let (e, bad) = parse(
-            "hold a, hold jump, pulse a 100, pulse a x 5, pulse a 1 0, hold walk, press a, hold a b, hold",
+        let (e, bad) = legacy(
+            "hold a, hold jump, pulse a 100, pulse a x 5, pulse a 1 0, hold walk, press, wait x, hold",
         );
         assert_eq!(e.len(), 1);
         assert_eq!(bad.len(), 8);
@@ -305,6 +424,7 @@ mod tests {
         let mut read = false;
         let held = f.held_at(
             Instant::now(),
+            0,
             |_| {
                 read = true;
                 "hold a".to_owned()
@@ -325,6 +445,7 @@ mod tests {
         let mut at = |ms: u64| {
             f.held_at(
                 t0 + Duration::from_millis(ms),
+                0,
                 |_| {
                     reads += 1;
                     "pulse a 100 1500".to_owned()
@@ -349,6 +470,7 @@ mod tests {
         let mut run = |ms: u64, text: &str| {
             f.held_at(
                 t0 + Duration::from_millis(ms),
+                0,
                 |_| text.to_owned(),
                 |m| said.push(m.to_owned()),
             )
@@ -366,6 +488,47 @@ mod tests {
                 "nxkit-input: scripted input: hold a, hold a",
                 "nxkit-input: scripted input: none",
             ]
+        );
+    }
+
+    #[test]
+    fn a_file_with_a_timeline_command_is_a_timeline() {
+        let p = parse("hold a\nwait 10\nrelease a\npulse b 5 50\nhold zr plus");
+        assert!(p.bad.is_empty());
+        assert_eq!(p.steps.len(), 4);
+        assert_eq!(p.entries.len(), 1);
+        // Without a timeline command a hold stays a legacy entry.
+        let p = parse("hold a, hold b, pulse x 1 9");
+        assert_eq!((p.steps.len(), p.entries.len()), (0, 3));
+        // A hold of two buttons has no legacy meaning.
+        assert_eq!(parse("hold a b").steps.len(), 1);
+    }
+
+    #[test]
+    fn the_timeline_of_a_file_runs_by_frames_and_restarts_when_the_text_changes() {
+        let f = file();
+        let t0 = Instant::now();
+        let text = "wait frames 2\nhold a\nwait frames 2\nrelease a";
+        let mut said = Vec::new();
+        let mut at = |frame: u64, text: &str| {
+            f.overlays_at(
+                t0 + Duration::from_millis(frame * 600),
+                frame,
+                |_| text.to_owned(),
+                |m| said.push(m.to_owned()),
+            )[0]
+            .buttons
+        };
+        // The timeline starts at frame 10, when the file is first read.
+        assert_eq!(at(10, text), 0);
+        assert_eq!(at(11, text), 0);
+        assert_eq!(at(12, text), btn::A);
+        assert_eq!(at(13, text), btn::A);
+        assert_eq!(at(14, text), 0);
+        assert_eq!(at(20, "hold a\nrelease zr"), btn::A);
+        assert_eq!(
+            said.last().map(String::as_str),
+            Some("nxkit-input: scripted input: the timeline ended at frame 20")
         );
     }
 }

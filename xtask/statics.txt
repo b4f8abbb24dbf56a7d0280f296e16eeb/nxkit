@@ -15,7 +15,7 @@ nxkit-rt: 67
 nxkit-save-sync: 2
 nxkit-svc-audio: 19
 nxkit-svc-fs: 4
-nxkit-svc-input: 13
+nxkit-svc-input: 16
 nxkit-svc-offline: 1
 nxkit-svc-pacing: 3
 nxkit-svc-system: 54

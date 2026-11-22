@@ -17,6 +17,7 @@ mod bind;
 mod config;
 mod deadzone;
 mod exports;
+mod frame;
 // The planners are used by the platform layer of macOS only.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod haptic_plan;
@@ -25,12 +26,14 @@ mod hd;
 mod input_map;
 mod ipc;
 mod keys;
+pub mod live;
 mod look;
 mod mac_keycodes;
 mod motion;
 mod npad;
 mod pointer;
 pub mod probe;
+mod record;
 mod rumble;
 mod script;
 mod seam;
@@ -40,6 +43,7 @@ mod slots;
 mod state;
 mod sys;
 mod system;
+mod timeline;
 mod touch;
 
 use std::sync::atomic::{AtomicBool, Ordering};
