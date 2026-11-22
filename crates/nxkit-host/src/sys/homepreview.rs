@@ -58,6 +58,61 @@ pub fn run(dir: &Path) -> Result<Vec<PathBuf>, String> {
             write(mtm, bounds, &view, &path)?;
             out.push(path);
         }
+        // The text input screen: empty with the game's guide, typed with the field's focus, and the controller on OK.
+        let rows = crate::textinput::rows(true);
+        let hints: [(&str, &str); 6] = [
+            ("a.circle", &t.key_type),
+            ("b.circle", &t.key_delete),
+            ("y.circle", &t.key_space),
+            ("l.button.roundedbottom.horizontal", &t.key_shift),
+            ("plus.circle", &t.ok),
+            ("minus.circle", &t.cancel),
+        ];
+        let request = |initial, pad: bool| homeviews::Keyboard {
+            title: "Wie heißt du?",
+            message: Some("Gib deinen Namen ein. Er erscheint im Spiel."),
+            guide: "Dein Name",
+            initial,
+            pad: pad.then(|| homeviews::PadKeys {
+                rows: &rows,
+                hints: &hints,
+            }),
+        };
+        let labels = [t.cancel.as_str(), t.ok.as_str()];
+        for (name, initial, focus, field) in [
+            ("keyboard-empty", "", None, true),
+            ("keyboard-typed", "Zijad", None, true),
+            ("keyboard-pad-ok", "Zijad", Some(homeviews::KEY_OK), false),
+        ] {
+            let card = homeviews::keyboard(mtm, bounds, &request(initial, false));
+            let n = crate::textinput::units(initial);
+            card.set_count(n, 10);
+            card.set_field_focus(field);
+            card.set_actions(mtm, labels, focus, crate::textinput::acceptable(initial, 1, 10));
+            let path = dir.join(format!("home-{name}-{tag}.png"));
+            write(mtm, bounds, &card.view, &path)?;
+            out.push(path);
+        }
+        // With a controller: the on-screen keyboard, the focus on a letter with shift on, and on OK.
+        for (name, initial, focus, shift) in [
+            ("keyboard-pad-keys", "", (2, 4), true),
+            ("keyboard-pad-keys-ok", "Zijad", (5, 1), false),
+        ] {
+            let card = homeviews::keyboard(mtm, bounds, &request(initial, true));
+            card.set_count(crate::textinput::units(initial), 10);
+            card.set_field_focus(true);
+            let on_actions = focus.0 == rows.len() - 1;
+            card.set_keys(mtm, &rows, (!on_actions).then_some(focus), shift, &t.key_space);
+            card.set_actions(
+                mtm,
+                labels,
+                on_actions.then_some(focus.1),
+                crate::textinput::acceptable(initial, 1, 10),
+            );
+            let path = dir.join(format!("home-{name}-{tag}.png"));
+            write(mtm, bounds, &card.view, &path)?;
+            out.push(path);
+        }
     }
     let card = super::loading::preview(mtm, "Super Mario Bros. Wonder", 1240, 3400);
     let bounds = card.frame();

@@ -429,6 +429,7 @@ impl FrameHooks for StopHooks {
         mouse::tick();
         super::pointer::tick();
         homeui::tick();
+        super::textinputui::tick();
         self.inner.display_tick(tick);
     }
 }
@@ -529,6 +530,7 @@ pub fn run(
     let env = crate::hostenv::host();
     super::pointer::install(window.clone(), env.cursor_hide, env.cursor_hidden);
     if let (Some(setup), Some(content)) = (cfg.home.clone(), content.as_ref()) {
+        super::textinputui::install(mtm, &window, content, events.clone(), setup.texts.clone());
         homeui::install(mtm, &window, content, events.clone(), setup);
     }
     present::install(window.clone(), over.is_some());
@@ -590,6 +592,7 @@ pub fn run(
     );
     ready()?;
     app.run();
+    super::textinputui::shutdown();
     homeui::shutdown();
     if fullscreen {
         fullscreen::observe_spaces(&delegate, false);

@@ -30,6 +30,7 @@ pub mod saveplace;
 pub mod savesync;
 pub mod settings;
 pub mod stop;
+pub mod textinput;
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]

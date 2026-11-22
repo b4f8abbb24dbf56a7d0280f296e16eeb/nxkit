@@ -402,9 +402,18 @@ A controller's Home button gets a menu and a quit prompt over the game, as the d
 - A controller without Home counts `-` and `+` held together. A and B are the buttons by their printed labels. The host asks GameController for the Home button (`preferredSystemGestureState`). macOS 27 gives it to the app when the Home button setting for apps lets the app decide.
 - While a screen is up, the game gets no controller, keyboard or mouse input. The host tells the game that it is out of focus, as under the console's HOME menu. It gets the input back once Home, A and B are up, so the B that closed a screen does not reach the game. A loss of the key focus closes whatever is shown.
 - Back to the launcher pauses the game in the background. The host tells the game that it is in the background, and the window leaves full screen. The launcher gets the activation and the application hides. A game that keeps running in the background focus (most pause there, as on the console) keeps its sound. The game comes back when it is active again (the launcher activates it, the Dock, Command-Tab), when it is shown again, or on the distributed notification `org.nxkit.resume.<pid>`. It goes back to full screen if it was there. `org.nxkit.quit.<pid>` quits it. The host posts `org.nxkit.paused.<pid>` and `org.nxkit.resumed.<pid>`.
-- `NXKIT_HOME_MENU=0` turns the menu off, and `NXKIT_HOME_QUIT=0` turns the hold off. `NXKIT_HOME_TEXT` gives the texts in the player's language, one per line. The order is that of the dm front end's `DM_HOME_QUIT_TEXT`: the hold, the prompt's title, its note, Quit, Cancel, Resume, Back to the launcher and the menu's title. A missing or empty line is the English one.
+- `NXKIT_HOME_MENU=0` turns the menu off, and `NXKIT_HOME_QUIT=0` turns the hold off. `NXKIT_HOME_TEXT` gives the texts in the player's language, one per line. The order is that of the dm front end's `DM_HOME_QUIT_TEXT`: the hold, the prompt's title, its note, Quit, Cancel, Resume, Back to the launcher and the menu's title, then the OK and the title of the text input screen and the hints of its on-screen keyboard (type, delete, space, shift). A missing or empty line is the English one.
 
 With the Home button on, the window's content view is a plain view that holds the game's view (its `CAMetalLayer`) and the screens above it. Under the Home screens the game's picture is blurred (`NSVisualEffectView` within the window) and dimmed.
+
+### The software keyboard
+
+A game that shows the console's keyboard (`nn::swkbd`, the `text_input` seam) waits while the host shows a text input screen over the game (`textinput.rs`, `sys/textinputui.rs`), in the look of the Home screens: the question card with the game's header and sub text, a field in the look of NX2Apple's player and rename sheets at the size of the console mode, a count of the characters, Cancel and OK. The lengths of the request count UTF-16 units, as on the console; OK stays quiet while the text is shorter than the game's minimum, and a longer text than its maximum is cut.
+
+- The Mac keyboard always types. Return sends, Escape cancels, a click takes a capsule.
+- While a controller is connected the card shows an on-screen keyboard (QWERTZ with the umlauts for a German system language, else QWERTY) and the controllers belong to the screen: the d-pad or the stick moves the focus (held, it repeats), A types the focused key, B deletes, Y types a space, L is shift, `+` goes to OK and sends from there, `-` cancels. Shift is on at the start of an empty field and goes off after a letter. A controller that connects or goes builds the card again with the text typed so far.
+- The screen needs the overlay of the Home button (the content view above the game). Without it the keyboard stops the game with a message.
+- `nxkit-host home-preview <folder>` draws the screen (empty, typed, the controller's focus, the on-screen keyboard) next to the Home screens.
 
 ### Over a launcher
 

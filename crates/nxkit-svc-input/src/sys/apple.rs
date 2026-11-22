@@ -384,8 +384,15 @@ impl Platform {
                     down_opt(g.buttonOptions()),
                     down(&g.buttonMenu()),
                 );
+                out.connected = true;
                 out.a |= down(&g.buttonA());
                 out.b |= down(&g.buttonB());
+                out.x |= down(&g.buttonX());
+                out.y |= down(&g.buttonY());
+                out.plus |= down(&g.buttonMenu());
+                out.minus |= down_opt(g.buttonOptions());
+                out.l |= down(&g.leftShoulder());
+                out.r |= down(&g.rightShoulder());
                 out.up |= down(&dpad.up());
                 out.down |= down(&dpad.down());
                 out.left |= down(&dpad.left());

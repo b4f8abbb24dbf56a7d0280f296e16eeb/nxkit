@@ -57,6 +57,20 @@ pub struct Buttons {
     pub left: bool,
     /// Right.
     pub right: bool,
+    /// The button labelled X.
+    pub x: bool,
+    /// The button labelled Y.
+    pub y: bool,
+    /// `+`.
+    pub plus: bool,
+    /// `-`.
+    pub minus: bool,
+    /// The left shoulder button.
+    pub l: bool,
+    /// The right shoulder button.
+    pub r: bool,
+    /// At least one controller is connected.
+    pub connected: bool,
 }
 
 /// What the host turned on.
@@ -294,7 +308,8 @@ impl HomeMenu {
 
 /// The texts of the screens, in the order of the lines of `NXKIT_HOME_TEXT` (the order of the dm front end's
 /// `DM_HOME_QUIT_TEXT`, so a launcher passes the same lines): hold, title, note, quit, cancel, resume, launcher, menu
-/// title, then the OK and the title of the text input screen. An empty or missing line takes the English default.
+/// title, then the OK and the title of the text input screen and the hints of its on-screen keyboard (type, delete,
+/// space, shift). An empty or missing line takes the English default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Texts {
     /// The hold indicator.
@@ -313,6 +328,18 @@ pub struct Texts {
     pub launcher: String,
     /// The menu's title.
     pub menu_title: String,
+    /// The confirm action of the text input screen (`textinput.rs`).
+    pub ok: String,
+    /// The title of the text input screen when the game gives no header.
+    pub input: String,
+    /// The hint of A on the on-screen keyboard: types the focused key.
+    pub key_type: String,
+    /// The hint of B: deletes.
+    pub key_delete: String,
+    /// The hint of Y, and the label of the space bar.
+    pub key_space: String,
+    /// The hint of L: shift.
+    pub key_shift: String,
 }
 
 impl Texts {
@@ -335,6 +362,12 @@ impl Texts {
             resume: pick(5, "Resume".into()),
             launcher: pick(6, "Back to the launcher".into()),
             menu_title: pick(7, game.to_owned()),
+            ok: pick(8, "OK".into()),
+            input: pick(9, "Enter text".into()),
+            key_type: pick(10, "Type".into()),
+            key_delete: pick(11, "Delete".into()),
+            key_space: pick(12, "Space".into()),
+            key_shift: pick(13, "Shift".into()),
         }
     }
 }
@@ -356,6 +389,13 @@ mod tests {
         down: false,
         left: false,
         right: false,
+        x: false,
+        y: false,
+        plus: false,
+        minus: false,
+        l: false,
+        r: false,
+        connected: true,
     };
     const NONE: Buttons = Buttons {
         home: false,
@@ -365,6 +405,13 @@ mod tests {
         down: false,
         left: false,
         right: false,
+        x: false,
+        y: false,
+        plus: false,
+        minus: false,
+        l: false,
+        r: false,
+        connected: true,
     };
 
     fn with(f: impl FnOnce(&mut Buttons)) -> Buttons {

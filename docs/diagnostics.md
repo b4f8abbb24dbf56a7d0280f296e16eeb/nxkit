@@ -77,7 +77,7 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_HOME_MENU=0` | No Home menu on a short press of a controller's Home button (`docs/nxkit-host.md`, The Home button). |
 | `NXKIT_HOME_QUIT=0` | No quit prompt when Home is held for 2 seconds. |
 | `NXKIT_LAUNCHER_BUNDLE_ID` | The bundle identifier of the launcher that started the game. The Home menu gets Back to the launcher, which pauses the game in the background and activates that application. |
-| `NXKIT_HOME_TEXT` | The texts of the Home menu and the quit prompt in the player's language, one per line: hold, title, note, quit, cancel, resume, back to the launcher, menu title. |
+| `NXKIT_HOME_TEXT` | The texts of the Home menu, the quit prompt and the text input screen in the player's language, one per line: hold, title, note, quit, cancel, resume, back to the launcher, menu title, OK, the input title, and the keyboard hints type, delete, space, shift. |
 | `NXKIT_PAUSE_UNFOCUSED=1` | Reports the loss of the key focus to the game (it pauses, as on the console). By default the game keeps running when another window gets the focus. |
 | `NXKIT_PIPELINE_ASYNC=0` | Builds a missing render pipeline in the encode, as before. By default it compiles on a background thread and the draw is left out until it is ready (`skip.pending`). |
 | `NXKIT_PIPELINE_THREADS=<n>` | The threads that compile pipelines in the background (default half the cores, 2 to 8). They take the job that a draw of the latest frame asked for first. |

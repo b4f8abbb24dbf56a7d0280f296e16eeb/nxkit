@@ -482,6 +482,13 @@ pub fn home_buttons() -> crate::home::Buttons {
         down: b.down,
         left: b.left,
         right: b.right,
+        x: b.x,
+        y: b.y,
+        plus: b.plus,
+        minus: b.minus,
+        l: b.l,
+        r: b.r,
+        connected: b.connected,
     }
 }
 

@@ -25,6 +25,7 @@ mod pointer;
 mod prefs;
 mod present;
 mod screen;
+mod textinputui;
 pub mod vm;
 
 pub use dylib::{Dylib, Image};
