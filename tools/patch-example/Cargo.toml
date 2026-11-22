@@ -1,0 +1,21 @@
+[package]
+name = "patch-example"
+description = "An example patch module of the nxkit host (W37): it skips the draws of one fragment program and logs each render pass"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The patch is its own workspace, so it is not built with the host and has its own target folder and lock file. It
+# builds in seconds. `tools/nxkit-patch new NAME` copies this folder. See "Patch modules" in docs/diagnostics.md.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The path is relative to this folder. `tools/nxkit-patch new` writes the right one for the copy.
+nxkit-patch-abi = { path = "../../crates/nxkit-patch-abi" }
+
+[profile.release]
+opt-level = 2
+panic = "abort"
