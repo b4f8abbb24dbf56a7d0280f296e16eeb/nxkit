@@ -1,10 +1,16 @@
 //! Barriers only where data flows (R19).
 //!
 //! Metal 4 runs the passes of a queue without order unless a barrier says otherwise. The planner walks the passes in
-//! order and remembers for each texture which stages wrote it and which stages read it since the last barrier that
-//! covered them. A pass gets one barrier before its first command when it reads a texture that an earlier pass wrote,
-//! or writes a texture that an earlier pass wrote or read. The barrier names the stages that did the earlier work and
-//! the stages of the pass. All other pass boundaries get no barrier and count as avoided.
+//! order and remembers for each texture the stages of its last writer and the stages that read it since. A pass gets
+//! one barrier before its first command when it reads a texture that an earlier pass wrote, or writes a texture that
+//! an earlier pass wrote or read. The barrier names the stages that did the earlier work and the stages of the pass.
+//! All other pass boundaries get no barrier and count as avoided.
+//!
+//! A barrier holds back only the pass it stands in (`barrierAfterQueueStages` is a consumer barrier). A pass after it
+//! without a barrier of its own may run beside the earlier work, so a barrier covers no hazard for later passes: each
+//! pass that touches a texture waits for its writer itself. A writer waited for every earlier access of the texture,
+//! so after it only its own write counts. The planner once dropped every hazard that any barrier waited for, and
+//! Pokémon Pokopia then showed tiles of earlier frames where a later pass read a texture without a barrier.
 //!
 //! A barrier after queue stages also covers the passes of earlier command buffers on the same queue. This is assumed
 //! from the Metal 4 documentation and is not verified on hardware.
@@ -78,6 +84,67 @@ mod tests {
         assert_eq!(dep.after, Stages::FRAGMENT);
         assert_eq!(dep.before, Stages::DISPATCH);
         assert_eq!(dep.visibility, Visibility::Device);
+    }
+
+    #[test]
+    fn every_reader_after_a_write_waits_for_the_writer_itself() {
+        // A dispatch writes texture 0, and two later dispatches read it. A barrier holds back only its own pass, so the
+        // second reader needs a barrier too: the first reader's barrier does not order it after the write.
+        let t = Span { start: 0, len: 1 };
+        let frame = Frame {
+            cmds: vec![
+                Cmd::Dispatch {
+                    reads: Span::default(),
+                    writes: t,
+                },
+                Cmd::Barrier(0),
+                Cmd::Dispatch {
+                    reads: t,
+                    writes: Span::default(),
+                },
+                Cmd::Barrier(0),
+                Cmd::Dispatch {
+                    reads: t,
+                    writes: Span::default(),
+                },
+            ],
+            lists: vec![TexId(0)],
+            ..Frame::default()
+        };
+        let mut table = ResourceTable::new();
+        let desc = nxkit_nvn::layout::TextureDesc {
+            target: nxkit_nvn::layout::Target::D2,
+            format: 0x25,
+            flags: 0,
+            samples: 0,
+            width: 4,
+            height: 4,
+            depth: 1,
+            levels: 1,
+            stride: 0,
+            packaged_block: None,
+        };
+        table
+            .create(desc, nxkit_nvn::space::GpuAddr::new(0x10_0000).unwrap())
+            .unwrap();
+        let mut plan = PassPlan::default();
+        Analyser::new().analyse(&frame, &table, &mut plan).unwrap();
+        let computes: Vec<usize> = plan
+            .passes
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.kind == PassKind::Compute)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(computes.len(), 3, "the barriers keep the dispatches apart");
+        let mut state = BarrierState::default();
+        let barriers = state.plan(&frame, &plan, &FastMap::default(), &[], &[], &FastSet::default());
+        assert!(barriers.before[computes[0]].is_none());
+        for &reader in &computes[1..] {
+            let dep = barriers.before[reader].expect("each reader waits for the write");
+            assert_eq!(dep.after, Stages::DISPATCH);
+            assert_eq!(dep.before, Stages::DISPATCH);
+        }
     }
 
     #[test]
@@ -407,7 +474,6 @@ impl BarrierState {
             }
             first = false;
             if let Some(d) = &dep {
-                self.cover(d.after);
                 if self.buffer_write.is_some_and(|w| (d.after | w) == d.after) {
                     self.buffer_write = None;
                 }
@@ -430,7 +496,10 @@ impl BarrierState {
                     PassKind::Render => Stages::FRAGMENT,
                     _ => mine,
                 };
-                h.write = join(h.write, stages);
+                // The pass waited for every earlier write and read of the texture (a write is a hazard for both), so
+                // from now on a later pass waits for this write only.
+                h.write = Some(stages);
+                h.read = None;
             }
             for id in &t.reads {
                 let id = aliases.get(id).unwrap_or(id);
@@ -442,19 +511,7 @@ impl BarrierState {
         }
         out
     }
+            // A barrier holds back the pass it stands in, not the passes after it (a consumer barrier), so it covers
+            // no hazard for them: every later pass that touches the texture waits for its writer itself.
 
-    /// Drops the hazards that a barrier after `stages` covers.
-    fn cover(&mut self, stages: Stages) {
-        let covered = |s: Option<Stages>| s.is_none_or(|s| (s | stages) == stages);
-        self.pending
-            .retain(|_, h| !(covered(h.write) && covered(h.read)));
-        for h in self.pending.values_mut() {
-            if covered(h.write) {
-                h.write = None;
-            }
-            if covered(h.read) {
-                h.read = None;
-            }
-        }
-    }
 }
