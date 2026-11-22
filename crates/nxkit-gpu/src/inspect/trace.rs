@@ -47,7 +47,7 @@ pub fn gpu_trace(frames: u32, path: Option<PathBuf>) -> Result<TraceTicket, Stri
     if !nxkit_metal::gpu_trace_supported() {
         return Err(
             "GPU trace capture is not supported in this process: Metal makes captures only when the \
-             process started with MTL_CAPTURE_ENABLED=1 (the host sets it unless NXKIT_GPU_CAPTURE=0)"
+             process started with MTL_CAPTURE_ENABLED=1 (start the game with NXKIT_GPU_CAPTURE=1)"
                 .to_owned(),
         );
     }

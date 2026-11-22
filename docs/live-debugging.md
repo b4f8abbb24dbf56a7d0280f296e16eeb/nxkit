@@ -81,7 +81,7 @@ again, so the lines print again after a new `set`.
 tools/nxkit-ctl gputrace 1
 ```
 
-Open the `.gputrace` file in Xcode and use Pixel History. The render passes have labels with their pass index and
+Start the game with `NXKIT_GPU_CAPTURE=1` for this. Open the `.gputrace` file in Xcode and use Pixel History. The render passes have labels with their pass index and
 their fragment keys, so a pass maps to the `NXKIT_DIAG` lines and to the capture manifest.
 
 ### Find a hitch or a slow frame

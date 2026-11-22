@@ -33,7 +33,7 @@ pub fn gpu_trace_start(ctx: &Context, path: &Path) -> Result<(), String> {
     if !m.supportsDestination(MTLCaptureDestination::GPUTraceDocument) {
         return Err(
             "GPU trace capture is not supported: the process started without MTL_CAPTURE_ENABLED=1 \
-             (NXKIT_GPU_CAPTURE=0 turns it off) or the system refuses it"
+             (start the game with NXKIT_GPU_CAPTURE=1) or the system refuses it"
                 .to_owned(),
         );
     }

@@ -259,7 +259,7 @@ The capture covers the whole device. It holds every command buffer of every enco
 
 While the capture runs, each render pass gets a label `r<index> <size> <format> d<draws> fs <keys>`. The keys are the fragment program keys of its draws, as in the `NXKIT_DIAG` output. So you find a pass of the trace in the log. The labels are on for the captured frames only. `NXKIT_GPU_LABELS=1` turns them on for all frames.
 
-Metal makes a capture only when the process starts with `MTL_CAPTURE_ENABLED=1` in its environment. The host sets it before it makes the first Metal device, as it does for `MTL_HUD_ENABLED`. `NXKIT_GPU_CAPTURE=0` turns it off. Then `gputrace` fails with the message that capture is not supported. The cost of the setting for the frame rate is not measured yet. Compare `NXKIT_GPU_CAPTURE=0` with the default in the same scene before you rely on it.
+Metal makes a capture only when the process starts with `MTL_CAPTURE_ENABLED=1` in its environment. Start the game with `NXKIT_GPU_CAPTURE=1`. Then the host sets it before it makes the first Metal device, as it does for `MTL_HUD_ENABLED`. Without it, `gputrace` fails with the message that capture is not supported. The setting is off by default. With Metal's capture layer, a pipeline compile whose task options name lookup archives crashed in the capture wrapper of the compiler (Pokémon Pokopia, a new pipeline of the `paint` knob). Thus, while the capture layer is on, the pipeline cache gives the compiles no lookup archives. It still asks the archives directly, so the start can compile more pipelines than without the layer.
 
 ## Categories (`NXKIT_DIAG`)
 

@@ -167,6 +167,8 @@ pub struct PipelineCache {
     /// Pipelines inserted since the serializer was made.
     captured: AtomicU64,
     options: Retained<MTL4CompilerTaskOptions>,
+    /// Metal's capture layer is on: the compiles get no lookup archives (see `new`).
+    capture_layer: bool,
     loaded_archive: bool,
     /// [`ArchiveConfig::compile_bases`].
     compile_bases: bool,
@@ -227,7 +229,20 @@ impl PipelineCache {
             all.extend(runtime.iter().map(|o| o.archive.clone()));
             options.setLookupArchives(Some(&NSArray::from_retained_slice(&all)));
         }
+        // With Metal's capture layer (`MTL_CAPTURE_ENABLED=1`, `NXKIT_GPU_CAPTURE=1`) a compile whose task options
+        // name lookup archives crashes in the capture wrapper of the compiler (measured in Pokémon Pokopia: a nil in
+        // `convertBinaryArchives`). Then the compiles get no lookup archives. The archives are still asked directly.
+        let capture_layer = crate::gputrace::gpu_trace_supported();
+        let options = if capture_layer {
+            eprintln!(
+                "nxkit-metal: the capture layer is on, so the pipeline compiles get no lookup archives"
+            );
+            MTL4CompilerTaskOptions::new()
+        } else {
+            options
+        };
         Ok(Self {
+            capture_layer,
             current: RwLock::new(Arc::new(first)),
             retired: Mutex::new(Vec::new()),
             ctx: ctx.clone(),
@@ -317,6 +332,7 @@ impl PipelineCache {
         let options = self
             .shards
             .as_ref()
+            .filter(|_| !self.capture_layer)
             .and_then(|s| s.compute_options(lib, function));
         let raw = self
             .generation()
