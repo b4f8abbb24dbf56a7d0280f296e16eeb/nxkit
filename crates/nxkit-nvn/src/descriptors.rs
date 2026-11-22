@@ -1,7 +1,10 @@
 //! The texture pool and the sampler pool.
 //!
 //! The game registers a texture in a slot of a texture pool and gets a handle: the texture id in the low 20 bits and
-//! the sampler id above them (`nvnDeviceGetTextureHandle`). The ids of all pools share one index space.
+//! the sampler id in the 12 bits above them (`nvnDeviceGetTextureHandle`). The ids of all pools share one index space,
+//! and a handle that the host has moved into it ([`crate::record::adjust_handle`]) holds the sampler id in the bits
+//! from 20 up to [`MAX_SAMPLER_ID`]: on the console each sampler pool has ids up to 4095, and a game can make several
+//! (Xenoblade Chronicles 3: 4096 and 2048).
 //! A draw names textures by handle, so the front end resolves a handle to a texture of the resource table.
 
 use crate::error::{NvnError, Result};
@@ -11,8 +14,8 @@ use crate::tic::{HEADER_BYTES, TextureView, Tic, Tsc};
 
 /// The largest texture id that a handle can hold.
 pub const MAX_TEXTURE_ID: u32 = (1 << 20) - 1;
-/// The largest sampler id that a handle can hold.
-pub const MAX_SAMPLER_ID: u32 = (1 << 12) - 1;
+/// The largest sampler id of the id space of all sampler pools.
+pub const MAX_SAMPLER_ID: u32 = (1 << 16) - 1;
 
 /// The id range of one pool and the memory that holds its headers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -333,6 +336,11 @@ mod tests {
         assert!(d.add_texture_pool(MAX_TEXTURE_ID, 2, m).is_err());
         assert!(d.add_sampler_pool(MAX_SAMPLER_ID, 1, m).is_ok());
         assert!(d.add_sampler_pool(MAX_SAMPLER_ID, 1, m).is_err());
+        // two full pools of the console fit
+        d.add_sampler_pool(0, 4096, m).unwrap();
+        d.add_sampler_pool(4096, 2048, m).unwrap();
+        let h = Descriptors::handle(0, 4096 + 7);
+        assert_eq!(((h >> 20) & u64::from(MAX_SAMPLER_ID)) as u32, 4103);
         assert_eq!(d.texture_pool_of(120).unwrap().base, 100);
         assert!(d.texture_pool_of(150).is_none());
     }

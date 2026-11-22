@@ -40,7 +40,7 @@ fn the_head_of_each_table_holds_its_bitmap_and_n_follows_the_highest_published_i
     let mut b = Bindless::new(&ctx).unwrap();
     let [tex, samp, tex_seen, samp_seen] = b.pool_buffers(0).try_into().ok().unwrap();
     assert_eq!(tex_seen.len(), 131072);
-    assert_eq!(samp_seen.len(), 512);
+    assert_eq!(samp_seen.len(), 8192);
     assert_eq!(b.seen(), (tex_seen.gpu_address(), samp_seen.gpu_address()));
     assert_eq!(long(&tex, 8), tex_seen.gpu_address());
     assert_eq!(long(&samp, 8), samp_seen.gpu_address());

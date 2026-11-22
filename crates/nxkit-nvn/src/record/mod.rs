@@ -417,14 +417,16 @@ impl Record {
     }
 }
 
-/// Moves the ids of a handle into the descriptor table of a command buffer. The texture id is bits 0 to 19, the
-/// sampler id bits 20 to 31. An id of 0 means no descriptor and stays 0. `tex` and `samp` say which ids move.
+/// Moves the ids of a handle into the descriptor table of a command buffer. The game's texture id is bits 0 to 19,
+/// its sampler id bits 20 to 31. The moved sampler id can be larger than 12 bits: it takes the bits from 20 up
+/// ([`crate::descriptors::MAX_SAMPLER_ID`]). An id of 0 means no descriptor and stays 0. `tex` and `samp` say which ids
+/// move.
 pub fn adjust_handle(h: u64, tex_base: u32, samp_base: u32, tex: bool, samp: bool) -> u64 {
     let h = h as u32;
     let (t, s) = (h & 0xf_ffff, h >> 20);
     let t = if tex && t != 0 { t + tex_base } else { t };
     let s = if samp && s != 0 { s + samp_base } else { s };
-    u64::from(s << 20 | t & 0xf_ffff)
+    u64::from(s) << 20 | u64::from(t & 0xf_ffff)
 }
 
 /// The handle `k` of a [`Record::BindTexturesDeferred`] as guest memory holds it now: the raw value at its address

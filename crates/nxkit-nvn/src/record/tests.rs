@@ -170,3 +170,11 @@ fn bad_records_in_guest_memory_are_errors() {
         assert!(Record::read(&m, 0).is_err(), "{op} {size}");
     }
 }
+
+#[test]
+fn a_sampler_id_of_a_second_pool_keeps_its_bits_above_4095() {
+    // Xenoblade Chronicles 3: a second sampler pool from 4096 on
+    let h = 5 | 7 << 20;
+    assert_eq!(adjust_handle(h, 0, 4096, true, true), 5 | 4103 << 20);
+    assert_eq!(adjust_handle(5, 0, 4096, true, true), 5);
+}
