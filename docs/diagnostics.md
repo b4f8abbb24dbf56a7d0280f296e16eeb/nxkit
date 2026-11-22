@@ -18,7 +18,7 @@ The code is in `nxkit_nvn::diag` (the shared `NXKIT_DIAG` parser and the health 
 | `NXKIT_WATCH_TEX` | Comma separated texture ids. The encoder prints the passes that render into them and the copies that touch them (at most 40 each). |
 | `NXKIT_DIAG_WATCH` | With `NXKIT_DIAG=tiny`: `0xADDR:LEN,0xADDR:LEN` (GPU addresses, LEN in bytes, at most 512). On each sampled frame, after the frame completed, the guest memory of each range is printed as `DIAG tiny watch 0x.. f32 [..] hex [..]`. |
 | `NXKIT_WATCH_ADDR` | A GPU address in hex. The decoder prints the texture that each record word at this address resolves to (at most 30). There is no default address. |
-| `NXKIT_CRASH_REPORT=0` | Turns off the crash report. By default a fatal `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE` or `SIGTRAP` prints to stderr the address, the thread, the registers, the frame pointer chain (guest frames as `main+0x...`, host frames with their symbol) and the guest module ranges, then ends the process as before (status 139 for a `SIGSEGV`). |
+| `NXKIT_CRASH_REPORT=0` | Turns off the crash report. By default a fatal `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE`, `SIGTRAP` or `SIGABRT` prints to stderr the address, the thread, the registers, the frame pointer chain (guest frames as `main+0x...`, host frames with their symbol) and the guest module ranges, then ends the process as before (status 139 for a `SIGSEGV`). |
 | `<NXKIT_DIAG_DIR>/nobar` | A file with `lo hi`. The passes in `[lo, hi)` get a full barrier from all earlier work. Use it to bisect a missing barrier. It is read every frame. |
 
 The variables `NXKIT_ANE_DUMP`, `NXKIT_ANE_STUDY`, `NXKIT_COREML_PACKAGE`, `NXKIT_NDSR_PACK` and `NXKIT_NDVE_DAT` belong to ignored tests and are not read by the host.

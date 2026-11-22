@@ -11,6 +11,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   `nvnSamplerPoolInitialize` with `ids above the handle limit`. It now reaches the title menu.
 - A texture buffer in a texture slot (`tbuf` of the shader reflection) is bound as a sampled texture buffer. The
   programs that read one were left out. OCTOPATH TRAVELER II showed no map on the character selection.
+- The crash report covers `SIGABRT`. When the runtime ended the game with `abort`, the log line that said why stayed
+  in the log pipe and the process ended without a word.
 - A stage has 128 separate textures and 128 separate samplers, as the shaders' tables hold (#51). The runtime took
   32 of each and ended the game at `nvnCommandBufferBindSeparateTexture` with index 32. OCTOPATH TRAVELER II
   stopped there about a minute after the start.

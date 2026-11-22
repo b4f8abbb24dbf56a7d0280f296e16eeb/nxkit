@@ -1,4 +1,4 @@
-//! The report of a fatal signal: `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE` and `SIGTRAP`.
+//! The report of a fatal signal: `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE`, `SIGTRAP` and `SIGABRT`.
 //!
 //! Without it a fault ends the host with status 139 and no word: the crash reporter of macOS writes no report for
 //! most of them (the guest code is mapped by hand, outside dyld). The handler writes one block to stderr: the signal,
@@ -7,6 +7,10 @@
 //! and symbol that `dladdr` names. Then it puts back the handler it found (the stack overflow check of Rust's
 //! runtime, or the default) and returns, so the fault happens again and ends the process as before, with the same
 //! status. `NXKIT_CRASH_REPORT=0` installs nothing.
+//!
+//! `SIGABRT` comes from `abort`, which the runtime calls after it logged why (`nxkit-rt`'s `fatal`). The handler lets
+//! the log pipe write that line first. When the handler returns, `abort` raises the signal again with the default
+//! action.
 //!
 //! The handler allocates nothing and formats into a buffer on its stack. It reads the frames through
 //! `mach_vm_read_overwrite`, which fails instead of faulting on an unreadable address. `dladdr` takes the lock of
@@ -18,15 +22,17 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The signals the handler reports.
-const SIGNALS: [(c_int, &str); 5] = [
+const SIGNALS: [(c_int, &str); 6] = [
     (SIGSEGV, "SIGSEGV"),
     (SIGBUS, "SIGBUS"),
     (SIGILL, "SIGILL"),
     (SIGFPE, "SIGFPE"),
     (SIGTRAP, "SIGTRAP"),
+    (SIGABRT, "SIGABRT"),
 ];
 const SIGILL: c_int = 4;
 const SIGTRAP: c_int = 5;
+const SIGABRT: c_int = 6;
 const SIGFPE: c_int = 8;
 const SIGBUS: c_int = 10;
 const SIGSEGV: c_int = 11;
