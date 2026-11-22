@@ -31,8 +31,8 @@ pub fn set_utility() {
 }
 
 /// Puts the calling thread in the user-initiated QoS class: below the threads that encode a frame, above background
-/// work. For the compile of a pipeline that draws of the frame on screen wait for. The class carries over to the
-/// system's shader compiler service. At the utility class, that service runs on the efficiency cores.
+/// work. Use it for the compile of a pipeline that a draw of the frame on screen waits for. The class carries over
+/// to the system's shader compiler service. At the utility class, that service runs on the efficiency cores.
 pub fn set_user_initiated() {
     #[cfg(target_vendor = "apple")]
     {

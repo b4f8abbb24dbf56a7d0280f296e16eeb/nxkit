@@ -184,8 +184,8 @@ Count:
      that the value is not in `[GUEST_VA_BASE, GUEST_VA_MAX)`. A hit is an error (`MetalError::Invalid("a guest
      address reached Metal")`) and a counted skip with the address. Two compares per bind.
   3. **Collision check.** Every Metal allocation that hands out a `gpuAddress` (`DataBuffer`, `Scratch` chunks,
-     `GuestMemory`, heaps) asserts once at creation that it lies outside the window. If Metal ever does hand out such
-     an address, the window moves. The check says so at once.
+     `GuestMemory`, heaps) asserts once at creation that it lies outside the window. If Metal ever hands out an address
+     in the window, the window must move. The check reports this at once.
 - A newtype for real addresses through the whole command layer was considered. It would touch every `u64` of
   `RenderCommand`, `ComputeCommand`, `Sink::put` and `Scratch::push`. The type swap of `guest` plus the tripwire catch
   the same misses for a fraction of the churn. Recommended: no newtype.

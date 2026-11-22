@@ -14,7 +14,7 @@
 //! of each replaced draw. Each replaced draw is the first draw of its pass, so the replacement goes before the pass.
 //!
 //! The scaler, its own textures, the pipelines and the counters live in [`Tupscale`] behind a mutex. MetalFX keeps the
-//! history in the scaler. A new scaler, a frame that did not run before, or a camera cut resets it.
+//! history in the scaler. A new scaler, a camera cut, or a frame after a frame without a run of the scaler resets it.
 
 mod find;
 mod make;
