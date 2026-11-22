@@ -1,5 +1,5 @@
 //! Opt-in Mac producer built on the same title-independent analysis used by other targets.
-use super::{Say, analysis, auto_shaders, bundle, extract, graphics, io, link, stage};
+use super::{Say, analysis, auto_shaders, bundle, extract, io, link, stage};
 use crate::Args;
 use std::path::Path;
 
@@ -100,14 +100,27 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             Ok((analyzed, note))
         },
     )?;
-    // A game on Vulkan or OpenGL would otherwise be built as an NVN game and fail in a way that names nothing.
-    graphics::generic_supported(graphics::detect(&analyzed.modules), game.title_id)
-        .map_err(|e| crate::exit::fail(4, e))?;
+    if analyzed.graphics == nxtitle::GraphicsApi::Vulkan {
+        return Err(crate::exit::fail(
+            4,
+            format!(
+                "unsupported: the game {:016X} renders with Vulkan, which the generic path does not build yet",
+                game.title_id
+            ),
+        ));
+    }
     let shaders = stage(
         p,
         "shaders",
         "discover and translate shaders for macOS",
         || {
+            // Only a game on NVN has NVN shaders to split and translate
+            if analyzed.graphics != nxtitle::GraphicsApi::Nvn {
+                return Ok((
+                    vec![],
+                    format!("none: the game renders with {}", analyzed.graphics.id()),
+                ));
+            }
             let files = auto_shaders::discover(&game.modules, &game.files, false)?;
             let count = files
                 .iter()

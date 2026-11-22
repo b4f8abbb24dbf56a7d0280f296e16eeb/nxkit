@@ -27,8 +27,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nxb build` builds a game without a title module on the generic path of `--auto-analyze` on its own, with a warning in
   the log (#54). It was an error with exit code 4. The path reads the modules, build IDs, NPDM and NVN names from the
   game and applies the SDK-wide rules (`sdk_rules.toml`, matched by function fingerprint) to the `sdk` module. The game
-  has no title patches and can fail to run. The path finds the graphics API in the modules: a game on Vulkan or OpenGL
-  stops with exit code 4 and a note, where it was built as an NVN game.
+  has no title patches and can fail to run. The path finds the graphics API in the modules (`nvnBootstrapLoader`,
+  `vkCreateInstance`, the OpenGL entry points) and writes it into `game.json`. A game on OpenGL builds with no shader
+  step, and the host has no OpenGL layer to run it yet.
 
 ## 0.15.2 - 2026-11-22
 

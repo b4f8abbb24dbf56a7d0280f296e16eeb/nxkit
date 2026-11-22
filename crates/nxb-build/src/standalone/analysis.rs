@@ -1,6 +1,7 @@
 //! Target-independent facts and rewritten modules from the input, without a title catalog. The `sdk` module gets the
 //! SDK-wide rules, which match by function fingerprint and not by build ID.
-use super::{auto_shaders, extract, layout, manifest, modules, npdm, nvn};
+use super::{auto_shaders, extract, graphics, layout, manifest, modules, npdm, nvn};
+use nxtitle::GraphicsApi;
 use std::collections::BTreeSet;
 
 /// The SDK-wide rules of the title modules, for the `sdk` module of any game (`sdk_rules.toml`).
@@ -9,6 +10,8 @@ const SDK_RULES: &str = include_str!("sdk_rules.toml");
 pub(super) struct Analysis {
     pub modules: Vec<(modules::Built, u64)>,
     pub thread: npdm::MainThread,
+    /// The API the modules ask for by name. A game that names none is taken for NVN.
+    pub graphics: GraphicsApi,
     settings: nxtitle::Settings,
 }
 
@@ -41,9 +44,26 @@ fn ordered(input: &[(String, Vec<u8>)]) -> Result<Vec<&(String, Vec<u8>)>, Strin
     Ok(selected.into_iter().map(|(_, m)| m).collect())
 }
 
+/// The graphics API of the modules, from the names in their read-only data.
+fn api_of(selected: &[&(String, Vec<u8>)]) -> Result<GraphicsApi, String> {
+    let mut loaded = Vec::new();
+    for (name, data) in selected {
+        let m = nxb_rewrite::nso::load(data, name).map_err(|e| format!("module {name}: {e:?}"))?;
+        let (off, size) = m.segments[1];
+        loaded.push(
+            m.image
+                .get(off..off.saturating_add(size))
+                .unwrap_or_default()
+                .to_vec(),
+        );
+    }
+    Ok(graphics::detect(loaded.iter().map(Vec::as_slice)).unwrap_or(GraphicsApi::Nvn))
+}
+
 pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
     let thread = npdm::main_thread(&game.npdm)?;
     let selected = ordered(&game.modules)?;
+    let graphics = api_of(&selected)?;
     let ids = selected
         .iter()
         .map(|(name, data)| {
@@ -94,6 +114,7 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
     Ok(Analysis {
         modules: built.into_iter().zip(bases).collect(),
         thread,
+        graphics,
         settings,
     })
 }
@@ -108,8 +129,13 @@ impl Analysis {
             modules: &self.modules,
             // Enable the available shared services. This is not a compatibility verdict.
             services: nxtitle::Service::ALL.iter().map(|s| s.id()).collect(),
-            graphics: nxtitle::GraphicsApi::Nvn.id(),
-            nvn_functions: nvn::names(&self.modules),
+            graphics: self.graphics.id(),
+            // Only a game on NVN fetches NVN functions
+            nvn_functions: if self.graphics == GraphicsApi::Nvn {
+                nvn::names(&self.modules)
+            } else {
+                vec![]
+            },
             patches: false,
             main_thread: self.thread,
             aoc: &game.aoc,
