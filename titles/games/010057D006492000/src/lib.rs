@@ -26,9 +26,9 @@
 //! regions).
 
 use nxtitle::{
-    BuildHooks, ConsoleVar, DrawSlot, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service,
-    Settings, SourceDraw, Standalone, TemporalDraws, TemporalView, Title, TitleId, UboStage,
-    Upscaler, VelocityCode,
+    BuildHooks, ConfigKey, ConsoleVar, DrawSlot, Evidence, Fact, Memory, Runtime, RuntimeHooks,
+    Service, Settings, SourceDraw, Standalone, TemporalDraws, TemporalView, Title, TitleId,
+    UboStage, Upscaler, VelocityCode,
 };
 
 /// The title module.
@@ -154,6 +154,27 @@ const CONSOLE_VARS: &[Fact<ConsoleVar>] = &[
     ),
 ];
 
+/// The game's `Kingship/Config/DefaultEngine.ini` scales its UI by `UIScaleCurve` over the shortest side with the keys
+/// (50, 0), (720, 1) and (8640, 16): 1.68 at 1080 and 3.73 at 2160. The UI, laid out for 1280x720, was then wider than
+/// the back buffer, too far right and cut off (raw frames at 1080 and 2160, 2026-11-22).
+const UI_SCALE: Evidence = Evidence::Recorded {
+    source: "Kingship/Config/DefaultEngine.ini of Kingship-Switch.pak v327680 ([/Script/Engine.UserInterfaceSettings]) \
+             and raw frames (NXKIT_DIAG=shot) at 1920x1080 and 3840x2160",
+    read: "2026-11-22",
+};
+
+/// The UI scale is the shortest side over 720 at any size, so the UI fills the back buffer as it does at 1280x720.
+const CONFIG_KEYS: &[Fact<ConfigKey>] = &[Fact::new(
+    ConfigKey {
+        section: "/Script/Engine.UserInterfaceSettings",
+        key: "UIScaleCurve",
+        value: "(EditorCurveData=(PreInfinityExtrap=RCCE_Constant,PostInfinityExtrap=RCCE_Constant,\
+                Keys=((Time=0.000000,Value=0.000000),(Time=720.000000,Value=1.000000),(Time=8640.000000,Value=12.000000)),\
+                DefaultValue=340282346638528859811704183484516925440.000000),ExternalCurve=None)",
+    },
+    UI_SCALE,
+)];
+
 /// The view uniform buffer dumps and the bindings of the TAA draw in runs of the game.
 const TAA_RUN: Evidence = Evidence::Recorded {
     source: "view uniform buffer dumps of OCTOPATH TRAVELER (NXKIT_DIAG=ubo with NXKIT_DIAG_FS) and the TAA draw's \
@@ -210,6 +231,10 @@ const TEMPORAL_DRAWS: Fact<TemporalDraws> = Fact::new(
 impl BuildHooks for Octo {
     fn console_vars(&self) -> &'static [Fact<ConsoleVar>] {
         CONSOLE_VARS
+    }
+
+    fn config_keys(&self) -> &'static [Fact<ConfigKey>] {
+        CONFIG_KEYS
     }
 
     fn standalone(&self) -> Option<Standalone> {
@@ -290,6 +315,20 @@ mod tests {
     use super::*;
     use nxb_profile::Profile;
     use nxb_rewrite::patches::PatchTable;
+
+    #[test]
+    fn the_ui_scale_is_the_shortest_side_over_720() {
+        let [k] = OCTO.config_keys() else {
+            panic!("one key")
+        };
+        assert_eq!(
+            (k.value.section, k.value.key),
+            ("/Script/Engine.UserInterfaceSettings", "UIScaleCurve")
+        );
+        let v = k.value.value;
+        assert!(v.contains("(Time=720.000000,Value=1.000000),(Time=8640.000000,Value=12.000000)"));
+        assert!(!v.contains(char::is_whitespace), "one ini line");
+    }
 
     #[test]
     fn profile_matches_the_module() {

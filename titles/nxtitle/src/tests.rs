@@ -37,12 +37,26 @@ impl BuildHooks for Fam {
         ];
         V
     }
+    fn config_keys(&self) -> &'static [Fact<ConfigKey>] {
+        const K: &[Fact<ConfigKey>] = &[Fact::new(
+            ConfigKey {
+                section: "S",
+                key: "k",
+                value: "1",
+            },
+            REC,
+        )];
+        K
+    }
     fn console_var_files(
         &self,
-        vars: &[ConsoleVar],
+        set: ConsoleSettings<'_>,
         _romfs: &dyn RomfsRead,
     ) -> Option<Result<Vec<(String, Vec<u8>)>, String>> {
-        Some(Ok(vec![("f".into(), vars.len().to_string().into_bytes())]))
+        Some(Ok(vec![(
+            "f".into(),
+            format!("{} {}", set.vars.len(), set.keys.len()).into_bytes(),
+        )]))
     }
 }
 const VELOCITY: VelocityCode = VelocityCode {
@@ -150,6 +164,27 @@ impl BuildHooks for Game {
             ),
         ];
         V
+    }
+    fn config_keys(&self) -> &'static [Fact<ConfigKey>] {
+        const K: &[Fact<ConfigKey>] = &[
+            Fact::new(
+                ConfigKey {
+                    section: "S",
+                    key: "k",
+                    value: "2",
+                },
+                REC,
+            ),
+            Fact::new(
+                ConfigKey {
+                    section: "T",
+                    key: "k",
+                    value: "3",
+                },
+                REC,
+            ),
+        ];
+        K
     }
     fn graphics_api(&self) -> Option<Fact<GraphicsApi>> {
         (self.0 == 2).then_some(Fact::new(GraphicsApi::Vulkan, REC))
@@ -386,8 +421,24 @@ fn console_vars_add_up_and_a_later_value_wins() {
         .map(|f| (f.value.name, f.value.value))
         .collect();
     assert_eq!(vars, [("a", "9"), ("b", "2"), ("c", "3")]);
-    let files = r.console_var_files(&[], &NoRomfs).unwrap().unwrap();
-    assert_eq!(files, [("f".to_string(), b"0".to_vec())]);
+    let keys: Vec<_> = r
+        .config_keys()
+        .iter()
+        .map(|f| (f.value.section, f.value.key, f.value.value))
+        .collect();
+    assert_eq!(
+        keys,
+        [("S", "k", "2"), ("T", "k", "3")],
+        "the title's value wins"
+    );
+    let files = r
+        .console_var_files(ConsoleSettings::default(), &NoRomfs)
+        .unwrap()
+        .unwrap();
+    assert_eq!(files, [("f".to_string(), b"0 0".to_vec())]);
     let lone = c.resolve(&TitleFacts::new(TitleId(2)));
-    assert!(lone.console_var_files(&[], &NoRomfs).is_none());
+    assert!(
+        lone.console_var_files(ConsoleSettings::default(), &NoRomfs)
+            .is_none()
+    );
 }

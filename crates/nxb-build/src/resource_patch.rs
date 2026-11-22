@@ -6,7 +6,7 @@
 //! a zstd frame of raw blocks, so no compressor is needed, and the game's dictionary decoder accepts a frame without
 //! a dictionary ID. Files with other digests (another game version) are left as they are, with a warning.
 //!
-//! The title's console variables (`BuildHooks::console_vars`) go through the same overlay: the family turns them into new
+//! The title's console variables (`BuildHooks::console_vars`) and configuration keys (`BuildHooks::config_keys`) go through the same overlay: the family turns them into new
 //! RomFS files (`BuildHooks::console_var_files`), which the RomFS does not have yet, and the overlay adds them.
 //!
 //! The standalone build does not clone the extract folder: [`overlay`] writes only the patched files into a small
@@ -22,7 +22,9 @@ use std::path::{Path, PathBuf};
 use nxb_extract::fileext::FileExt;
 use nxb_model::{Digest, FileDigest};
 use nxb_romfs::image::{Header, Index};
-use nxtitle::{ConsoleVar, Edit, Resolved, ResourcePatch, RomfsEntry, RomfsRead};
+use nxtitle::{
+    ConfigKey, ConsoleSettings, ConsoleVar, Edit, Resolved, ResourcePatch, RomfsEntry, RomfsRead,
+};
 
 use crate::Args;
 use crate::graph::Build;
@@ -46,8 +48,8 @@ fn choices(
     choose(&patches_for(title)?, options)
 }
 
-/// The title's resolved layers and its console variables, when it has any.
-type Console = (Resolved, Vec<ConsoleVar>);
+/// The title's resolved layers, its console variables and its configuration keys, when it has any.
+type Console = (Resolved, Vec<ConsoleVar>, Vec<ConfigKey>);
 
 fn console_for(title: &str) -> Result<Option<Console>, String> {
     let Ok(id) = u64::from_str_radix(title, 16) else {
@@ -55,7 +57,8 @@ fn console_for(title: &str) -> Result<Option<Console>, String> {
     };
     let r = nxtitles::catalog()?.resolve(&nxtitle::TitleFacts::new(nxtitle::TitleId(id)));
     let vars: Vec<ConsoleVar> = r.console_vars().iter().map(|f| f.value).collect();
-    Ok((!vars.is_empty()).then_some((r, vars)))
+    let keys: Vec<ConfigKey> = r.config_keys().iter().map(|f| f.value).collect();
+    Ok((!vars.is_empty() || !keys.is_empty()).then_some((r, vars, keys)))
 }
 
 fn patches_for(title: &str) -> Result<Vec<ResourcePatch>, String> {
@@ -205,7 +208,8 @@ fn write_overlay(
         return none();
     };
     let vars: &[ConsoleVar] = console.map_or(&[], |c| &c.1);
-    let stamp = stamp_of(&romfs, chosen, vars)?;
+    let keys: &[ConfigKey] = console.map_or(&[], |c| &c.2);
+    let stamp = stamp_of(&romfs, chosen, vars, keys)?;
     if std::fs::read_to_string(out.join(STAMP)).is_ok_and(|s| s == stamp) {
         return Ok(Some(out));
     }
@@ -217,9 +221,13 @@ fn write_overlay(
     for w in &warnings {
         say(w);
     }
-    if let Some((resolved, vars)) = console {
-        let names: Vec<&str> = vars.iter().map(|v| v.name).collect();
-        match resolved.console_var_files(vars, &romfs) {
+    if let Some((resolved, vars, keys)) = console {
+        let names: Vec<&str> = vars
+            .iter()
+            .map(|v| v.name)
+            .chain(keys.iter().map(|k| k.key))
+            .collect();
+        match resolved.console_var_files(ConsoleSettings { vars, keys }, &romfs) {
             Some(made) => {
                 let made = made.map_err(|e| format!("console vars: {e}"))?;
                 let at: Vec<&str> = made.iter().map(|f| f.0.as_str()).collect();
@@ -389,11 +397,12 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
 }
 
 /// What a patched folder is made from: the RomFS (size and time), each patch's option, value and archive digest, and
-/// the console variables.
+/// the console variables and the configuration keys.
 fn stamp_of(
     romfs: &Romfs,
     chosen: &[(ResourcePatch, f32)],
     vars: &[ConsoleVar],
+    keys: &[ConfigKey],
 ) -> Result<String, String> {
     let meta = match romfs {
         Romfs::Image { file, .. } => file.metadata(),
@@ -427,6 +436,9 @@ fn stamp_of(
     }
     for v in vars {
         s.push_str(&format!("cvar {}={}\n", v.name, v.value));
+    }
+    for k in keys {
+        s.push_str(&format!("key [{}] {}={}\n", k.section, k.key, k.value));
     }
     Ok(s)
 }

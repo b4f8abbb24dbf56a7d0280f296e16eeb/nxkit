@@ -30,7 +30,10 @@ mod temporal;
 pub mod threads;
 
 pub use catalog::{Catalog, FamilyFrom, Resolved};
-pub use console::{ConsoleFiles, ConsoleVar, RomfsEntry, RomfsRead, merge_console_vars};
+pub use console::{
+    ConfigKey, ConsoleFiles, ConsoleSettings, ConsoleVar, RomfsEntry, RomfsRead, merge_config_keys,
+    merge_console_vars,
+};
 pub use evidence::{Evidence, Fact};
 pub use facts::{Match, TitleFacts};
 pub use hooks::{

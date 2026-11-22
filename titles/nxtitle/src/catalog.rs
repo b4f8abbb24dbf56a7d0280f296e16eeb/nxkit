@@ -1,9 +1,9 @@
 //! The catalog: families and titles, and how they are composed for one game.
 
 use crate::{
-    BuildHooks, ConsoleVar, Fact, Family, GraphicsApi, LimitRule, Match, Need, PaceProfile, Pacing,
-    ResourcePatch, RomfsRead, Runtime, RuntimeHooks, Seed, Service, ShaderRole, ShaderView,
-    Standalone, Title, TitleFacts, Upscaler,
+    BuildHooks, ConfigKey, ConsoleSettings, ConsoleVar, Fact, Family, GraphicsApi, LimitRule,
+    Match, Need, PaceProfile, Pacing, ResourcePatch, RomfsRead, Runtime, RuntimeHooks, Seed,
+    Service, ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
 };
 use std::collections::BTreeSet;
 
@@ -210,15 +210,30 @@ impl Resolved {
             .collect()
     }
 
-    /// The RomFS files that set `vars`: the answer of the first layer that has one (the title, then the family).
+    /// The configuration keys of the family, then the title's, as they apply: a later value of a section and key wins.
+    pub fn config_keys(&self) -> Vec<Fact<ConfigKey>> {
+        let hooks: Vec<_> = self.build_hooks().collect();
+        let all: Vec<Fact<ConfigKey>> = hooks
+            .into_iter()
+            .rev()
+            .flat_map(|h| h.config_keys().iter().copied())
+            .collect();
+        let merged = crate::merge_config_keys(all.iter().map(|f| f.value));
+        merged
+            .into_iter()
+            .filter_map(|k| all.iter().rev().find(|f| f.value == k).copied())
+            .collect()
+    }
+
+    /// The RomFS files that set `set`: the answer of the first layer that has one (the title, then the family).
     /// `None` when no layer knows how.
     pub fn console_var_files(
         &self,
-        vars: &[ConsoleVar],
+        set: ConsoleSettings<'_>,
         romfs: &dyn RomfsRead,
     ) -> Option<Result<crate::ConsoleFiles, String>> {
         self.build_hooks()
-            .find_map(|h| h.console_var_files(vars, romfs))
+            .find_map(|h| h.console_var_files(set, romfs))
     }
 
     /// The needs of the family, then the title's.

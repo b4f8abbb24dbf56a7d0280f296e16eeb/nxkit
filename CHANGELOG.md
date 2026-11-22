@@ -4,6 +4,17 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.15.1 - 2026-11-22
+
+### Fixed
+
+- OCTOPATH TRAVELER at its default render size of 3840x2160 (and at 1080p and 1440p) shows its whole UI, placed as at
+  1280x720. The game scales its UI by `UIScaleCurve` over the shortest side (3.73 at 2160, 1.68 at 1080). Its UI, laid
+  out for 1280x720, was then wider than the screen, too far right and cut off. A title or family can now set keys of
+  the engine configuration (`BuildHooks::config_keys`): the family `unreal` writes them into a copy of the project's
+  `Config/DefaultEngine.ini` in the pak of the console variables. OCTOPATH TRAVELER sets the curve to the shortest
+  side over 720.
+
 ## 0.15.0 - 2026-11-22
 
 ### Added

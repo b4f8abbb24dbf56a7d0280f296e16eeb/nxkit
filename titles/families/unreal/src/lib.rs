@@ -13,7 +13,8 @@
 //! Console variables are not read from the program arguments: a Shipping build ignores `-ExecCmds`. The family writes
 //! them as `+CVars=<name>=<value>` lines of the section `[<Platform> DeviceProfile]` in a copy of the project's
 //! `Config/DefaultDeviceProfiles.ini`. The copy goes into a new pak that the engine mounts after the game's paks
-//! (see [`BuildHooks::console_var_files`]). [`CVAR_PAK`] records a run of this on a title.
+//! (see [`BuildHooks::console_var_files`]). Keys of the engine configuration (`BuildHooks::config_keys`) go into a copy
+//! of the project's `Config/DefaultEngine.ini` in the same pak. [`CVAR_PAK`] records a run of this on a title.
 //!
 //! The back buffer size comes from the program arguments `-ResX=` and `-ResY=`: the Switch platform code of the engine
 //! reads them in `nninitStartup` into the display size (1280x720 when absent), the platform application reports that
@@ -28,8 +29,8 @@ mod ini;
 mod pak;
 
 use nxtitle::{
-    BuildHooks, ConsoleFiles, ConsoleVar, Evidence, Fact, Family, LimitKind, LimitRow, LimitRule,
-    LimitSite, Match, RenderArgs, RomfsRead, RuntimeHooks, TitleFacts,
+    BuildHooks, ConsoleFiles, ConsoleSettings, Evidence, Fact, Family, LimitKind, LimitRow,
+    LimitRule, LimitSite, Match, RenderArgs, RomfsRead, RuntimeHooks, TitleFacts,
 };
 
 /// The family.
@@ -80,10 +81,10 @@ pub const CVAR_PAK: Evidence = Evidence::Recorded {
 impl BuildHooks for Unreal {
     fn console_var_files(
         &self,
-        vars: &[ConsoleVar],
+        set: ConsoleSettings<'_>,
         romfs: &dyn RomfsRead,
     ) -> Option<Result<ConsoleFiles, String>> {
-        Some(cvarpak::files(vars, romfs))
+        Some(cvarpak::files(set, romfs))
     }
 }
 
