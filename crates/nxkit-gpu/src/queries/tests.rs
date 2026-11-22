@@ -111,7 +111,7 @@ fn the_vertices_of_a_draw_come_from_its_arguments() {
 }
 
 #[test]
-fn counted_draws_get_offsets_of_their_pass_and_land_once_all_were_encoded() {
+fn counted_draws_get_offsets_of_their_pass_and_land_in_full_once_all_were_encoded() {
     let Ok(ctx) = Context::system_default() else {
         return;
     };
@@ -137,17 +137,21 @@ fn counted_draws_get_offsets_of_their_pass_and_land_once_all_were_encoded() {
     assert_ne!(o0, o1);
     vis.buffer.write(o0, &40u64.to_le_bytes()).unwrap();
     vis.buffer.write(o1, &2u64.to_le_bytes()).unwrap();
-    // Draw 1 is not encoded: the second samples report does not land. The first sums no slot, the vertices of draw 0
-    // are known from its arguments.
+    // Draw 1 is not encoded: the second samples report lands with the samples of draw 0 and counts as visible, so a
+    // game that polls it does not wait. The first sums no slot, the vertices of draw 0 are known from its arguments.
     q.encoded(s0);
     let st = q.write(&guest, 7);
-    assert_eq!((st.written, st.samples, st.cpu, st.uncounted), (2, 1, 1, 1));
+    assert_eq!(
+        (st.written, st.samples, st.cpu, st.uncounted, st.assumed),
+        (3, 2, 1, 0, 1)
+    );
     assert_eq!(counter(&guest, 0x120), (3, 7));
+    assert_eq!(counter(&guest, 0x110), (40, 7));
     let landed = f.counters.landed.as_ref().unwrap();
-    assert_eq!(landed.get(addr + 16), None);
+    assert_eq!(landed.get(addr + 16).map(|(v, _)| v), Some(40));
     q.encoded(s1);
     let st = q.write(&guest, 9);
-    assert_eq!((st.written, st.samples), (3, 2));
+    assert_eq!((st.written, st.samples, st.assumed), (3, 2, 0));
     assert_eq!(counter(&guest, 0x100), (0, 9));
     assert_eq!(counter(&guest, 0x110), (42, 9));
     assert_eq!(landed.get(addr + 16).map(|(v, _)| v), Some(42));

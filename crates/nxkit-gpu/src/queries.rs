@@ -5,7 +5,10 @@
 //! its own in a zeroed visibility result buffer (one per slot of the pass), so no two passes add to the same 8 bytes,
 //! whichever command buffer runs them. The encoder sets the offset of each draw (`encode::render_pass`) and counts the
 //! draws it encoded per slot. A slot whose draws were not all encoded (a pipeline still compiling, a lost pass) is not
-//! counted: its reports do not land, and a render condition reads the counter of an earlier report instead.
+//! counted. Its samples reports land anyway and count at least one sample, so the object counts as visible: a game that
+//! waits for the report gets it in the frame, and a render condition draws. Unreal Engine's `RHIGetRenderQueryResult`
+//! polls each report up to 2 s, and OCTOPATH TRAVELER II stood for minutes on the first load of a scene, whose draws
+//! wait for their pipelines.
 //!
 //! [`FrameQueries::write`] runs when the GPU finished the frame (`GpuBackend::write_counters`): every report whose
 //! slots were all counted gets its 16-byte `NVNcounterData` (counter, then the GPU end time in ticks) in guest memory,
@@ -123,8 +126,10 @@ pub(crate) struct WriteStats {
     pub(crate) written: u32,
     pub(crate) samples: u32,
     pub(crate) cpu: u32,
-    /// Reports with a slot whose draws were not all encoded, or with an indirect draw.
+    /// Vertex and primitive reports with a slot whose draws were not all encoded, or with an indirect draw.
     pub(crate) uncounted: u32,
+    /// Samples reports with a slot whose draws were not all encoded, written as visible (at least one sample).
+    pub(crate) assumed: u32,
     /// Reports whose 16 bytes are not in guest memory.
     pub(crate) refused: u32,
 }
@@ -374,15 +379,25 @@ impl FrameQueries {
                     Source::Timestamp | Source::Unknown => None,
                 }
             };
-            let value = self
-                .counters
-                .sums_of(w)
-                .iter()
-                .try_fold(0u64, |a, s| Some(a.wrapping_add(slot(s)?)));
-            let Some(value) = value else {
+            let mut missing = false;
+            let value = self.counters.sums_of(w).iter().try_fold(0u64, |a, s| {
+                Some(a.wrapping_add(match slot(s) {
+                    Some(v) => v,
+                    None if src == Source::Samples => {
+                        missing = true;
+                        0
+                    }
+                    None => return None,
+                }))
+            });
+            let Some(mut value) = value else {
                 st.uncounted += 1;
                 continue;
             };
+            if missing {
+                value = value.max(1);
+                st.assumed += 1;
+            }
             if write_report(guest, &map, w.addr, value, ticks).is_none() {
                 st.refused += 1;
                 continue;
@@ -429,8 +444,8 @@ pub(crate) fn write_diag(st: &WriteStats) {
     let n = N.fetch_add(1, Ordering::Relaxed);
     if n < 30 || n.is_multiple_of(120) {
         eprintln!(
-            "DIAG rendercond counters landed {} (samples {} vertices/primitives {}), not counted {} (a draw not encoded or indirect), outside guest memory {}",
-            st.written, st.samples, st.cpu, st.uncounted, st.refused
+            "DIAG rendercond counters landed {} (samples {} vertices/primitives {}), samples taken as visible {} (a draw not encoded), not counted {} (a draw not encoded or indirect), outside guest memory {}",
+            st.written, st.samples, st.cpu, st.assumed, st.uncounted, st.refused
         );
     }
 }

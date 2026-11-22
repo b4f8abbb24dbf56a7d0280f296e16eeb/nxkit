@@ -6,6 +6,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- A samples report whose draws were not all encoded lands as visible, at least one sample (#51). It did not land,
+  and Unreal Engine's `RHIGetRenderQueryResult` polls each report up to 2 s. On the first load of a scene, whose
+  draws wait for their pipelines, OCTOPATH TRAVELER II showed a black picture for minutes.
 - OCTOPATH TRAVELER II gets an alias region of 4608 MiB, a reserve of 6 GiB and the argument `-nothreadtimeout`
   (#51). With 3200 MiB the Unreal heap ran out at the character selection. Unreal's hang detector ended the game
   while the first load compiled pipelines for more than 5 s without a present.
