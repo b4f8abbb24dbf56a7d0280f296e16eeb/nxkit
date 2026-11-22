@@ -54,7 +54,8 @@ fn now() -> u64 {
     u64::try_from(base().elapsed().as_nanos()).unwrap_or(u64::MAX)
 }
 
-/// Whether the category is on.
+/// Whether the category is on. It is start only: the hooks for the batches of the GPU, which it needs, are built once at
+/// the start by [`super::flushstat`]. A change of `NXKIT_DIAG` while the game runs has no effect on it.
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| nxkit_nvn::diag::on("frame"))

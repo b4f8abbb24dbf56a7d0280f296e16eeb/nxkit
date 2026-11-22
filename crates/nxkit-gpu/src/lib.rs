@@ -19,6 +19,7 @@
 #![cfg(target_os = "macos")]
 
 mod diag;
+mod gpulive;
 pub(crate) use diag::{diag, knob, nobar, nobar_range, refresh_knobs, watched};
 pub(crate) use skip::{buf_skip, tex_skip};
 

@@ -4,16 +4,15 @@
 //! front end prints the mean per submit every [`REPORT_EVERY`] submits and starts again. The counters are plain adds.
 //! The clocks run only with the category on: each reads the time twice, so the numbers include that cost.
 
-use std::sync::OnceLock;
 use std::time::Instant;
 
 /// The submits between two reports.
 pub const REPORT_EVERY: u64 = 300;
 
-/// Whether `NXKIT_DIAG` names `decodeprof` (read once).
+/// Whether `NXKIT_DIAG` names `decodeprof`
 pub fn on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::diag::on("decodeprof"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| crate::diag::on("decodeprof"))
 }
 
 /// A stopwatch that does nothing when the category is off.

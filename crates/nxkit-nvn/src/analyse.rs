@@ -58,14 +58,14 @@ struct Scan<'a> {
 
 /// True under `NXKIT_DIAG=passmerge` (or `all`).
 fn merge_diag() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::diag::on("passmerge"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| crate::diag::on("passmerge"))
 }
 
 /// True under `NXKIT_DIAG=stats` (or `all`).
 fn stats_diag() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::diag::on("stats"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| crate::diag::on("stats"))
 }
 
 impl Analyser {

@@ -5,7 +5,7 @@
 # handler or a Metal completion handler, or are counters and once-guards of the diagnostics.
 
 nxkit-abi: 7
-nxkit-gpu: 120
+nxkit-gpu: 121
 nxkit-hos: 19
 nxkit-host: 22
 nxkit-metal: 19

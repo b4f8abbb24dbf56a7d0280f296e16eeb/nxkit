@@ -40,7 +40,8 @@ pub(crate) fn now_ns() -> u64 {
     unsafe { clock_gettime_nsec_np(8) }
 }
 
-/// Whether a category that uses the counters is on.
+/// Whether a category that uses the counters is on. It is start only, like the categories `frame` and `gateseq`: the host
+/// builds the hooks once at the start.
 pub(crate) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| super::frametime::on() || super::gateseq::on())

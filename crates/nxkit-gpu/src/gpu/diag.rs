@@ -85,8 +85,8 @@ pub(super) fn pass_shape_diag(
 /// `NXKIT_DIAG=hitch`: a line for each frame whose encode took long or that built pipelines or textures, with the wall
 /// clock in milliseconds, to put it next to the late frames of `NXKIT_PACE_DIAG`.
 pub(super) fn hitch_diag(s: &EncodeStats, draws: usize) {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| crate::diag("hitch")) {
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    if !ON.flag(|| crate::diag("hitch")) {
         return;
     }
     if s.encode_ns < 7_000_000 && s.pipeline_builds == 0 && s.textures_created == 0 {
@@ -167,8 +167,8 @@ impl Gpu {
         detail: &FrameDetail,
         textures: &FastMap<TexId, Res>,
     ) {
-        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if !*ON.get_or_init(|| crate::diag("imgdump")) {
+        static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+        if !ON.flag(|| crate::diag("imgdump")) {
             return;
         }
         self.frames_encoded += 1;

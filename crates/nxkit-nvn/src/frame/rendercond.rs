@@ -26,7 +26,6 @@
 //! each condition covered, when `NXKIT_DIAG=rendercond` is on.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::counters::{Counters, Landed, Place, Source};
@@ -445,8 +444,8 @@ pub(crate) fn read_gpu_u64<S: GpuSpace, M: GuestMem>(space: &S, mem: &M, addr: u
 /// frames, then every 60th), and the first evaluations with the counters they read. The backend adds a line for the
 /// emulated counters it wrote (`nxkit-gpu`, `queries`).
 pub(crate) fn frame_diag(rc: &mut RenderConds, frame: &Frame) {
-    static ON: OnceLock<bool> = OnceLock::new();
-    if !*ON.get_or_init(|| crate::diag::on("rendercond")) {
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    if !ON.flag(|| crate::diag::on("rendercond")) {
         return;
     }
     static FRAMES: AtomicU32 = AtomicU32::new(0);

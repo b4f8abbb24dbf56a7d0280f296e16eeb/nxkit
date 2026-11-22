@@ -111,12 +111,12 @@ impl Backend for GpuBackend {
         let mut detail = {
             let mut walker = locked(&self.walker);
             let counters = walker.take_counters();
-            if self.diag.stats && self.reports.load(Ordering::Relaxed).is_multiple_of(30) {
+            if self.diag.stats() && self.reports.load(Ordering::Relaxed).is_multiple_of(30) {
                 eprintln!("nxkit-gpu: walk: {counters:?}");
             }
             walker.take()
         };
-        if self.diag.overlap {
+        if self.diag.overlap() {
             self.overlap.frame(&detail, fence.0, &self.guest);
         }
         if !matches(frame, &detail) {
@@ -282,7 +282,7 @@ impl Backend for GpuBackend {
 
     fn recording_invalidated(&self, start: u64, end: u64) {
         self.invalidations.push(start, end);
-        if self.diag.overlap
+        if self.diag.overlap()
             && let Ok(gpu) = self
                 .guest
                 .address_map()

@@ -193,10 +193,10 @@ pub(crate) struct Fixed {
     pub(crate) clip: DepthClip,
 }
 
-/// Whether `NXKIT_DIAG` asks for the depth diagnostic. It is read once, because [`prepare`] runs for every draw.
+/// Whether `NXKIT_DIAG` asks for the depth diagnostic. A memo keeps the answer, because [`prepare`] runs for every draw.
 fn diag_depth() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::diag("depth"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| crate::diag("depth"))
 }
 
 /// The cull mode of a draw. NVN culls both faces with `FRONT_AND_BACK`, which Metal cannot.

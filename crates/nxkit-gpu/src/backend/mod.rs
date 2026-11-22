@@ -502,7 +502,7 @@ impl GpuBackend {
                 "DIAG pools frame {n}: pool ops applied at once {direct}, queued behind an encode {deferred}"
             );
         }
-        let diag = self.diag.stats;
+        let diag = self.diag.stats();
         if crate::diag("pixelall") && n.is_multiple_of(10) {
             let st = &report.stats;
             eprintln!(

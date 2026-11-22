@@ -1,4 +1,4 @@
-//! The diagnostics of the present path of one backend, with the switches of `NXKIT_DIAG` read once when it is made.
+//! The diagnostics of the present path of one backend, with the switches of `NXKIT_DIAG` read at each use (live, W35).
 //!
 //! - `present`: the counters of the ticks, the presents asked, the textures found and the blits done.
 //! - `encpace`: for every 60th frame, the time from the game's present to the end of its encode and from there to the
@@ -12,12 +12,6 @@ const N: usize = 256;
 
 /// The state of the present diagnostics. The backend owns one.
 pub(super) struct PresentDiag {
-    present: bool,
-    encpace: bool,
-    /// `NXKIT_DIAG=overlap`.
-    pub(super) overlap: bool,
-    /// `NXKIT_DIAG=stats`.
-    pub(super) stats: bool,
     /// Ticks, presents asked, textures found, blits done.
     counts: [AtomicU64; 4],
     base: Instant,
@@ -29,10 +23,6 @@ pub(super) struct PresentDiag {
 impl Default for PresentDiag {
     fn default() -> Self {
         PresentDiag {
-            present: crate::diag("present"),
-            encpace: crate::diag("encpace"),
-            overlap: crate::diag("overlap"),
-            stats: crate::diag("stats"),
             counts: [const { AtomicU64::new(0) }; 4],
             base: Instant::now(),
             asked: AtomicU64::new(0),
@@ -43,6 +33,26 @@ impl Default for PresentDiag {
 }
 
 impl PresentDiag {
+    /// `NXKIT_DIAG=present`.
+    fn present(&self) -> bool {
+        crate::diag("present")
+    }
+
+    /// `NXKIT_DIAG=encpace`.
+    fn encpace(&self) -> bool {
+        crate::diag("encpace")
+    }
+
+    /// `NXKIT_DIAG=overlap`.
+    pub(super) fn overlap(&self) -> bool {
+        crate::diag("overlap")
+    }
+
+    /// `NXKIT_DIAG=stats`.
+    pub(super) fn stats(&self) -> bool {
+        crate::diag("stats")
+    }
+
     fn now(&self) -> u64 {
         u64::try_from(self.base.elapsed().as_micros()).unwrap_or(0)
     }
@@ -50,7 +60,7 @@ impl PresentDiag {
     /// Counts one event of the present path: 0 a tick, 1 a present asked, 2 a texture found, 3 a blit done. Every 120th
     /// tick prints the counts.
     pub(super) fn count(&self, i: usize) {
-        if !self.present {
+        if !self.present() {
             return;
         }
         let n = self.counts[i].fetch_add(1, Ordering::Relaxed) + 1;
@@ -74,7 +84,7 @@ impl PresentDiag {
 
     /// The game presented its next frame.
     pub(super) fn asked(&self) {
-        if self.encpace {
+        if self.encpace() {
             let n = self.asked.fetch_add(1, Ordering::Relaxed) + 1;
             self.at_ask[n as usize % N].store(self.now(), Ordering::Relaxed);
         }
@@ -82,14 +92,14 @@ impl PresentDiag {
 
     /// Frame `n` is encoded and queued for the screen.
     pub(super) fn ready(&self, n: u64) {
-        if self.encpace {
+        if self.encpace() {
             self.at_ready[n as usize % N].store(self.now(), Ordering::Relaxed);
         }
     }
 
     /// A tick shows frame `n`, with `pending` frames queued.
     pub(super) fn shown(&self, n: u64, pending: usize) {
-        if self.encpace && n.is_multiple_of(60) {
+        if self.encpace() && n.is_multiple_of(60) {
             let t = self.now();
             let ask = self.at_ask[n as usize % N].load(Ordering::Relaxed);
             let ready = self.at_ready[n as usize % N].load(Ordering::Relaxed);
