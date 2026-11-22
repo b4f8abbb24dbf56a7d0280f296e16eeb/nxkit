@@ -54,6 +54,7 @@ mod encode;
 mod error;
 mod format;
 mod frame;
+mod gputrace;
 mod guest;
 mod hooks;
 mod icb;
@@ -110,6 +111,7 @@ pub use format::{
     BcKind, Format, FormatClass, IndexType, LoadAction, Primitive, SampleType, StoreAction,
 };
 pub use frame::{FRAMES_IN_FLIGHT, Frame, FrameRing, SCRATCH_BYTES, Submitted};
+pub use gputrace::{gpu_trace_running, gpu_trace_start, gpu_trace_stop, gpu_trace_supported};
 pub use guest::{GuestMemory, PAGE_SIZE};
 pub use icb::{IcbBuffer, IcbCommand, IcbDesc, IndirectCommandBuffer, Inherit};
 pub use interpolate::{Camera, FrameInterpolator, InterpolateDesc, InterpolateInputs};
