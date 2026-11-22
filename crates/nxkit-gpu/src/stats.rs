@@ -163,8 +163,6 @@ pub struct EncodeStats {
     pub copybacks: u32,
     /// Texel bytes that the copy-backs wrote into guest memory.
     pub copyback_bytes: u64,
-    /// Texture views whose channel swizzle is not the identity. Metal views here carry no swizzle, so it is ignored.
-    pub swizzle_ignored: u32,
     /// Textures that are scaled and had guest data that is not copied into them.
     pub scaled_upload_lost: u32,
     /// Scaled textures that got guest data through a native-size staging texture and a GPU scale.
@@ -235,7 +233,6 @@ impl EncodeStats {
         self.uploads += o.uploads;
         self.copybacks += o.copybacks;
         self.copyback_bytes += o.copyback_bytes;
-        self.swizzle_ignored += o.swizzle_ignored;
         self.scaled_upload_lost += o.scaled_upload_lost;
         self.scaled_uploads += o.scaled_uploads;
         self.textures_kept_native += o.textures_kept_native;
