@@ -42,6 +42,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The host logs what it writes into a frame limit (`nxkit-pacing: Unreal t.MaxFPS (game thread) 30 -> 60 fps`) and
   the notices of the pacing service at the start.
 
+- Diagnostics: with `NXKIT_DIAG_FS`, the `draw` line names the render pass of the draw in the frame and the size of
+  its attachments, and the `ubo` category prints every float of the uniform buffers of a listed draw. The knob
+  `fsquiet` holds the listed draws back until the game shows the scene to look at.
+- `nxkit_metal::TemporalUpscaler`: MetalFX temporal scaling (`MTL4FXTemporalScaler`) of a jittered picture with its
+  depth, motion, jitter and an optional reactive mask, typed so that no input can be left out. A GPU test scales a
+  still green picture from 32x32 to 64x64.
+
 ### Fixed
 
 - The host passes the `args` setting of the title module to the game as its program arguments (`argv` after
@@ -63,15 +70,6 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - A GPU-written texture with `NVN_TEXTURE_FLAGS_COMPRESSIBLE` in compressible pool memory is not copied back into
   guest memory at the end of the frame. On the console its bytes are compressed, so the CPU cannot read them.
   Octopath Traveler (Unreal Engine 4) copied back about 105 MB of render targets in each frame, 2.3 ms of GPU time.
-### Added
-
-- Diagnostics: with `NXKIT_DIAG_FS`, the `draw` line names the render pass of the draw in the frame and the size of
-  its attachments, and the `ubo` category prints every float of the uniform buffers of a listed draw. The knob
-  `fsquiet` holds the listed draws back until the game shows the scene to look at.
-- `nxkit_metal::TemporalUpscaler`: MetalFX temporal scaling (`MTL4FXTemporalScaler`) of a jittered picture with its
-  depth, motion, jitter and an optional reactive mask, typed so that no input can be left out. A GPU test scales a
-  still green picture from 32x32 to 64x64. Nothing uses it yet.
-
 ## 0.15.0 - 2026-11-22
 
 ### Added
