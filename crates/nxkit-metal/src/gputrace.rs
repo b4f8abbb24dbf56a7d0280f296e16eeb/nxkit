@@ -1,6 +1,9 @@
-//! A Metal GPU trace capture of the device, for Xcode (Pixel History and the other GPU tools).
+//! A Metal GPU trace capture of the command queue, for Xcode (Pixel History and the other GPU tools).
 //!
-//! The capture takes every command buffer that any queue of the device commits between [`start`] and [`stop`]. Metal
+//! The capture takes every command buffer that the Metal 4 queue of the context commits between
+//! [`gpu_trace_start`] and [`gpu_trace_stop`]. Every encode thread commits to that one queue. Metal 4 refuses a capture
+//! of the device ("Capturing Metal 4 Device is not supported", measured in Pokémon Pokopia), so the capture object is
+//! the queue. Metal
 //! makes a capture only in a process that started with `MTL_CAPTURE_ENABLED=1` in its environment. The host sets that
 //! before the first device exists.
 
@@ -26,7 +29,7 @@ pub fn gpu_trace_running() -> bool {
     unsafe { MTLCaptureManager::sharedCaptureManager() }.isCapturing()
 }
 
-/// Starts a capture of the whole device into the document `path`. The file must not exist.
+/// Starts a capture of the queue of `ctx` into the document `path`. The file must not exist.
 pub fn gpu_trace_start(ctx: &Context, path: &Path) -> Result<(), String> {
     // SAFETY: the shared capture manager is available on any thread.
     let m = unsafe { MTLCaptureManager::sharedCaptureManager() };
@@ -42,9 +45,9 @@ pub fn gpu_trace_start(ctx: &Context, path: &Path) -> Result<(), String> {
     }
     let url = NSURL::fileURLWithPath(&NSString::from_str(&path.display().to_string()));
     let desc = MTLCaptureDescriptor::new();
-    let device: &ProtocolObject<dyn objc2_metal::MTLDevice> = ctx.device();
-    let object: &AnyObject = device.as_ref();
-    // SAFETY: the capture object is the Metal device, which the descriptor accepts.
+    let queue: &ProtocolObject<dyn objc2_metal::MTL4CommandQueue> = ctx.queue();
+    let object: &AnyObject = queue.as_ref();
+    // SAFETY: the capture object is the Metal 4 command queue of the context, which the descriptor accepts.
     unsafe { desc.setCaptureObject(Some(object)) };
     desc.setDestination(MTLCaptureDestination::GPUTraceDocument);
     desc.setOutputURL(Some(&url));

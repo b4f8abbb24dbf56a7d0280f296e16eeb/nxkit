@@ -255,7 +255,7 @@ The schema is 1.
 
 `gputrace [N] [PATH]` captures the next `N` frames (1 by default) with Metal's capture manager into a GPU trace document. Without `PATH` the file is `<diag_dir>/frame-<n>-<time>.gputrace`. The answer is the path. Open it in Xcode to use Pixel History and the other GPU tools.
 
-The capture covers the whole device. It holds every command buffer of every encoder thread. It starts before the first command buffer of the first frame. It stops after the submit of the last frame and the wait for the GPU. The frames stay slow while the capture runs.
+The capture covers the Metal 4 command queue of the host, because Metal 4 refuses a capture of the device. Every encoder thread commits to that queue, so the capture holds every command buffer. It starts before the first command buffer of the first frame. It stops after the submit of the last frame and the wait for the GPU. The frames stay slow while the capture runs.
 
 While the capture runs, each render pass gets a label `r<index> <size> <format> d<draws> fs <keys>`. The keys are the fragment program keys of its draws, as in the `NXKIT_DIAG` output. So you find a pass of the trace in the log. The labels are on for the captured frames only. `NXKIT_GPU_LABELS=1` turns them on for all frames.
 
