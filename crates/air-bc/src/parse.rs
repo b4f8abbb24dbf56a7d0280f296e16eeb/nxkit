@@ -478,6 +478,7 @@ impl<'a> P<'a> {
                 Op::Alloca(t, self.int()? as u32)
             }
             "load" => {
+                let volatile = self.eat_word("volatile");
                 let t = self.ty()?;
                 self.expect(',')?;
                 let p = self.typed()?;
@@ -489,7 +490,7 @@ impl<'a> P<'a> {
                 let md = self.md_attachments()?;
                 return Ok(Inst {
                     res,
-                    op: Op::Load(t, p, a),
+                    op: Op::Load(t, p, a, volatile),
                     md,
                 });
             }

@@ -10,7 +10,7 @@ use crate::hir::{
     Arg, BinOp, CmpOp, ConstArray, Expr, ExprKind, FnConst, Func, Local, LocalId, Module, Param,
     Place, PlaceKind, Query, SampleOpt, Stmt, SwitchArm, TexOp, UnOp,
 };
-use crate::types::{is_float, Access, Scalar, Space, Tex, TexKind, Type};
+use crate::types::{is_float, is_signed, Access, Scalar, Space, Tex, TexKind, Type};
 use crate::{builtins, conv, Error};
 
 mod pool;
@@ -18,7 +18,169 @@ mod pool;
 type R<T> = Result<T, Error>;
 
 /// A dm_bs instantiation: argument types, sampling option per extra argument, function.
-type BsInstance = (Vec<Type>, Vec<Option<&'static str>>, usize);
+type BsInstance = (Vec<Type>, Vec<Option<OptKind>>, usize);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OptKind {
+    Level,
+    Bias,
+    Grad2d,
+}
+
+impl OptKind {
+    fn named(name: &str) -> Option<Self> {
+        match name {
+            "level" => Some(Self::Level),
+            "bias" => Some(Self::Bias),
+            "gradient2d" => Some(Self::Grad2d),
+            _ => None,
+        }
+    }
+
+    fn arity(self) -> usize {
+        match self {
+            Self::Grad2d => 2,
+            _ => 1,
+        }
+    }
+
+    fn lower(self, previous: &SampleOpt, mut value: impl FnMut(usize) -> R<Expr>) -> R<SampleOpt> {
+        if matches!(previous, SampleOpt::Grad2d(..))
+            || (self == Self::Grad2d && !matches!(previous, SampleOpt::None))
+        {
+            return Err(Error::invalid("multiple sample options with gradient2d"));
+        }
+        Ok(match self {
+            Self::Level => SampleOpt::Level(Box::new(value(0)?)),
+            Self::Bias => SampleOpt::Bias(Box::new(value(0)?)),
+            Self::Grad2d => SampleOpt::Grad2d(Box::new(value(0)?), Box::new(value(1)?)),
+        })
+    }
+
+    fn operand(self, value: Expr) -> R<Expr> {
+        match self {
+            Self::Grad2d if value.ty != Type::Vector(Scalar::Float, 2) => {
+                Err(Error::invalid("gradient2d requires float2 derivatives"))
+            }
+            Self::Grad2d => Ok(value),
+            _ => conv(value, &Type::FLOAT),
+        }
+    }
+}
+
+fn array_integer_bounds(s: Scalar) -> (i128, i128) {
+    if s == Scalar::Bool {
+        return (0, 1);
+    }
+    let signed = is_signed(s);
+    let limit = 1i128 << (s.size() * 8 - u32::from(signed));
+    (if signed { -limit } else { 0 }, limit - 1)
+}
+
+// Keep the same exact f32 subset as the emitter's array initializer fold.
+fn scalar_array_float_value(value: &Expr) -> Option<f64> {
+    if value.ty != Type::FLOAT {
+        return None;
+    }
+    let f = match &value.kind {
+        ExprKind::Float(f) => *f,
+        ExprKind::Unary(UnOp::Neg, e) => -scalar_array_float_value(e)?,
+        ExprKind::Convert(e) => {
+            let n = scalar_array_integer_value(e)?;
+            let f = n as f32;
+            if f as i128 != n {
+                return None;
+            }
+            f64::from(f)
+        }
+        _ => return None,
+    };
+    f.is_finite().then_some(f)
+}
+
+// Recover only integer values that the existing emitter can safely fold.
+fn scalar_array_integer_value(value: &Expr) -> Option<i128> {
+    let Type::Scalar(ty) = value.ty else {
+        return None;
+    };
+    if is_float(ty) {
+        return None;
+    }
+    let n = match &value.kind {
+        ExprKind::Int(n) => *n,
+        ExprKind::Unary(UnOp::Neg, e) if is_signed(ty) => match e.kind {
+            ExprKind::Int(n) => n.checked_neg()?,
+            _ => scalar_array_integer_value(e)?.checked_neg()?,
+        },
+        ExprKind::Convert(e) => {
+            let n = if e.ty == Type::FLOAT {
+                let f = scalar_array_float_value(e)?;
+                if ty == Scalar::Bool {
+                    return Some(i128::from(f != 0.0));
+                }
+                f.trunc() as i128
+            } else {
+                scalar_array_integer_value(e)?
+            };
+            if ty == Scalar::Bool {
+                i128::from(n != 0)
+            } else {
+                n
+            }
+        }
+        _ => return None,
+    };
+    let (min, max) = array_integer_bounds(ty);
+    (min..=max).contains(&n).then_some(n)
+}
+
+/// Check the initializer before inserting its implicit conversion.
+/// A constructor already has its explicit result type at this point.
+fn check_array_initializer(value: &Expr, dest: &Type) -> R<()> {
+    if matches!(
+        (&value.ty, dest),
+        (Type::Vector(from, a), Type::Vector(to, b)) if a == b && from != to
+    ) {
+        return Err(Error::unsupported("const-array:implicit-narrowing"));
+    }
+    let (Type::Scalar(from), Type::Scalar(to)) = (&value.ty, dest) else {
+        return Ok(());
+    };
+    if let ExprKind::Int(n) = &value.kind {
+        let (min, max) = array_integer_bounds(*from);
+        if !(min..=max).contains(n) {
+            return Err(Error::unsupported("const-array:integer-literal-range"));
+        }
+    }
+    let literal = scalar_array_integer_value(value);
+    let non_narrowing = if from == to {
+        true
+    } else if is_float(*from) {
+        is_float(*to)
+    } else if !is_float(*to) {
+        let (min, max) = array_integer_bounds(*to);
+        let (from_min, from_max) = array_integer_bounds(*from);
+        (min <= from_min && from_max <= max) || literal.is_some_and(|n| (min..=max).contains(&n))
+    } else if *from == Scalar::Bool {
+        true
+    } else {
+        literal.is_some_and(|n| {
+            if *to == Scalar::Float {
+                return (n as f32) as i128 == n;
+            }
+            // Half has 11 significant bits, including the leading one.
+            let magnitude = n.unsigned_abs();
+            magnitude == 0
+                || (magnitude <= 65_504
+                    && magnitude.trailing_zeros() >= magnitude.ilog2().saturating_sub(10))
+        })
+    };
+    if non_narrowing {
+        Ok(())
+    } else {
+        Err(Error::unsupported("const-array:implicit-narrowing"))
+    }
+}
 
 /// Analyses an accepted module.
 pub fn analyze(m: &ast::Module) -> R<Module> {
@@ -33,6 +195,7 @@ pub fn analyze(m: &ast::Module) -> R<Module> {
 struct Cx {
     out: Module,
     struct_ids: HashMap<Rc<str>, usize>,
+    volatile_structs: HashSet<usize>,
     fconst_ids: HashMap<Rc<str>, usize>,
     const_ids: HashMap<Rc<str>, usize>,
     /// Signatures of the lowered functions, to resolve `Callee::User` by pointer.
@@ -101,6 +264,7 @@ impl Cx {
             Ty::ThreadgroupAtomicUintPtr => {
                 Type::Ptr(Space::Threadgroup, Rc::new(Type::Scalar(Scalar::Uint)))
             }
+            Ty::DeviceAtomicUintPtr => Type::Ptr(Space::Device, Rc::new(Type::UINT)),
             Ty::Ptr(sp, inner) => Type::Ptr(*sp, Rc::new(self.ty(inner)?)),
             Ty::Ref(_, inner) => self.ty(inner)?,
             Ty::Array { metal: true, .. } => return Err(Error::unsupported("metal-array")),
@@ -183,6 +347,16 @@ impl Cx {
                 for k in metal {
                     self.out.types.structs[id].fields[k].metal_array = true;
                 }
+                for (k, field) in s.fields.iter().enumerate() {
+                    self.out.types.structs[id].fields[k].is_volatile = field.is_volatile;
+                }
+                if self.out.types.structs[id]
+                    .fields
+                    .iter()
+                    .any(|f| f.is_volatile || self.has_volatile_field(&f.ty))
+                {
+                    self.volatile_structs.insert(id);
+                }
                 self.struct_ids.insert(s.name.clone(), id);
                 Ok(())
             }
@@ -211,13 +385,24 @@ impl Cx {
                 let Type::Array(el, n) = &t else {
                     return Err(Error::invalid("const array type"));
                 };
-                if init.len() as u32 != *n {
-                    return Err(Error::unsupported("const-array:partial-init"));
+                if init.len() > *n as usize {
+                    return Err(Error::invalid("const-array:excess-init"));
+                }
+                if init.len() < *n as usize {
+                    if !matches!(el.as_ref(), Type::Scalar(_) | Type::Vector(_, _)) {
+                        return Err(Error::unsupported("const-array:partial-element-type"));
+                    }
+                    // A short declaration must not create an arbitrarily large GPU object.
+                    const MAX_PARTIAL_BYTES: u32 = 16 * 1024 * 1024;
+                    if *n > MAX_PARTIAL_BYTES / self.out.types.layout(el).size {
+                        return Err(Error::unsupported("const-array:partial-size"));
+                    }
                 }
                 let mut vals = Vec::with_capacity(init.len());
                 for e in init {
                     self.locals.clear();
                     let v = self.expr(e)?;
+                    check_array_initializer(&v, el)?;
                     vals.push(conv(v, el)?);
                 }
                 self.const_ids.insert(name.clone(), self.out.consts.len());
@@ -335,6 +520,25 @@ impl Cx {
     fn stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) -> R<()> {
         match s {
             ast::Stmt::Empty => {}
+            ast::Stmt::SharedHalfStore { base, index, value } => {
+                let base = self.expr(base)?;
+                if base.ty != Type::Ptr(Space::Threadgroup, Rc::new(Type::UINT)) {
+                    return Err(Error::unsupported("shared-half-store:base"));
+                }
+                let half = Type::Scalar(Scalar::Ushort);
+                let value = self.expr(value)?;
+                let offset = self.index(index)?;
+                if value.ty != half || offset.ty != Type::UINT {
+                    return Err(Error::unsupported("shared-half-store:operands"));
+                }
+                let ptr_ty = Type::Ptr(Space::Threadgroup, Rc::new(half));
+                let base = Expr::new(ExprKind::PtrCast(Box::new(base)), ptr_ty.clone());
+                let place = deref(Expr::new(
+                    ExprKind::PtrOffset(Box::new(base), Box::new(offset)),
+                    ptr_ty,
+                ))?;
+                out.push(Stmt::MayAliasStore { place, value });
+            }
             ast::Stmt::Block(b) => {
                 let stmts = self.block(&b.stmts)?;
                 out.push(if b.contract_off {
@@ -493,6 +697,7 @@ impl Cx {
             A::Member { base, arrow, .. } => *arrow || self.is_place(base),
             A::Index { base, .. } => matches!(base.ty.strip(), Ty::Ptr(..)) || self.is_place(base),
             A::Swizzle { base, .. } => self.is_place(base),
+            A::Cond { .. } => matches!(e.ty, Ty::Ref(Space::Thread, _)),
             _ => false,
         }
     }
@@ -510,6 +715,26 @@ impl Cx {
         }
         match &e.kind {
             A::Paren(x) => self.place(x),
+            A::Cond { cond, then, els } if matches!(e.ty, Ty::Ref(Space::Thread, _)) => {
+                let c = self.cond(cond)?;
+                let yes = self.place(then)?;
+                let no = self.place(els)?;
+                if !matches!(yes.ty, Type::Vector(..))
+                    || yes.ty != no.ty
+                    || yes.space != Space::Thread
+                    || no.space != Space::Thread
+                {
+                    return Err(Error::unsupported("conditional-field-place"));
+                }
+                let ptr_ty = Type::Ptr(Space::Thread, Rc::new(yes.ty.clone()));
+                let yes = Expr::new(ExprKind::AddrOf(Box::new(yes)), ptr_ty.clone());
+                let no = Expr::new(ExprKind::AddrOf(Box::new(no)), ptr_ty.clone());
+                deref(Expr::new(
+                    ExprKind::Cond(Box::new(c), Box::new(yes), Box::new(no)),
+                    ptr_ty,
+                ))
+            }
+
             A::Var { name, scope } => match scope {
                 VarScope::Local => {
                     let id = self
@@ -545,13 +770,10 @@ impl Cx {
                     })
                 }
             },
-            A::Deref(p) => {
-                let ptr = self.expr(p)?;
-                deref(ptr)
-            }
+            A::Deref(p) => self.deref_ast(p),
             A::Member { base, field, arrow } => {
                 let bp = if *arrow {
-                    deref(self.expr(base)?)?
+                    self.deref_ast(base)?
                 } else {
                     self.place(base)?
                 };
@@ -613,6 +835,67 @@ impl Cx {
         }
     }
 
+    fn deref_ast(&mut self, e: &ast::Expr) -> R<Place> {
+        match &e.kind {
+            A::Paren(p) => self.deref_ast(p),
+            A::Member { .. } if self.is_place(e) => {
+                let p = self.place(e)?;
+                if self.is_volatile_field(&p) {
+                    if p.space != Space::Constant {
+                        return Err(Error::unsupported("volatile-field:binding"));
+                    }
+                    let mut target = deref(load(p))?;
+                    let PlaceKind::Deref(ptr) = target.kind else {
+                        return Err(Error::invalid("volatile resource deref"));
+                    };
+                    target.kind = PlaceKind::VolatileDeref(ptr);
+                    Ok(target)
+                } else {
+                    deref(self.read_place(p)?)
+                }
+            }
+            _ => deref(self.expr(e)?),
+        }
+    }
+
+    fn is_volatile_field(&self, p: &Place) -> bool {
+        let PlaceKind::Field(base, index) = &p.kind else {
+            return false;
+        };
+        let Type::Struct(id) = base.ty else {
+            return false;
+        };
+        self.out.types.structs[id].fields[*index as usize].is_volatile
+    }
+
+    fn has_volatile_field(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(id) => self.volatile_structs.contains(id),
+            Type::Array(elem, _) => self.has_volatile_field(elem),
+            _ => false,
+        }
+    }
+
+    fn read_place(&self, p: Place) -> R<Expr> {
+        if self.is_volatile_field(&p) || self.has_volatile_field(&p.ty) {
+            return Err(Error::unsupported("volatile-field:pointer-escape"));
+        }
+        if p.is_volatile()
+            && (!matches!(p.ty, Type::Scalar(_))
+                || matches!(p.kind, PlaceKind::Element(..) | PlaceKind::Swizzle(..)))
+        {
+            return Err(Error::unsupported("volatile-field:non-scalar"));
+        }
+        Ok(load(p))
+    }
+
+    fn check_unqualified_place(&self, p: &Place) -> R<()> {
+        if p.is_volatile() || self.is_volatile_field(p) || self.has_volatile_field(&p.ty) {
+            return Err(Error::unsupported("volatile-field:write-or-escape"));
+        }
+        Ok(())
+    }
+
     fn field(&self, bp: Place, field: &str) -> R<Place> {
         let Type::Struct(id) = bp.ty else {
             return Err(Error::invalid("member of non-struct"));
@@ -666,15 +949,15 @@ impl Cx {
                 if !self.is_place(e) {
                     // member or index of an rvalue
                     let p = self.place_of_rvalue(e)?;
-                    return Ok(load(p));
+                    return self.read_place(p);
                 }
                 let p = self.place(e)?;
-                Ok(load(p))
+                self.read_place(p)
             }
             A::Swizzle { base, comps } => {
                 if self.is_place(e) {
                     let p = self.place(e)?;
-                    return Ok(load(p));
+                    return self.read_place(p);
                 }
                 let b = self.expr(base)?;
                 Ok(Expr::new(ExprKind::Swizzle(Box::new(b), comps.clone()), ty))
@@ -682,6 +965,7 @@ impl Cx {
             A::Paren(x) => self.expr(x),
             A::AddrOf(x) => {
                 let p = self.place(x)?;
+                self.check_unqualified_place(&p)?;
                 Ok(Expr::new(ExprKind::AddrOf(Box::new(p)), ty))
             }
             A::Unary { op, operand } => {
@@ -705,6 +989,7 @@ impl Cx {
             A::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, ty),
             A::Assign { op, lhs, rhs } => {
                 let p = self.place(lhs)?;
+                self.check_unqualified_place(&p)?;
                 let v = self.expr(rhs)?;
                 match op {
                     None => {
@@ -779,7 +1064,7 @@ impl Cx {
                     _ => Err(Error::unsupported(format!("ctor:{ty}"))),
                 }
             }
-            A::Cast { kind, operand, .. } => {
+            A::Cast { kind, to, operand } => {
                 let v = self.expr(operand)?;
                 match kind {
                     CastKind::AsType => {
@@ -794,6 +1079,8 @@ impl Cx {
                         }
                         _ => conv(v, &ty),
                     },
+                    // A device atomic Uint word has the same AIR pointer type as a device uint.
+                    CastKind::Reinterpret if *to == Ty::DeviceAtomicUintPtr && v.ty == ty => Ok(v),
                     CastKind::Reinterpret => match (&v.ty, &ty) {
                         (
                             Type::Ptr(..) | Type::Scalar(Scalar::Ulong | Scalar::Long),
@@ -933,6 +1220,7 @@ impl Cx {
                 for (a, (by_ref, pt)) in args.iter().zip(params.iter()) {
                     if by_ref.is_some() {
                         let p = self.place(a)?;
+                        self.check_unqualified_place(&p)?;
                         if (*by_ref == Some(Space::Threadgroup) || p.space == Space::Threadgroup)
                             && (*by_ref != Some(p.space) || !self.is_place(a))
                         {
@@ -1001,17 +1289,19 @@ impl Cx {
             self.expr(&args[3])?,
             self.expr(&args[4])?,
         ];
-        // a sampling option (`level(x)`) is passed as its struct, whose value is the float
-        let mut opts: Vec<Option<&'static str>> = Vec::new();
+        // Flatten the option's fields, but retain its kind in the template specialization.
+        let mut opts = Vec::new();
         for a in &args[5..] {
             if let A::Call {
                 callee: Callee::Builtin(n),
                 args: oa,
             } = &a.kind
             {
-                if matches!(&**n, "level" | "bias") {
-                    vals.push(conv(self.expr(&oa[0])?, &Type::FLOAT)?);
-                    opts.push(Some(if &**n == "level" { "level" } else { "bias" }));
+                if let Some(opt) = OptKind::named(n) {
+                    for operand in oa {
+                        vals.push(opt.operand(self.expr(operand)?)?);
+                    }
+                    opts.push(Some(opt));
                     continue;
                 }
             }
@@ -1043,7 +1333,7 @@ impl Cx {
     fn bs_instantiate(
         &mut self,
         tys: &[Type],
-        opts: &[Option<&'static str>],
+        opts: &[Option<OptKind>],
         tx: Tex,
         ty: &Type,
     ) -> R<usize> {
@@ -1091,10 +1381,16 @@ impl Cx {
             Type::UINT,
         );
         let cond = conv(bit, &Type::BOOL)?;
-        let extra: Vec<SampleArg> = (5..tys.len())
-            .map(|k| match opts[k - 5] {
-                Some(o) => SampleArg::Opt(o, k),
-                None => SampleArg::Local(k),
+        let mut k = 5;
+        let extra: Vec<_> = opts
+            .iter()
+            .map(|opt| {
+                let start = k;
+                k += opt.map_or(1, OptKind::arity);
+                match opt {
+                    Some(o) => SampleArg::Opt(*o, start),
+                    None => SampleArg::Local(start),
+                }
             })
             .collect();
         let sample = self.sample_from(
@@ -1294,12 +1590,9 @@ impl Cx {
         let mut gather = if name == "gather" { Some(0u8) } else { None };
         for a in it {
             if let SampleArg::Opt(o, l) = a {
-                let v = load_local(*l, Type::FLOAT);
-                opt = if *o == "level" {
-                    SampleOpt::Level(Box::new(v))
-                } else {
-                    SampleOpt::Bias(Box::new(v))
-                };
+                opt = o.lower(&opt, |i| {
+                    Ok(load_local(l + i, self.locals[l + i].ty.clone()))
+                })?;
                 continue;
             }
             if let SampleArg::Ast(e) = a {
@@ -1307,20 +1600,11 @@ impl Cx {
                     A::Call {
                         callee: Callee::Builtin(n),
                         args: oargs,
-                    } if matches!(&**n, "level" | "bias") => {
-                        let v = conv(self.expr(&oargs[0])?, &Type::FLOAT)?;
-                        opt = if &**n == "level" {
-                            SampleOpt::Level(Box::new(v))
-                        } else {
-                            SampleOpt::Bias(Box::new(v))
-                        };
-                        continue;
-                    }
-                    A::Call {
-                        callee: Callee::Builtin(n),
-                        ..
                     } => {
-                        return Err(Error::unsupported(format!("sample-option:{n}")));
+                        let o = OptKind::named(n)
+                            .ok_or_else(|| Error::unsupported(format!("sample-option:{n}")))?;
+                        opt = o.lower(&opt, |i| o.operand(self.expr(&oargs[i])?))?;
+                        continue;
                     }
                     A::Component(c) => {
                         let i = match &**c {
@@ -1344,6 +1628,11 @@ impl Cx {
         }
         if name == "gather" && !matches!(opt, SampleOpt::None) {
             return Err(Error::invalid("gather option"));
+        }
+        if matches!(opt, SampleOpt::Grad2d(..))
+            && (name != "sample" || tx.kind != TexKind::T2dArray || tx.elem != Scalar::Float)
+        {
+            return Err(Error::unsupported("sample-option:gradient2d"));
         }
         let ty = if name == "sample_compare" || (tx.kind.is_depth() && name == "sample") {
             Type::FLOAT
@@ -1387,8 +1676,8 @@ enum SampleArg<'a> {
     Ast(&'a ast::Expr),
     Local(LocalId),
     Value(Expr),
-    /// A sampling option whose float value is in a local.
-    Opt(&'static str, LocalId),
+    /// A sampling option whose fields start at this local.
+    Opt(OptKind, LocalId),
 }
 
 fn push_label(arms: &mut Vec<SwitchArm>, v: Option<i64>) {

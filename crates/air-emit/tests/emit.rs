@@ -201,6 +201,35 @@ fn the_fp_contract_pragma_stops_fmuladd() {
         "o.c = in.u * in.u + in.u; o.c += in.u * in.u;",
     );
     assert!(!file.contains("fmuladd"), "{file}");
+    assert!(!file.contains("invariance-late-contract"), "{file}");
+    assert!(mixed.contains("invariance-late-contract"), "{mixed}");
+}
+
+#[test]
+fn file_contract_pragma_only_changes_float_value_helpers() {
+    let ir = emit(
+        "#pragma clang fp contract(off)
+         static uint float_helper(float x) { return as_type<uint>(x); }
+         static uint uint_helper(uint x) { return x + 1u; }
+         struct I { float4 u [[user(locn0)]]; };
+         fragment float4 main0(I in [[stage_in]]) {
+             return float4(as_type<float>(uint_helper(float_helper(in.u.x))));
+         }",
+    );
+    let attrs = |name: &str| {
+        let head = ir
+            .lines()
+            .find(|line| line.starts_with("define ") && line.contains(name))
+            .expect("definition");
+        let (_, group) = head.rsplit_once(" #").expect("group");
+        let group = group.trim_end_matches(" {");
+        let prefix = format!("attributes #{group} =");
+        ir.lines()
+            .find(|line| line.starts_with(&prefix))
+            .expect("attributes")
+    };
+    assert!(!attrs("float_helper").contains("invariance-late-contract"));
+    assert!(attrs("uint_helper").contains("invariance-late-contract"));
 }
 
 #[test]
@@ -266,4 +295,153 @@ fn the_blend_rule_of_a_pixel_shader_emits() {
     // The tests are on integer bits, so fast math cannot fold them away.
     assert!(ir.contains("and i32"), "{ir}");
     assert!(ir.contains("1065353216"), "{ir}");
+}
+
+const SAMPLE_GRAD_2D_ARRAY: &str = "air.sample_texture_2d_array_grad.v4f32";
+
+// Distinct, exactly representable components from the authored gradient2d fixtures.
+const GRADIENT_DX: [&str; 2] = ["0x3FB0000000000000", "0xBFD0000000000000"]; // (1/16, -1/4)
+const GRADIENT_DY: [&str; 2] = ["0x3FE0000000000000", "0x3FC0000000000000"]; // (1/2, 1/8)
+
+fn vector_value<'a>(ir: &'a str, element_ty: &str, values: [&str; 2]) -> &'a str {
+    let first = format!(
+        "insertelement <2 x {element_ty}> undef, {element_ty} {}, i32 0",
+        values[0]
+    );
+    let base = result_of(ir, &first);
+    let second = format!(
+        "insertelement <2 x {element_ty}> {base}, {element_ty} {}, i32 1",
+        values[1]
+    );
+    result_of(ir, &second)
+}
+
+fn result_of<'a>(ir: &'a str, operation: &str) -> &'a str {
+    ir.lines()
+        .find_map(|line| {
+            let (result, op) = line.trim().split_once(" = ")?;
+            op.starts_with(operation).then_some(result)
+        })
+        .unwrap_or_else(|| panic!("missing {operation} in {ir}"))
+}
+
+fn gradient_call(ir: &str) -> &str {
+    ir.lines()
+        .find(|line| line.contains("call") && line.contains(SAMPLE_GRAD_2D_ARRAY))
+        .unwrap()
+}
+
+#[test]
+fn array_gradient_preserves_derivatives_and_offset() {
+    let ir = emit(
+        "struct spvDescriptorSetBuffer0 { texture2d_array<float> tex [[id(0)]]; sampler s [[id(1)]]; };\n\
+         fragment float4 main0(constant spvDescriptorSetBuffer0& a [[buffer(0)]]) {\n\
+           return a.tex.sample(a.s, float2(0.25f, 0.5f), 1u,\n\
+                               gradient2d(float2(0.0625f, -0.25f), float2(0.5f, 0.125f)), int2(2, -3));\n\
+         }",
+    );
+    let dx = vector_value(&ir, "float", GRADIENT_DX);
+    let dy = vector_value(&ir, "float", GRADIENT_DY);
+    let offset = vector_value(&ir, "i32", ["2", "-3"]);
+    let call = gradient_call(&ir);
+    assert!(call.contains(&format!(
+        "i32 1, <2 x float> {dx}, <2 x float> {dy}, float 0x0000000000000000, i1 true, <2 x i32> {offset}, i32 0)"
+    )), "{call}");
+    let decl = ir
+        .lines()
+        .find(|s| s.starts_with("declare") && s.contains(SAMPLE_GRAD_2D_ARRAY))
+        .unwrap();
+    assert!(
+        decl.contains("<2 x float>, i32, <2 x float>, <2 x float>, float, i1, <2 x i32>, i32"),
+        "{decl}"
+    );
+    assert!(ir.contains("extractvalue { <4 x float>, i8 }"));
+}
+
+#[test]
+fn array_gradient_passes_both_derivatives_through_border_helper() {
+    let ir = emit(
+        "struct dm_border_t { uint mask; float4 k[2]; };\n\
+         float4 dm_bmix(float4 a, float4 b, float4 k) { return a + b * k; }\n\
+         template<typename V, typename T, typename... A> static inline __attribute__((always_inline))\n\
+         V dm_bs(V r, constant dm_border_t* b, uint i, T t, sampler w, A... a) {\n\
+           if (b->mask >> i & 1u) r = dm_bmix(r, t.sample(w, a...), b->k[i]); return r; }\n\
+         struct spvDescriptorSetBuffer0 { texture2d_array<float> tex [[id(0)]]; sampler s [[id(1)]];\n\
+           constant dm_border_t* border [[id(2)]]; };\n\
+         fragment float4 main0(constant spvDescriptorSetBuffer0& a [[buffer(0)]]) {\n\
+           return dm_bs(float4(0.0f), a.border, 0u, a.tex, a.s, float2(0.5f), 1u,\n\
+                        gradient2d(float2(0.0625f, -0.25f), float2(0.5f, 0.125f))); }",
+    );
+    let (caller, helper) = ir.split_once("define internal <4 x float> @dm_bs").unwrap();
+    let dx = vector_value(caller, "float", GRADIENT_DX);
+    let dy = vector_value(caller, "float", GRADIENT_DY);
+    let forward = caller
+        .lines()
+        .find(|line| line.contains("call") && line.contains("@dm_bs"))
+        .unwrap();
+    assert!(
+        forward.contains(&format!(
+            "i32 noundef 1, <2 x float> noundef {dx}, <2 x float> noundef {dy})"
+        )),
+        "{forward}"
+    );
+
+    let reload = |arg| {
+        let store = format!("store <2 x float> {arg}, <2 x float>* ");
+        let slot = helper
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(&store))
+            .unwrap()
+            .split_once(',')
+            .unwrap()
+            .0;
+        result_of(helper, &format!("load <2 x float>, <2 x float>* {slot},"))
+    };
+    // The specialization's first derivative is argument 7, its second is argument 8.
+    let dx = reload("%a7");
+    let dy = reload("%a8");
+    let call = gradient_call(helper);
+    assert!(
+        call.contains(&format!("<2 x float> {dx}, <2 x float> {dy}, float 0x0000000000000000, i1 true, <2 x i32> zeroinitializer, i32 0)")),
+        "{call}"
+    );
+}
+
+#[test]
+fn array_gradient_rejects_scalar_derivatives() {
+    let source = format!(
+        "{PRE}struct spvDescriptorSetBuffer0 {{ texture2d_array<float> tex [[id(0)]]; sampler s [[id(1)]]; }};\n\
+         fragment float4 main0(constant spvDescriptorSetBuffer0& a [[buffer(0)]]) {{\n\
+            return a.tex.sample(a.s, float2(0.5f), 1u, gradient2d(0.0625f, float2(0.0f))); }}"
+    );
+    let err = compile_source(&source, &Target::macos(), "t.metal").unwrap_err();
+    assert!(
+        format!("{err:?}").contains("gradient2d requires float2 derivatives"),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn fragment_sample_id_can_be_a_stage_in_member() {
+    let body = "struct I { uint gl_SampleID [[sample_id]]; };
+        struct O { float4 c [[color(0)]]; };
+        fragment O main0(I in [[stage_in]]) {
+            O o;
+            o.c = float4(float(in.gl_SampleID));
+            return o;
+        }";
+    for target in [Target::macos(), Target::ios()] {
+        let ir = compile_source(&format!("{PRE}{body}"), &target, "t.metal").expect("emits");
+        assert!(
+            ir.contains(
+                "i32 0, !\"air.sample_id\", !\"air.arg_type_name\", !\"uint\", !\"air.arg_name\", !\"gl_SampleID\""
+            ),
+            "{ir}"
+        );
+        assert!(ir.contains("@air.convert.f.f32.u.i32(i32 %"), "{ir}");
+
+        let bad = body.replace("uint gl_SampleID", "float gl_SampleID");
+        assert!(compile_source(&format!("{PRE}{bad}"), &target, "t.metal")
+            .is_err_and(|e| e.to_string().contains("sample_id field is not uint")));
+    }
 }

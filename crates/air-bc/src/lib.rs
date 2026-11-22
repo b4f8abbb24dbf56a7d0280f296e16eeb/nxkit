@@ -42,6 +42,37 @@ attributes #0 = { nounwind }
 "#;
 
     #[test]
+    fn volatile_loads_survive_dce_cse_and_promotion() {
+        let source = SMALL
+            .replace("float noundef %a", "float noundef %a, i32 addrspace(2)* %constant")
+            .replace(
+                "  %0 = load float, float* %a.addr, align 4",
+                "  %unused = load volatile float, float* %a.addr, align 4\n  %0 = load volatile float, float* %a.addr, align 4\n  %c0 = load volatile i32, i32 addrspace(2)* %constant, align 4\n  %c1 = load volatile i32, i32 addrspace(2)* %constant, align 4",
+            );
+        let mut module = parse::parse(&source).expect("volatile load subset");
+        opt::optimize(&mut module);
+        let ops = module.functions[0].blocks.iter().flat_map(|(_, ops)| ops);
+        assert_eq!(
+            ops.filter(|i| matches!(i.op, ast::Op::Load(_, _, _, true)))
+                .count(),
+            4,
+        );
+        let volatile = writer::write(&module).expect("volatile load bitcode");
+        for (_, ops) in &mut module.functions[0].blocks {
+            for inst in ops {
+                if let ast::Op::Load(_, _, _, volatile) = &mut inst.op {
+                    *volatile = false;
+                }
+            }
+        }
+        // Same instructions, just volatility: the raw bitcode record must change.
+        assert_ne!(
+            volatile,
+            writer::write(&module).expect("ordinary load bitcode")
+        );
+    }
+
+    #[test]
     fn writes_wrapped_bitcode() {
         let b = to_bitcode(SMALL).expect("subset");
         // wrapper magic 0x0B17C0DE, then the raw 'BC' 0xC0DE stream at the offset it names

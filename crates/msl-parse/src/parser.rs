@@ -73,6 +73,33 @@ fn py_int(s: &str) -> PResult<u128> {
     }))
 }
 
+/// Decode unsigned binary digits with optional C++ digit separators.
+fn binary_u32(digits: &str) -> PResult<u32> {
+    let bytes = digits.as_bytes();
+    if bytes.is_empty() {
+        return reject("binary-literal:out-of-range");
+    }
+    let mut value = 0u32;
+    let mut previous_digit = false;
+    for (i, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'0' | b'1' => {
+                let Some(next) = value.checked_mul(2) else {
+                    return reject("binary-literal:out-of-range");
+                };
+                value = next + u32::from(byte - b'0');
+                previous_digit = true;
+            }
+            b'\'' if previous_digit && matches!(bytes.get(i + 1), Some(b'0' | b'1')) => {
+                previous_digit = false;
+            }
+            b'\'' => return reject("binary-literal:separator-position"),
+            _ => return reject("binary-literal:out-of-range"),
+        }
+    }
+    Ok(value)
+}
+
 /// `int(n.rstrip('uU'))` as the canonical decimal text (no leading zeros).
 fn py_int_text(n: &str) -> PResult<Rc<str>> {
     let digits = n.trim_end_matches(['u', 'U']);
@@ -116,7 +143,7 @@ const TEX_ACCEPTED: [&str; 9] = [
     "depthcube",
     "depthcube_array",
 ];
-const FIELD_ATTRS: [&str; 16] = [
+const FIELD_ATTRS: [&str; 17] = [
     "id",
     "user",
     "attribute",
@@ -133,6 +160,7 @@ const FIELD_ATTRS: [&str; 16] = [
     "sample_mask",
     "clip_distance",
     "front_facing",
+    "sample_id",
 ];
 const PARAM_ATTRS: [&str; 16] = [
     "stage_in",
@@ -714,13 +742,34 @@ impl<'a> Parser<'a> {
         self.next()?;
         let mut fields: Vec<Field> = Vec::new();
         while !self.accept("}")? {
-            let ty = self.type_()?;
-            let is_const = self.last_const;
+            let is_volatile = self.peek()? == "const"
+                && self.peek_at(1)? == "device"
+                && self.peek_at(2)? == "volatile";
+            let ty = if is_volatile {
+                self.expect("const")?;
+                self.expect("device")?;
+                self.expect("volatile")?;
+                let target = self.ident()?;
+                if !self.structs.contains_key(target) {
+                    return reject("volatile-field:pointee");
+                }
+                self.expect("*")?;
+                Ty::Ptr(Space::Device, Rc::new(Ty::Struct(self.intern(target))))
+            } else {
+                self.type_()?
+            };
+            if ty == Ty::DeviceAtomicUintPtr {
+                return reject("type:atomic_uint");
+            }
+            let is_const = is_volatile || self.last_const;
             loop {
                 let fname = self.ident()?;
                 let fname = self.intern(fname);
                 let fty = self.array_suffix(ty.clone())?;
                 let attrs = self.attrs()?;
+                if is_volatile && (fty != ty || attrs.len() != 1 || attrs[0].name != "id") {
+                    return reject("volatile-field:binding");
+                }
                 for a in &attrs {
                     if !FIELD_ATTRS.contains(&a.name.as_str()) {
                         return reject(format!("field-attr:{}", a.name));
@@ -735,6 +784,7 @@ impl<'a> Parser<'a> {
                     ty: fty,
                     attrs,
                     is_const,
+                    is_volatile,
                 });
                 if !self.accept(",")? {
                     break;
@@ -763,10 +813,46 @@ impl<'a> Parser<'a> {
         let name = self.ident()?;
         let name = self.intern(name);
         if self.peek()? == "[" {
-            let ty = self.array_suffix(ty)?;
-            self.expect("=")?;
-            let init = self.init_list()?;
+            let inferred = self.peek_at(1)? == "]";
+            let ty = if inferred {
+                self.expect("[")?;
+                self.expect("]")?;
+                if self.peek()? == "[" {
+                    return reject("const-array:unsized-nested");
+                }
+                if !matches!(ty, Ty::Scalar(_) | Ty::Vec { packed: false, .. }) {
+                    return reject("const-array:unsized-element-type");
+                }
+                ty
+            } else {
+                self.array_suffix(ty)?
+            };
+            let direct = !self.accept("=")?;
+            if direct
+                && !inferred
+                && !matches!(&ty, Ty::Array { elem, .. }
+                    if matches!(elem.as_ref(), Ty::Scalar(_) | Ty::Vec { packed: false, .. }))
+            {
+                return reject("const-array:direct-element-type");
+            }
+            let init = self.init_list(inferred, direct)?;
             self.expect(";")?;
+            let ty = if inferred {
+                if init.is_empty() {
+                    return reject("const-array:unsized-empty");
+                }
+                let Ok(n) = u32::try_from(init.len()) else {
+                    return reject("const-array:unsized-length");
+                };
+                Ty::Array {
+                    elem: Rc::new(ty),
+                    n: Rc::from(n.to_string()),
+                    unsafe_: false,
+                    metal: false,
+                }
+            } else {
+                ty
+            };
             self.globals
                 .insert(name.clone(), Ty::Ref(Space::Constant, Rc::new(ty.clone())));
             self.stat("const-array")?;
@@ -831,6 +917,9 @@ impl<'a> Parser<'a> {
             self.next()?;
             Ty::Void
         };
+        if ret == Ty::DeviceAtomicUintPtr {
+            return reject("type:atomic_uint");
+        }
         let name = self.ident()?;
         let name = self.intern(name);
         self.expect("(")?;
@@ -838,6 +927,9 @@ impl<'a> Parser<'a> {
         if !self.accept(")")? {
             loop {
                 let (pty, array_ref) = self.frame(|p| p.type_body(entry.is_none(), false))?;
+                if pty == Ty::DeviceAtomicUintPtr {
+                    return reject("type:atomic_uint");
+                }
                 let is_const = self.last_const;
                 if array_ref.is_some() {
                     if is_const {
@@ -941,18 +1033,36 @@ impl<'a> Parser<'a> {
             let toks = &p.toks[p.i..end];
             let has_init = toks.iter().any(|t| t.text == "[[" || t.text == "=");
             let has_body = (p.i..end).any(|j| p.toks[j].text == "{" && p.toks[j - 1].text == ")");
-            Ok(has_init && !has_body)
+            // A direct-list array has a closing bound immediately before its
+            // first brace, without an intervening function declarator.
+            let direct_array = toks
+                .iter()
+                .position(|t| t.text == "{")
+                .is_some_and(|brace| {
+                    let head = &toks[..brace];
+                    head.last().is_some_and(|t| t.text == "]")
+                        && !head.iter().any(|t| matches!(t.text, "(" | "[["))
+                });
+            Ok((has_init || direct_array) && !has_body)
         })
     }
 
-    /// `init_list(ty)`: `{ e, e, ... }` with optional commas.
-    fn init_list(&mut self) -> PResult<Vec<Expr>> {
+    /// A global constant array initializer list with optional trailing comma.
+    fn init_list(&mut self, inferred: bool, direct: bool) -> PResult<Vec<Expr>> {
         self.frame(|p| {
             p.expect("{")?;
             let mut out = Vec::new();
             while !p.accept("}")? {
                 out.push(*p.expr_assign()?);
-                p.accept(",")?;
+                if !p.accept(",")? && p.peek()? != "}" {
+                    return reject(if inferred {
+                        "const-array:unsized-missing-comma"
+                    } else if direct {
+                        "const-array:direct-missing-comma"
+                    } else {
+                        "const-array:missing-comma"
+                    });
+                }
             }
             Ok(out)
         })
@@ -1063,9 +1173,14 @@ impl<'a> Parser<'a> {
             self.last_const = true;
             v = self.ident()?;
         }
-        if v == "atomic_uint" && space == Some(Space::Threadgroup) && !self.last_const {
+        if v == "atomic_uint" && !self.last_const {
+            let ty = match space {
+                Some(Space::Threadgroup) => Ty::ThreadgroupAtomicUintPtr,
+                Some(Space::Device) => Ty::DeviceAtomicUintPtr,
+                _ => return reject("type:atomic_uint"),
+            };
             self.expect("*")?;
-            return Ok((Ty::ThreadgroupAtomicUintPtr, None));
+            return Ok((ty, None));
         }
         let mut t = if let Some((packed, base, w)) = vec_name(v) {
             if packed {
@@ -1234,6 +1349,46 @@ impl<'a> Parser<'a> {
         self.frame(|p| p.stmt_body())
     }
 
+    /// Match the exact producer alias without adding to the type namespace.
+    fn shared_half_store(&mut self) -> PResult<Option<Stmt>> {
+        const DECLARATION: &[&str] = &[
+            "typedef",
+            "ushort",
+            "__attribute__",
+            "(",
+            "(",
+            "may_alias",
+            ")",
+            ")",
+            "dm_ushort_alias",
+            ";",
+        ];
+        for (i, token) in DECLARATION.iter().enumerate() {
+            if self.peek_at(i)? != *token {
+                return Ok(None);
+            }
+        }
+        for token in DECLARATION.iter().copied().chain([
+            "(",
+            "(",
+            "threadgroup",
+            "dm_ushort_alias",
+            "*",
+            ")",
+        ]) {
+            self.expect(token)?;
+        }
+        let base = self.expr_unary()?;
+        self.expect(")")?;
+        self.expect("[")?;
+        let index = self.expr()?;
+        self.expect("]")?;
+        self.expect("=")?;
+        let value = self.expr()?;
+        self.expect(";")?;
+        Ok(Some(Stmt::SharedHalfStore { base, index, value }))
+    }
+
     fn stmt_body(&mut self) -> PResult<Stmt> {
         let v = self.peek()?;
         self.stat("stmt")?;
@@ -1245,6 +1400,11 @@ impl<'a> Parser<'a> {
             ";" => {
                 self.next()?;
                 return Ok(Stmt::Empty);
+            }
+            "typedef" => {
+                if let Some(store) = self.shared_half_store()? {
+                    return Ok(store);
+                }
             }
             "if" => {
                 self.next()?;
@@ -1586,6 +1746,21 @@ impl<'a> Parser<'a> {
             if !p.lv {
                 return reject("assign-to-rvalue");
             }
+            // Keep the indexed-output change to simple assignment. A
+            // compound assignment would have to retain the same address
+            // across its read and write rather than recompute the choice.
+            fn conditional_field_lhs(e: &Expr) -> bool {
+                match &e.kind {
+                    ExprKind::Cond { .. } => matches!(e.ty, Ty::Ref(Space::Thread, _)),
+                    ExprKind::Paren(base)
+                    | ExprKind::Swizzle { base, .. }
+                    | ExprKind::Index { base, .. } => conditional_field_lhs(base),
+                    _ => false,
+                }
+            }
+            if op != "=" && conditional_field_lhs(&t) {
+                return reject("conditional-field-compound-assignment");
+            }
             let lhs_name = p.lvname.clone();
             let r = p.expr_assign()?;
             let bop = if op == "=" {
@@ -1636,10 +1811,39 @@ impl<'a> Parser<'a> {
             }
             p.cond(&c.ty)?;
             let a = p.expr_assign()?;
+            let a_lvalue = p.lv;
             p.expect(":")?;
             let b = p.expr_assign()?;
             let (ta, tb) = (a.ty.strip(), b.ty.strip());
-            p.lv = false;
+            // nxkit's indexed outputs select among ordinary local fields,
+            // not pointer dereferences, subscripts, or computed temporaries.
+            fn local_field(expr: &Expr) -> bool {
+                match &expr.kind {
+                    ExprKind::Member {
+                        base, arrow: false, ..
+                    } => matches!(
+                        base.kind,
+                        ExprKind::Var {
+                            scope: VarScope::Local,
+                            ..
+                        }
+                    ),
+                    ExprKind::Paren(inner) => local_field(inner),
+                    ExprKind::Cond { .. } => matches!(expr.ty, Ty::Ref(Space::Thread, _)),
+                    _ => false,
+                }
+            }
+            let field_place = a_lvalue
+                && p.lv
+                && a.ty == b.ty
+                && matches!(a.ty, Ty::Ref(Space::Thread, _))
+                && matches!(ta, Ty::Vec { .. })
+                && local_field(&a)
+                && local_field(&b);
+            p.lv = field_place;
+            if field_place {
+                p.lvname = None;
+            }
             p.stat("op:?")?;
             let ty = if ta == tb {
                 ta
@@ -1664,7 +1868,11 @@ impl<'a> Parser<'a> {
                     then: a,
                     els: b,
                 },
-                ty,
+                ty: if field_place {
+                    Ty::Ref(Space::Thread, Rc::new(ty))
+                } else {
+                    ty
+                },
                 span: p.span_from(start),
             })
         })
@@ -2082,9 +2290,18 @@ impl<'a> Parser<'a> {
         if k == TokKind::Num {
             self.next()?;
             self.stat("lit")?;
-            let ty = self.literal_type(v)?;
+            let (ty, value) =
+                if let Some(binary) = v.strip_prefix("0b").or_else(|| v.strip_prefix("0B")) {
+                    let Some(digits) = binary.strip_suffix(['u', 'U']) else {
+                        return reject("binary-literal:requires-unsigned-suffix");
+                    };
+                    let value = binary_u32(digits)?;
+                    (UINT, format!("{value}u").into())
+                } else {
+                    (self.literal_type(v)?, v.into())
+                };
             return bx(Expr {
-                kind: ExprKind::Literal(v.into()),
+                kind: ExprKind::Literal(value),
                 ty,
                 span: self.span_from(start),
             });
@@ -2203,16 +2420,23 @@ impl<'a> Parser<'a> {
                     {
                         return reject("threadgroup-atomic-cast");
                     }
+                    if f != to && (f == Ty::DeviceAtomicUintPtr || to == Ty::DeviceAtomicUintPtr) {
+                        return reject("device-atomic-cast");
+                    }
                     self.stat("call:static_cast")?;
                     CastKind::Static
                 }
                 _ => {
                     let from_ok =
                         matches!(f, Ty::Ptr(..)) || f == s(Scalar::Ulong) || f == s(Scalar::Long);
-                    let ok = if to == Ty::ThreadgroupAtomicUintPtr {
-                        matches!(&f, Ty::Ptr(Space::Threadgroup, inner) if **inner == UINT)
-                    } else {
-                        matches!(to, Ty::Ptr(..)) && from_ok
+                    let ok = match &to {
+                        Ty::ThreadgroupAtomicUintPtr => {
+                            matches!(&f, Ty::Ptr(Space::Threadgroup, inner) if **inner == UINT)
+                        }
+                        Ty::DeviceAtomicUintPtr => {
+                            matches!(&f, Ty::Ptr(Space::Device, inner) if **inner == UINT)
+                        }
+                        _ => matches!(to, Ty::Ptr(..)) && from_ok,
                     };
                     if !ok {
                         return reject("reinterpret_cast");
@@ -2443,6 +2667,24 @@ impl<'a> Parser<'a> {
             self.expect(")")?;
             if val.ty.strip() != UINT {
                 return reject("threadgroup-atomic-form");
+            }
+            return bx(mk(
+                self,
+                Callee::Builtin(name.into()),
+                vec![*ptr, *val],
+                UINT,
+            ));
+        }
+        if name == "atomic_fetch_or_explicit" && !self.funcs.contains_key(name) {
+            self.expect("(")?;
+            let ptr = self.expr_assign()?;
+            self.expect(",")?;
+            let val = self.expr_assign()?;
+            self.expect(",")?;
+            self.expect("memory_order_relaxed")?;
+            self.expect(")")?;
+            if ptr.ty.strip() != Ty::DeviceAtomicUintPtr || val.ty.strip() != UINT {
+                return reject("device-atomic-or-form");
             }
             return bx(mk(
                 self,

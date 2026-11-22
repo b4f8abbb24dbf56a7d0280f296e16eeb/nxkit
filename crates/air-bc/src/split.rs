@@ -86,7 +86,7 @@ fn global_refs_val(v: &Val, out: &mut Vec<String>) {
 fn op_vals(op: &Op) -> Vec<&Val> {
     match op {
         Op::Alloca(..) | Op::Br(_) | Op::Unreachable => vec![],
-        Op::Load(_, p, _) => vec![&p.1],
+        Op::Load(_, p, _, _) => vec![&p.1],
         Op::Store(a, b, _) => vec![&a.1, &b.1],
         Op::Gep(_, _, p, idx) => std::iter::once(&p.1)
             .chain(idx.iter().map(|x| &x.1))
@@ -162,7 +162,7 @@ pub fn split(m: &Module) -> Result<Vec<Entry>, String> {
         for (_, insts) in &f.blocks {
             for i in insts {
                 match &i.op {
-                    Op::Load(_, p, _) => global_refs_val(&p.1, &mut loads),
+                    Op::Load(_, p, _, _) => global_refs_val(&p.1, &mut loads),
                     Op::Store(_, p, _) => global_refs_val(&p.1, &mut stores),
                     _ => {}
                 }

@@ -266,6 +266,8 @@ pub enum Ty {
     Ptr(Space, Rc<Ty>),
     /// Opaque word pointer usable by relaxed threadgroup atomics.
     ThreadgroupAtomicUintPtr,
+    /// Opaque pointer usable by relaxed device unsigned atomic OR.
+    DeviceAtomicUintPtr,
     /// An lvalue (or reference) of the inner type in an address space.
     Ref(Space, Rc<Ty>),
     /// `n` is the decimal length without leading zeros. `unsafe_` is `spvUnsafeArray`, `metal`
@@ -328,6 +330,7 @@ impl Ty {
             Ty::Struct(_) => "struct",
             Ty::Ptr(..) => "ptr",
             Ty::ThreadgroupAtomicUintPtr => "threadgroup atomic_uint*",
+            Ty::DeviceAtomicUintPtr => "device atomic_uint*",
             Ty::Ref(..) => "ref",
             Ty::Array { .. } => "array",
             Ty::Tex { .. } => "tex",
@@ -404,7 +407,9 @@ impl Ty {
             Ty::Ptr(space, _) | Ty::Ref(space, _) => ScalarName::named(space.name()),
             Ty::Array { elem, .. } => ScalarName::BogusTy(elem.clone()),
             Ty::Tex { kind, .. } => ScalarName::named(kind),
-            Ty::ThreadgroupAtomicUintPtr | Ty::Sampler | Ty::Void => ScalarName::BogusNone,
+            Ty::ThreadgroupAtomicUintPtr | Ty::DeviceAtomicUintPtr | Ty::Sampler | Ty::Void => {
+                ScalarName::BogusNone
+            }
             Ty::Opt(name) => ScalarName::named(name),
             Ty::Comp(name) => ScalarName::named(name),
         })

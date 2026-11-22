@@ -3,7 +3,7 @@
 
 use msl_parse::ast::{Attr, Stage};
 use msl_sema::hir::Func;
-use msl_sema::types::{Access, FieldDef, Space, Type};
+use msl_sema::types::{Access, FieldDef, Scalar, Space, Type};
 use msl_sema::Error;
 
 use crate::func::{Addr, FnGen, RetKind, V};
@@ -419,6 +419,11 @@ pub fn emit_entry(cx: &mut ModCx, f: &Func) -> R<String> {
                             md.extend(interp(fa));
                         } else if attr(fa, "front_facing").is_some() {
                             md.push(s("air.front_facing"));
+                        } else if attr(fa, "sample_id").is_some() {
+                            if fd.ty != Type::Scalar(Scalar::Uint) {
+                                return Err(Error::invalid("sample_id field is not uint"));
+                            }
+                            md.push(s("air.sample_id"));
                         } else {
                             return Err(Error::unsupported("stage_in:fragment-field"));
                         }
@@ -560,8 +565,13 @@ pub fn emit_entry(cx: &mut ModCx, f: &Func) -> R<String> {
         .enumerate()
         .map(|(k, x)| format!("{}{} %a{k}", x.ty, x.attrs))
         .collect();
+    let group = if cx.metal41 && stage == Stage::Fragment && !f.contract {
+        crate::NO_LATE_CONTRACT_GROUP
+    } else {
+        0
+    };
     let header = format!(
-        "define {ret_ty} @{}({}) #0 {{\n",
+        "define {ret_ty} @{}({}) #{group} {{\n",
         f.name,
         params_text.join(", ")
     );

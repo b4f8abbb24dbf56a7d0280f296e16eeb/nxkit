@@ -83,8 +83,8 @@ pub struct Inst {
 pub enum Op {
     /// alloca T, align A
     Alloca(Ty, u32),
-    /// load T, ptr, align A
-    Load(Ty, (Ty, Val), u32),
+    /// load [volatile] T, ptr, align A; the final field is volatility.
+    Load(Ty, (Ty, Val), u32, bool),
     /// store (T v), (ptr), align A
     Store((Ty, Val), (Ty, Val), u32),
     /// getelementptr [inbounds] T, ptr, idx...

@@ -546,6 +546,15 @@ impl<'a> FnGen<'a> {
             Stmt::Expr(e) => {
                 self.expr(e)?;
             }
+            Stmt::MayAliasStore { place, value } => {
+                let value = self.expr(value)?;
+                let addr = self
+                    .addr(place)?
+                    .ok_or_else(|| Error::invalid("alias store to non-addressable"))?;
+                self.no_tbaa += 1;
+                self.store_to(&addr, &value);
+                self.no_tbaa -= 1;
+            }
             Stmt::Block(b) => self.scope(b)?,
             Stmt::NoContract(b) => {
                 let saved = std::mem::replace(&mut self.contract, false);
@@ -842,7 +851,7 @@ impl<'a> FnGen<'a> {
                 ty: p.ty.clone(),
                 space: 2,
             },
-            PlaceKind::Deref(e) => {
+            PlaceKind::Deref(e) | PlaceKind::VolatileDeref(e) => {
                 let v = self.expr(e)?;
                 Addr {
                     ptr: v.r,
@@ -1007,6 +1016,10 @@ impl<'a> FnGen<'a> {
 
     /// Loads a value from an address (memory form to value form).
     pub fn load_from(&mut self, a: &Addr) -> V {
+        self.load_from_qualified(a, false)
+    }
+
+    fn load_from_qualified(&mut self, a: &Addr, volatile: bool) -> V {
         if matches!(a.ty, Type::Texture(_) | Type::Sampler) {
             let (p, md) = self.handle_addr(a);
             let ht = self.lt(&a.ty);
@@ -1048,8 +1061,9 @@ impl<'a> FnGen<'a> {
         let mt = self.mt(&a.ty);
         let r = self.tmp();
         let md = self.access_md(a);
+        let qualifier = if volatile { "volatile " } else { "" };
         self.emit(format!(
-            "{r} = load {mt}, {mt}{sp}* {}, align {al}{md}",
+            "{r} = load {qualifier}{mt}, {mt}{sp}* {}, align {al}{md}",
             a.ptr
         ));
         if a.ty.elem() == Some(Scalar::Bool) {
@@ -1233,7 +1247,7 @@ impl<'a> FnGen<'a> {
                 let a = self
                     .addr(p)?
                     .ok_or_else(|| Error::invalid("load of non-addressable"))?;
-                Ok(self.load_from(&a))
+                Ok(self.load_from_qualified(&a, p.is_volatile()))
             }
         }
     }
@@ -2196,20 +2210,41 @@ impl<'a> FnGen<'a> {
         Ok(V { r, ty: to })
     }
 
-    /// Folds a constant expression (for constant array initialisers).
-    pub fn fold(e: &Expr) -> Option<CVal> {
+    /// Recognizes constant arms for conditional-expression lowering.
+    fn fold(e: &Expr) -> Option<CVal> {
+        Self::fold_inner(e, false)
+    }
+
+    /// Folds a global array element, declining conversions that may lose their typed value.
+    pub fn fold_array_initializer(e: &Expr) -> Option<CVal> {
+        Self::fold_inner(e, true)
+    }
+
+    fn fold_inner(e: &Expr, array_init: bool) -> Option<CVal> {
         Some(match &e.kind {
-            ExprKind::Int(v) => CVal::Int(*v),
+            ExprKind::Int(v) => {
+                if array_init && !folded_integer_fits(*v, e.ty.elem()?) {
+                    return None;
+                }
+                CVal::Int(*v)
+            }
             ExprKind::Float(v) => CVal::Float(*v),
             ExprKind::Zero => CVal::Zero,
-            ExprKind::Unary(UnOp::Neg, x) => match FnGen::fold(x)? {
+            ExprKind::Unary(UnOp::Neg, x) => match Self::fold_inner(x, array_init)? {
                 CVal::Int(v) => CVal::Int(-v),
                 CVal::Float(v) => CVal::Float(-v),
                 _ => return None,
             },
             ExprKind::Convert(x) => {
-                let v = FnGen::fold(x)?;
+                let mut v = Self::fold_inner(x, array_init)?;
                 let s = e.ty.elem()?;
+                if array_init {
+                    let from = x.ty.elem()?;
+                    normalize_array_vector_source(&mut v, from);
+                    if !array_conversion_is_safe(&v, from, s) {
+                        return None;
+                    }
+                }
                 match v {
                     CVal::Int(i) if is_float(s) => CVal::Float(i as f64),
                     CVal::Float(f) if !is_float(s) => CVal::Int(f as i128),
@@ -2217,13 +2252,13 @@ impl<'a> FnGen<'a> {
                 }
             }
             ExprKind::Splat(x) => {
-                let v = FnGen::fold(x)?;
+                let v = Self::fold_inner(x, array_init)?;
                 CVal::Vec(vec![v; e.ty.width()? as usize])
             }
             ExprKind::Vector(parts) => {
                 let mut out = Vec::new();
                 for p in parts {
-                    match FnGen::fold(p)? {
+                    match Self::fold_inner(p, array_init)? {
                         CVal::Vec(v) => out.extend(v),
                         v => out.push(v),
                     }
@@ -2242,6 +2277,66 @@ impl<'a> FnGen<'a> {
     /// The thread address space number.
     pub fn thread() -> u32 {
         space_num(Space::Thread)
+    }
+}
+
+// The legacy fold keeps the representation of lanes in a vector cast. When a
+// later cast reads that vector, restore the proven source type for each lane.
+// Leave final storage spelling and unmodeled half/bool conversions alone.
+fn normalize_array_vector_source(v: &mut CVal, from: Scalar) {
+    let CVal::Vec(lanes) = v else { return };
+    for lane in lanes {
+        match lane {
+            CVal::Int(i) if from == Scalar::Float => {
+                let f = *i as f32;
+                if f as i128 == *i {
+                    *lane = CVal::Float(f64::from(f));
+                }
+            }
+            CVal::Float(f) if !is_float(from) && from != Scalar::Bool && f.is_finite() => {
+                *lane = CVal::Int(f.trunc() as i128);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn folded_integer_fits(n: i128, s: Scalar) -> bool {
+    let bits = scalar_bits(s);
+    if is_signed(s) {
+        let limit = 1i128 << (bits - 1);
+        (-limit..limit).contains(&n)
+    } else {
+        (0..(1i128 << bits)).contains(&n)
+    }
+}
+
+// The existing fold carries wide literals, without applying each intermediate
+// conversion. Keep its output when it is safe, otherwise let Metal compile it.
+fn array_conversion_is_safe(v: &CVal, from: Scalar, to: Scalar) -> bool {
+    match v {
+        CVal::Zero => true,
+        CVal::Vec(items) => items.iter().all(|i| array_conversion_is_safe(i, from, to)),
+        CVal::Int(i) if !is_float(from) && folded_integer_fits(*i, from) => {
+            if is_float(to) {
+                // A rounded wide integer could be observed by a later cast.
+                (*i as f32) as i128 == *i
+            } else {
+                to == Scalar::Bool || folded_integer_fits(*i, to)
+            }
+        }
+        CVal::Float(f) if from == Scalar::Float && f.is_finite() => {
+            if is_float(to) {
+                true
+            } else if to == Scalar::Bool {
+                // The legacy fold truncates before converting to bool.
+                *f == 0.0 || f.trunc() != 0.0
+            } else {
+                folded_integer_fits(f.trunc() as i128, to)
+            }
+        }
+        // In particular, a half source may still carry an unrounded f32 literal.
+        _ => false,
     }
 }
 

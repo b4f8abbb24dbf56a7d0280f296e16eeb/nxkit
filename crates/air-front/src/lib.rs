@@ -43,7 +43,7 @@ pub fn id() -> String {
 pub const ID_BASE: &str = "0.10.0";
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 11;
+pub const FORMAT: u32 = 23;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -339,6 +339,285 @@ mod tests {
         let parsed = air_lib::parse(&lib).expect("metallib");
         assert_eq!(parsed.functions[0].name(), b"exchange");
         assert_eq!(parsed.functions[1].name(), b"separate");
+    }
+
+    fn assert_same_shader(source: &str, reference: &str, target: &Target) {
+        let got = compile(source.as_bytes(), target).expect("source bitcode");
+        assert!(matches!(got, Ir::Bitcode(_)), "{source}");
+        assert_eq!(
+            got,
+            compile(reference.as_bytes(), target).expect("reference bitcode"),
+            "{source}"
+        );
+        assert_eq!(
+            build_raw(source.as_bytes(), target).expect("source metallib"),
+            build_raw(reference.as_bytes(), target).expect("reference metallib"),
+            "{source}"
+        );
+    }
+
+    #[test]
+    fn partial_constant_arrays_match_explicit_zeroes() {
+        let target = Target::macos_for(27);
+        for (ty, len, prefix, zero) in [
+            ("uint", 4, &["9u", "0u"][..], "0u"),
+            ("float", 3, &["-0.0", "1.5"][..], "0.0"),
+            ("bool", 3, &["true"][..], "false"),
+            ("uint", 11, &["5u", "0u"][..], "0u"),
+            ("float", 3, &[][..], "0.0"),
+            ("uint2", 3, &["uint2(2u, 7u)"][..], "uint2(0u)"),
+            ("float3", 3, &["float3(-0.0, 0.0, 0.0)"][..], "float3(0.0)"),
+            ("float3", 10, &["float3(2.0)"][..], "float3(0.0)"),
+            ("uint4", 3, &[][..], "uint4(0u)"),
+        ] {
+            let shader = |values: &[&str]| {
+                format!(
+                "#include <metal_stdlib>\nusing namespace metal;\n\
+                 constant {ty} values[{len}] = {{{}}};\n\
+                 kernel void k(device {ty}* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ out[i] = values[i]; }}\n",
+                values.join(", ")
+            )
+            };
+            let partial = shader(prefix);
+            let mut padded = prefix.to_vec();
+            padded.resize(len, zero);
+            let full = shader(&padded);
+            assert_same_shader(&partial, &full, &target);
+        }
+    }
+
+    #[test]
+    fn constant_array_casts_fall_back_when_the_legacy_fold_is_not_exact() {
+        let target = Target::macos_for(27);
+        let source = |ty: &str, extent: &str, value: &str| {
+            format!(
+                "#include <metal_stdlib>\nusing namespace metal;\n\
+                 constant {ty} values[{extent}] = {{{value}}};\n\
+                 kernel void k(device {ty}* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ out[i] = values[i]; }}\n"
+            )
+        };
+        for (ty, extent, value, expected) in [
+            ("uint", "3", "uint(ushort(65537u))", "1u"),
+            ("uint", "", "uint(ushort(65537u))", "1u"),
+            ("bool", "3", "bool(0.5f)", "true"),
+            ("float", "3", "float(uint(-1))", "4294967296.0"),
+            ("float", "3", "float(half(1.0001f))", "1.0"),
+        ] {
+            let bad = source(ty, extent, value);
+            let good = source(ty, extent, expected);
+            assert!(
+                matches!(
+                    compile(bad.as_bytes(), &target),
+                    Err(Reject(key)) if key.contains("const-array:non-constant-init")
+                ),
+                "{value}"
+            );
+            assert!(
+                matches!(
+                    build_raw(bad.as_bytes(), &target),
+                    Err(Ok(Reject(key))) if key.contains("const-array:non-constant-init")
+                ),
+                "{value}"
+            );
+            assert!(matches!(
+                compile(good.as_bytes(), &target),
+                Ok(Ir::Bitcode(_))
+            ));
+            assert!(build_raw(good.as_bytes(), &target).is_ok());
+        }
+    }
+
+    #[test]
+    fn partial_const_array_rejects_unsupported_initializers() {
+        let target = Target::macos_for(27);
+        for (decl, reason) in [
+            (
+                "constant uint values[1] = {1u, 2u};",
+                "const-array:excess-init",
+            ),
+            (
+                "constant uint values[2][2] = {};",
+                "const-array:partial-element-type",
+            ),
+            (
+                "struct Value { uint x; }; constant Value values[2] = {};",
+                "const-array:partial-element-type",
+            ),
+            (
+                "constant float3 values[1048577] = {};",
+                "const-array:partial-size",
+            ),
+            (
+                "constant ulong values[4294967295] = {};",
+                "const-array:partial-size",
+            ),
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\n{decl}\n");
+            let error = air_emit::compile_source(&source, &target, "-").unwrap_err();
+            assert!(error.key().contains(reason), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn partial_copy_list_requires_a_comma_between_elements() {
+        let source = "#include <metal_stdlib>\nusing namespace metal;\n\
+            constant uint values[3] = {1u 2u};\n\
+            kernel void k(device uint* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) { out[i] = values[i]; }\n";
+        let error = air_emit::compile_source(source, &Target::macos_for(27), "-").unwrap_err();
+        assert!(
+            error.key().contains("const-array:missing-comma"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn inferred_constant_array_bounds_match_explicit_bounds() {
+        let target = Target::macos_for(27);
+        for (ty, len, values) in [
+            ("uint", "3", "7u, 0u, 11u,"),
+            ("bool", "1", "true"),
+            ("float3", "2", "float3(-0.0, 5.0, 0.0), float3(0.0)"),
+        ] {
+            let shader = |bound: &str| {
+                format!(
+                "#include <metal_stdlib>\nusing namespace metal;\n\
+                 constant {ty} values[{bound}] = {{ {values} }};\n\
+                 kernel void k(device {ty}* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ out[i] = values[i]; }}\n"
+            )
+            };
+            let inferred = shader("");
+            let explicit = shader(len);
+            assert_same_shader(&inferred, &explicit, &target);
+        }
+    }
+
+    #[test]
+    fn inferred_constant_arrays_reject_unsupported_forms() {
+        let target = Target::macos_for(27);
+        for (decl, reason) in [
+            ("constant uint values[] = {};", "const-array:unsized-empty"),
+            (
+                "constant uint values[][2] = {};",
+                "const-array:unsized-nested",
+            ),
+            (
+                "struct S { uint x; }; constant S values[] = {};",
+                "const-array:unsized-element-type",
+            ),
+            (
+                "constant uint values[] = {1u 2u};",
+                "const-array:unsized-missing-comma",
+            ),
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\n{decl}\n");
+            let error = air_emit::compile_source(&source, &target, "-").unwrap_err();
+            assert!(error.key().contains(reason), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn direct_list_constant_arrays_match_copy_list_initializers() {
+        let target = Target::macos_for(27);
+        for (ty, bound, list) in [
+            ("uint", "4", "1u"),
+            ("uint", "", "1u, 2u,"),
+            ("float3", "3", "float3(-0.0, 1.0, 0.0)"),
+        ] {
+            let shader = |equals: &str| {
+                format!(
+                "#include <metal_stdlib>\nusing namespace metal;\n\
+                 constant {ty} values[{bound}]{equals}{{{list}}};\n\
+                 kernel void k(device {ty}* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {{ out[i] = values[i]; }}\n"
+            )
+            };
+            let direct = shader("");
+            let copy = shader(" = ");
+            assert_same_shader(&direct, &copy, &target);
+        }
+    }
+
+    #[test]
+    fn direct_lists_do_not_admit_unrelated_constants_or_invalid_arrays() {
+        let target = Target::macos_for(27);
+        for decl in [
+            "constant uint value{1u};",
+            "constant uint values[2][2]{};",
+            "constant uint values[2]{1u 2u};",
+            "constant uint values[]{ };",
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\n{decl}\n");
+            assert!(
+                air_emit::compile_source(&source, &target, "-").is_err(),
+                "{decl}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsigned_binary_masks_match_hex_and_decimal_masks() {
+        let target = Target::macos_for(27);
+        let binary = "#include <metal_stdlib>\nusing namespace metal;\n\
+            constant uint masks[2] = {0B101010U, 0b10000000000000000000000000000000u};\n\
+            kernel void k(device uint* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {\n\
+                out[i] = masks[i & 0b1u] ^ (i & 0B00101u);\n\
+            }\n";
+        let reference = binary
+            .replace("0B101010U", "0x2au")
+            .replace("0b10000000000000000000000000000000u", "0x80000000u")
+            .replace("0b1u", "1u")
+            .replace("0B00101u", "5u");
+        assert_same_shader(binary, &reference, &target);
+    }
+
+    #[test]
+    fn binary_literals_reject_unsupported_suffix_and_extent() {
+        let target = Target::macos_for(27);
+        for literal in [
+            "0b",
+            "0b102u",
+            "0b1u2u",
+            "0b11",
+            "0b11ul",
+            "0b100000000000000000000000000000000u",
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\nconstant uint a[2] = {{{literal}}};\n");
+            assert!(
+                air_emit::compile_source(&source, &target, "-").is_err(),
+                "{literal}"
+            );
+        }
+    }
+
+    #[test]
+    fn binary_digit_separators_match_unseparated_masks() {
+        let target = Target::macos_for(27);
+        let msl = "#include <metal_stdlib>\nusing namespace metal;\n\
+            constant uint masks[]{0B10'10U, 0b1111'1111'1111'1111'1111'1111'1111'1111u};\n\
+            kernel void k(device uint* out [[buffer(0)]], uint i [[thread_index_in_threadgroup]]) {\n\
+                out[i] = masks[i & 1u] ^ (i & 0b1'0'1u);\n\
+            }\n";
+        let reference = msl.replace('\'', "");
+        assert_same_shader(msl, &reference, &target);
+    }
+
+    #[test]
+    fn binary_digit_separators_require_surrounding_binary_digits() {
+        let target = Target::macos_for(27);
+        for literal in [
+            "0b'1u",
+            "0b1''0u",
+            "0b1'u",
+            "0b1u'0",
+            "0b1'2u",
+            "0b1'0ul",
+            "0b1'00000000000000000000000000000000u",
+        ] {
+            let source = format!("#include <metal_stdlib>\nusing namespace metal;\nconstant uint a[2] = {{{literal}}};\n");
+            assert!(
+                air_emit::compile_source(&source, &target, "-").is_err(),
+                "{literal}"
+            );
+        }
     }
 
     #[test]

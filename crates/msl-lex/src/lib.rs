@@ -3,8 +3,8 @@
 //!
 //! This is a faithful port of the phase 1 prototype `msl_lex.py`. Every token carries its
 //! exact byte span in the source, its text and its 1-based line number. The token stream is
-//! identical to the prototype's, token for token, which the `lexdump` comparison in
-//! `tools/compare_tokens.sh` checks on the corpus.
+//! identical to the prototype's for its covered syntax, checked by the `lexdump` comparison in
+//! `tools/compare_tokens.sh` on the corpus. Binary literal tokens extend that syntax.
 //!
 //! Rules (all taken over from the prototype, including its corner cases):
 //! * A line whose first non-blank character (spaces and tabs only) is `#` is one `Pp` token:
@@ -13,7 +13,7 @@
 //! * Whitespace, newlines, `//` and `/* */` comments produce no tokens. An unterminated
 //!   `/*` is not a comment: it lexes as the punctuators `/` and `*`.
 //! * `[[` is always one `AttrOpen` token (the C++ rule). `]]` stays two `]` tokens.
-//! * Numbers follow the prototype's regular expression exactly (see [`lex_number`]).
+//! * Numbers use the prototype's rules plus binary literals (see [`lex_number`]).
 //! * Any other character is a [`LexError`].
 //!
 //! Input text must already have universal newlines applied (`\r\n` and `\r` turned into
@@ -191,6 +191,9 @@ fn digits(src: &str, i: usize) -> usize {
 /// | \d+[uUlLfFhH]*
 /// ```
 ///
+/// This also recognizes binary integer tokens. Keep their invalid suffixes
+/// together so the parser can reject them rather than admit two literals.
+///
 /// Python's `re` takes the first alternative that matches, not the longest. Each alternative
 /// is deterministic here: no backtracking inside it can produce a different match.
 pub fn lex_number(src: &str, i: usize) -> Option<usize> {
@@ -205,6 +208,16 @@ pub fn lex_number(src: &str, i: usize) -> Option<usize> {
             j += 1;
         }
         while matches!(byte(b, j), b'u' | b'U' | b'l' | b'L') {
+            j += 1;
+        }
+        return Some(j);
+    }
+    if byte(b, i) == b'0'
+        && matches!(byte(b, i + 1), b'b' | b'B')
+        && matches!(byte(b, i + 2), b'0' | b'1' | b'\'')
+    {
+        let mut j = i + 2;
+        while byte(b, j).is_ascii_alphanumeric() || matches!(byte(b, j), b'_' | b'.' | b'\'') {
             j += 1;
         }
         return Some(j);
@@ -561,6 +574,11 @@ mod tests {
         assert_eq!(texts("a.x"), ["a", ".", "x"]);
         assert_eq!(texts("1.5.x"), ["1.5", ".", "x"]);
         assert_eq!(texts("0x10UL"), ["0x10UL"]);
+        assert_eq!(texts("0b101u 0B10U 0b"), ["0b101u", "0B10U", "0", "b"]);
+        assert_eq!(
+            texts("0b10'10u 0B'1U 0b1u'"),
+            ["0b10'10u", "0B'1U", "0b1u'"]
+        );
     }
 
     #[test]
