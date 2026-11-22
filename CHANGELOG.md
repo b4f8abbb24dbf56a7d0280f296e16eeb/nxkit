@@ -4,15 +4,14 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
-### Changed
-
-- The Unreal heap policy moved from `nxkit-host` to `nxkit-ue` (`wire`, `settings`): the 40 % share of the alias
-  region, the 32 MiB steps, the fixups keys `UE_MALLOC_VT` and `UE_MALLOC_SLOT` and `NXKIT_UE_HEAP`. The host wires the
-  observation gates by id and knows no Unreal name. The behaviour is the same. The heap line now starts with
-  `nxkit-ue:`.
+## 0.15.0 - 2026-11-22
 
 ### Added
 
+- A title module can turn spatial audio on by default (`spatial_audio` of its run settings, written to `game.json`
+  and as the default of the `NXKIT_SPATIAL_AUDIO` row of `launcher.json`). The launch option still wins:
+  `NXKIT_SPATIAL_AUDIO=0` gives stereo, `1` spatial audio. Octopath Traveler has it on: CRIWARE ADX2 mixes 5.1 into its
+  six-channel AudioOut in the SDK's channel order.
 - A title or its family can set console variables of the game (`BuildHooks::console_vars`, R73). The family writes
   them into files of the game's own format and `nxb build` adds the files to the app's RomFS. The family `unreal`
   writes an extra pak, `<Project>-<Platform>_<n+1>_P.pak`, with a copy of the project's `DefaultDeviceProfiles.ini`
@@ -49,8 +48,30 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   depth, motion, jitter and an optional reactive mask, typed so that no input can be left out. A GPU test scales a
   still green picture from 32x32 to 64x64.
 
+### Changed
+
+- The Unreal heap policy moved from `nxkit-host` to `nxkit-ue` (`wire`, `settings`): the 40 % share of the alias
+  region, the 32 MiB steps, the fixups keys `UE_MALLOC_VT` and `UE_MALLOC_SLOT` and `NXKIT_UE_HEAP`. The host wires the
+  observation gates by id and knows no Unreal name. The behaviour is the same. The heap line now starts with
+  `nxkit-ue:`.
+
 ### Fixed
 
+- Octopath Traveler has sound after "New Game". A write to a file opened with `OpenMode_AllowAppend` goes to its
+  offset, as on the console; the flag only lets the write grow the file. The host wrote it at the end, so each save
+  of `KSSystemData` (opened with Write and AllowAppend, written at 0) was appended to the old one, and the next load
+  read the first copy (zeros of the presized file) and set the music and effect volumes to 0. A save file damaged
+  this way is repaired by the game's next save.
+- Octopath Traveler: the first story scene (Cyrus, Atlasdam) renders lit and sharp instead of a white plane over
+  black. A depth and stencil clear honours its masks: Unreal Engine 4 clears only the stencil between its lights and
+  its translucency, and the host cleared the depth with it (`ClearKeeps` in the pass plan, separate Metal load actions
+  for depth and stencil). The host honours `nvnDeviceSetDepthMode`: with the depth mode 0 to 1 the draws use the vertex
+  entries that keep the clip depth (`main0_z`, `main0_lz`), so the depth that the game reads back (depth of field) is
+  its own and not `0.5 + z / 2`. The archive step plans these entries when the recorded pipeline list shows the mode.
+- The runtime pipeline cache is written 5 s after a burst of at least 16 compiles, and `SIGTERM`, `SIGINT` and `SIGHUP`
+  stop the host as a closed window does, so a killed load keeps what it compiled.
+- Octopath Traveler: the load after confirming a traveler no longer stalls for about 50 s. GPU counter and timestamp
+  reports are written when their batch completes on the GPU, also when no CPU wait follows.
 - The host passes the `args` setting of the title module to the game as its program arguments (`argv` after
   `game`), as the old engine passed `game_args`. Before, `argv` was `game` alone and `args` went unread.
 - A buffer texture may have up to 2^27 texels, the size the device reports. The layout check and the texture header
@@ -73,33 +94,6 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nvnQueueFlush` sends the submitted work to the GPU when no present, wait or other flush did so within 50 ms. On
   the console flushed work runs by itself, and Unreal Engine 4.18 polls the report of an occlusion query with no
   present and no wait. In a normal Octopath Traveler run it flushes in about 1 of 1600 frames.
-
-## 0.15.0 - 2026-11-22
-
-### Added
-
-- A title module can turn spatial audio on by default (`spatial_audio` of its run settings, written to `game.json`
-  and as the default of the `NXKIT_SPATIAL_AUDIO` row of `launcher.json`). The launch option still wins:
-  `NXKIT_SPATIAL_AUDIO=0` gives stereo, `1` spatial audio. Octopath Traveler has it on: CRIWARE ADX2 mixes 5.1 into its
-  six-channel AudioOut in the SDK's channel order.
-
-### Fixed
-
-- Octopath Traveler has sound after "New Game". A write to a file opened with `OpenMode_AllowAppend` goes to its
-  offset, as on the console; the flag only lets the write grow the file. The host wrote it at the end, so each save
-  of `KSSystemData` (opened with Write and AllowAppend, written at 0) was appended to the old one, and the next load
-  read the first copy (zeros of the presized file) and set the music and effect volumes to 0. A save file damaged
-  this way is repaired by the game's next save.
-- Octopath Traveler: the first story scene (Cyrus, Atlasdam) renders lit and sharp instead of a white plane over
-  black. A depth and stencil clear honours its masks: Unreal Engine 4 clears only the stencil between its lights and
-  its translucency, and the host cleared the depth with it (`ClearKeeps` in the pass plan, separate Metal load actions
-  for depth and stencil). The host honours `nvnDeviceSetDepthMode`: with the depth mode 0 to 1 the draws use the vertex
-  entries that keep the clip depth (`main0_z`, `main0_lz`), so the depth that the game reads back (depth of field) is
-  its own and not `0.5 + z / 2`. The archive step plans these entries when the recorded pipeline list shows the mode.
-- The runtime pipeline cache is written 5 s after a burst of at least 16 compiles, and `SIGTERM`, `SIGINT` and `SIGHUP`
-  stop the host as a closed window does, so a killed load keeps what it compiled.
-- Octopath Traveler: the load after confirming a traveler no longer stalls for about 50 s. GPU counter and timestamp
-  reports are written when their batch completes on the GPU, also when no CPU wait follows.
 
 ## 0.14.0 - 2026-11-21
 
