@@ -88,6 +88,8 @@ pub fn gpu_settings(
         // The runtime pipeline cache: what this run compiles is kept for the next start (`crate::pipecache`).
         runtime_cache: crate::pipecache::folder(root, &run.host),
         build_id: crate::pipecache::build_id(root),
+        // The pipelines that the build resolved from the title's seeds: made at every start (`nxkit_pipestate::list`).
+        shipped_list: Some(root.join(nxkit_pipestate::list::SHIPPED_LIST)).filter(|p| p.is_file()),
         gob_order: match platform::get() {
             Platform::Nx => GobOrder::Tegra,
             Platform::Ounce => GobOrder::Switch2,

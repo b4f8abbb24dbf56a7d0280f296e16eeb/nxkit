@@ -18,7 +18,7 @@ use crate::detail::DrawDetail;
 pub(crate) mod model;
 
 /// The buffer slot of the layout block (`pull::SLOT` of the translator, `[[buffer(16)]]` of the `_bp` entry).
-pub(crate) const SLOT: u32 = 16;
+pub(crate) const SLOT: u32 = nxkit_pipestate::program::PULL_SLOT;
 
 /// The streams of the block: `dm_vstream s[16]`.
 pub(crate) const STREAMS: usize = 16;

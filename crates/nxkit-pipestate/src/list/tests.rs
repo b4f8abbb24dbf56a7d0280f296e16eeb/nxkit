@@ -1,6 +1,7 @@
 //! Tests for the list of seen pipelines: the text round trip, the merge and the refusal of damage.
 
 use super::*;
+use crate::format::BcKind;
 
 fn blend() -> BlendState {
     BlendState {
@@ -19,8 +20,8 @@ fn stage(l: &str, e: &str) -> Stage {
 
 fn render(key: u64) -> RenderRec {
     RenderRec {
-        key,
-        vertex_key: key.wrapping_mul(7),
+        key: Some(key),
+        vertex_key: Some(key.wrapping_mul(7)),
         fallback: key % 2 == 1,
         vertex: stage("0a1b_b", "main0"),
         fragment: Some(stage("9f_b", "main0_u")),
@@ -58,7 +59,7 @@ fn render(key: u64) -> RenderRec {
 
 fn mesh(key: u64) -> MeshRec {
     MeshRec {
-        key,
+        key: Some(key),
         object: Some(stage("t_b", "task")),
         mesh: stage("m_b", "mesh"),
         fragment: None,
@@ -82,7 +83,7 @@ fn sample() -> Seen {
     }));
     s.insert(Entry::Mesh(mesh(3)));
     s.insert(Entry::Compute(ComputeRec {
-        key: 4,
+        key: Some(4),
         function: stage("c_b", "kern"),
     }));
     s
@@ -108,7 +109,7 @@ fn an_entry_is_kept_once_and_keeps_its_place() {
     assert_eq!(s.entries()[0], Entry::Render(render(1)));
     // the same key of another kind is another pipeline
     assert!(s.insert(Entry::Compute(ComputeRec {
-        key: 1,
+        key: Some(1),
         function: stage("c_b", "k2"),
     })));
 }
@@ -157,8 +158,45 @@ fn a_name_with_white_space_or_an_unknown_format_is_no_entry() {
 }
 
 #[test]
+fn a_list_of_the_build_has_no_keys_and_the_host_gives_them() {
+    let mut s = Seen::default();
+    let keyless = RenderRec {
+        key: None,
+        vertex_key: None,
+        ..render(1)
+    };
+    assert!(s.insert(Entry::Render(keyless.clone())));
+    assert!(
+        !s.insert(Entry::Render(keyless.clone())),
+        "the same description once"
+    );
+    assert!(s.insert(Entry::Render(RenderRec {
+        samples: 1,
+        ..keyless.clone()
+    })));
+    let text = s.to_text();
+    assert!(text.lines().nth(1).unwrap().starts_with("R\t-\t-\t"));
+    let back = Seen::parse(&text).unwrap();
+    assert_eq!(back, s);
+    let keyed = back.with_keys(|e| match e {
+        Entry::Render(r) if r.samples == 4 => Some((40, Some(41))),
+        _ => None,
+    });
+    assert_eq!(keyed.len(), 1, "an entry the host gives no key is left out");
+    assert!(keyed.contains(&keyed.entries()[0]));
+    assert!(
+        keyed.contains(&Entry::Render(RenderRec {
+            samples: 2,
+            ..render(40)
+        })),
+        "an entry with a key is told apart by its key"
+    );
+    assert_eq!(keyed.entries()[0].key(), Some(40));
+}
+
+#[test]
 fn a_block_compressed_target_cannot_be_written() {
-    let c = [Some(ColorTarget::new(Format::Bc(nxkit_metal::BcKind::Bc7)))];
+    let c = [Some(ColorTarget::new(Format::Bc(BcKind::Bc7)))];
     assert_eq!(colors_text(&c), None);
     assert_eq!(colors_text(&[]), Some("-".to_string()));
 }

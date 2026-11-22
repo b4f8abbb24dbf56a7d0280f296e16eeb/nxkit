@@ -27,7 +27,10 @@ use super::Targets;
 /// The keys come from `std::collections::hash_map::DefaultHasher`. Rust does not promise its algorithm across
 /// releases. If a release changes it, every key changes: the pinned tests of this module fail, and the scheme is
 /// raised then.
-pub(crate) const KEY_SCHEME: u32 = 1;
+///
+/// Scheme 2: the vertex layout holds only the attributes that the shader reads (`nxkit_pipestate::nvn::
+/// vertex_descriptor`), so a draw with attributes the shader does not read has another key than under scheme 1.
+pub(crate) const KEY_SCHEME: u32 = 2;
 
 /// What the key of a render pipeline hashes.
 pub(super) struct RenderKey<'a> {
@@ -130,23 +133,20 @@ pub(super) fn point_size_key(vertex: &str, entry: &str) -> u64 {
     h.finish()
 }
 
-/// The shader key of the program of a library stem: `<key>_b`, or `<key>_bp` for a vertex function that pulls.
-#[cfg(test)]
-fn program_of(stem: &str) -> &str {
-    let stem = stem.strip_suffix('p').unwrap_or(stem);
-    stem.strip_suffix("_b").unwrap_or(stem)
-}
-
-/// The keys that the encoder could have computed for the entry of a list, from its fields alone (tests only).
+/// The keys that the encoder computes for the entry of a list, from its fields alone.
 ///
 /// Every input of a key is in the entry: the program keys are the stems without `_b` (`_bp` marks a pulling vertex
-/// function, whose layout is empty), the `Targets` are the formats of the colour targets and the sample count, and
-/// the rest are fields. Not in a render entry: the debug flags (assumed off) and the topology class of an entry that
-/// the topology fallback made, which is recorded as `Unspecified`. That entry is not `Point`, so the keys of `Line`
-/// and `Triangle` are given. Every other entry has exactly one key.
-#[cfg(test)]
+/// function, whose layout is empty), the vertex entry gives the suffix of the vertex key
+/// (`nxkit_pipestate::draw::vertex_suffix`), the `Targets` are the formats of the colour targets and the sample count,
+/// and the rest are fields. Not in a render entry: the debug flags (assumed off) and the topology class of an entry
+/// that the topology fallback made, which is recorded as `Unspecified`. That entry is not `Point`, so the keys of
+/// `Line` and `Triangle` are given. Every other entry has exactly one key.
 pub(super) fn entry_keys(e: &super::record::Entry) -> Vec<u64> {
+    use nxkit_pipestate::draw::vertex_suffix;
+    use nxkit_pipestate::program::key_of_stem;
+
     use super::record::Entry;
+    let program_of = |stem: &str| key_of_stem(stem).0.to_owned();
     let targets = |colors: &[Option<ColorTarget>], samples| Targets {
         colors: colors.iter().map(|c| c.map(|c| c.format)).collect(),
         samples,
@@ -154,6 +154,9 @@ pub(super) fn entry_keys(e: &super::record::Entry) -> Vec<u64> {
     match e {
         Entry::Render(r) => {
             let t = targets(&r.colors, r.samples);
+            let (vertex, pull) = key_of_stem(&r.vertex.0);
+            let vertex = format!("{vertex}{}", vertex_suffix(&r.vertex.1, pull));
+            let fragment = r.fragment.as_ref().map(|f| program_of(&f.0));
             let classes = if r.fallback && r.topology == TopologyClass::Unspecified {
                 vec![TopologyClass::Line, TopologyClass::Triangle]
             } else {
@@ -163,13 +166,13 @@ pub(super) fn entry_keys(e: &super::record::Entry) -> Vec<u64> {
                 .into_iter()
                 .map(|class| {
                     render_key(&RenderKey {
-                        vertex: program_of(&r.vertex.0),
-                        fragment: r.fragment.as_ref().map(|f| program_of(&f.0)),
+                        vertex: &vertex,
+                        fragment: fragment.as_deref(),
                         targets: &t,
                         icb: r.icb,
                         colors: &r.colors,
                         layout: &r.layout,
-                        pull: r.vertex.0.ends_with("_bp"),
+                        pull,
                         class,
                         alpha_to_coverage: r.a2c,
                         flat: false,
@@ -181,10 +184,13 @@ pub(super) fn entry_keys(e: &super::record::Entry) -> Vec<u64> {
         }
         Entry::Mesh(m) => {
             let t = targets(&m.colors, m.samples);
+            let task = m.object.as_ref().map(|o| program_of(&o.0));
+            let mesh = program_of(&m.mesh.0);
+            let fragment = m.fragment.as_ref().map(|f| program_of(&f.0));
             vec![mesh_key(&MeshKey {
-                task: m.object.as_ref().map(|o| program_of(&o.0)),
-                mesh: Some(program_of(&m.mesh.0)),
-                fragment: m.fragment.as_ref().map(|f| program_of(&f.0)),
+                task: task.as_deref(),
+                mesh: Some(&mesh),
+                fragment: fragment.as_deref(),
                 fragment_entry: m.fragment.as_ref().map(|f| f.1.as_str()),
                 targets: &t,
                 colors: &m.colors,
@@ -192,8 +198,16 @@ pub(super) fn entry_keys(e: &super::record::Entry) -> Vec<u64> {
                 keeps_depth: m.mesh.1 != "main0",
             })]
         }
-        Entry::Compute(c) => vec![compute_key(program_of(&c.function.0))],
+        Entry::Compute(c) => vec![compute_key(&program_of(&c.function.0))],
     }
+}
+
+/// The `point_size_key` of a render entry: the vertex shader key without suffix and the entry.
+pub(super) fn entry_vertex_key(r: &super::record::RenderRec) -> u64 {
+    point_size_key(
+        nxkit_pipestate::program::key_of_stem(&r.vertex.0).0,
+        &r.vertex.1,
+    )
 }
 
 #[cfg(test)]

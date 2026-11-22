@@ -36,6 +36,8 @@ pub struct GpuSettings {
     pub runtime_cache: Option<PathBuf>,
     /// A number that changes with the app build: a runtime cache of another one is dropped.
     pub build_id: u64,
+    /// The pipeline list that the build shipped in the app (`nxkit_pipestate::list::SHIPPED_LIST`), or none.
+    pub shipped_list: Option<PathBuf>,
     /// The pipeline cache compiles the unspecialized pipeline of a base that the archive lacks and specializes it per
     /// colour state (`ArchiveConfig::compile_bases`): off unless `NXKIT_PIPELINE_BASES=1`. In Ocarina of Time every
     /// base was as rare as its pipelines (the vertex layout is part of it), an unspecialized compile took 0.1 to 10 s
@@ -163,6 +165,7 @@ impl Default for GpuSettings {
             gob_order: GobOrder::Tegra,
             runtime_cache: None,
             build_id: 0,
+            shipped_list: None,
             compile_bases: pipeline_bases(&Env::default()),
             specialize: pipeline_specialize(&Env::default()),
             prewarm_screen: crate::prewarm_screen::ScreenHook::default(),

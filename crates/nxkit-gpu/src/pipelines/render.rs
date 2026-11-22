@@ -341,34 +341,27 @@ pub(super) fn vertex_entry<'a>(
         }
         _ => false,
     };
-    let (plain, kept) = if layer {
-        (
-            vs.entry_layer.as_deref().unwrap_or(&vs.entry),
-            &vs.entry_z[1],
-        )
-    } else {
-        (vs.entry.as_str(), &vs.entry_z[0])
-    };
-    match (zero_to_one, kept) {
-        (true, Some(z)) => (z, if layer { ":layer:z" } else { ":z" }),
-        (true, None) => {
-            depth_mode_ignored(&d.program.vertex);
-            (plain, if layer { ":layer" } else { "" })
-        }
-        (false, _) => (plain, if layer { ":layer" } else { "" }),
+    let e = nxkit_pipestate::draw::vertex_entry(
+        layer,
+        &vs.entry,
+        vs.entry_layer.as_deref(),
+        [vs.entry_z[0].as_deref(), vs.entry_z[1].as_deref()],
+        zero_to_one,
+    );
+    if e.depth_mode_ignored {
+        depth_mode_ignored(&d.program.vertex);
     }
+    (e.entry, e.suffix)
 }
 
 /// The mesh function of a mesh draw: `main0_z` with the device in the depth mode 0 to 1, see [`vertex_entry`].
 fn mesh_entry(ms: &StageProgram, zero_to_one: bool) -> &str {
-    match (zero_to_one, &ms.entry_z[0]) {
-        (true, Some(z)) => z,
-        (true, None) => {
-            depth_mode_ignored(&ms.entry);
-            &ms.entry
-        }
-        (false, _) => &ms.entry,
+    let (entry, ignored) =
+        nxkit_pipestate::draw::mesh_entry(&ms.entry, ms.entry_z[0].as_deref(), zero_to_one);
+    if ignored {
+        depth_mode_ignored(&ms.entry);
     }
+    entry
 }
 
 /// Counts a draw that converts the depth although the device keeps it (`Reason::DepthModeIgnored`).

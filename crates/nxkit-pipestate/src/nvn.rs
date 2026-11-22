@@ -394,13 +394,22 @@ pub enum LayoutError {
 /// The vertex descriptor of a draw. A stream with stride 0 steps as a constant. A stream with a divisor steps per
 /// instance. Shader inputs without a bound attribute read a constant zero stream. Metal requires a descriptor
 /// even for those inputs; omitting one makes the entire pipeline fail to compile.
+///
+/// Only the attributes that the shader reads (`inputs`) and their streams are in the descriptor. The others change
+/// nothing that the pipeline draws, and leaving them out gives two draws that differ only in them one pipeline. It
+/// also makes the layout of a seed (`crate::seeds`), which holds only the attributes the shader reads, the layout of
+/// the draw.
 pub fn vertex_descriptor<S: StreamState>(
     attributes: &[Attribute],
     streams: &[S],
     inputs: &[(u32, VertexFormat)],
 ) -> Result<VertexDescriptor, LayoutError> {
+    let read: Vec<&Attribute> = attributes
+        .iter()
+        .filter(|a| inputs.iter().any(|(l, _)| *l == a.location))
+        .collect();
     let mut out = VertexDescriptor::default();
-    for a in attributes {
+    for a in &read {
         if !streams.iter().any(|s| s.index() == a.stream) {
             continue;
         }
@@ -431,7 +440,7 @@ pub fn vertex_descriptor<S: StreamState>(
     }
     out.attributes.sort_by_key(|(l, _)| *l);
     for s in streams {
-        if !attributes.iter().any(|a| a.stream == s.index()) {
+        if !read.iter().any(|a| a.stream == s.index()) {
             continue;
         }
         let (step, step_rate) = if s.stride() == 0 {
@@ -445,7 +454,7 @@ pub fn vertex_descriptor<S: StreamState>(
         // "references a buffer ... that has no stride"; Ocarina of Time after its opening). The stride of a constant
         // step is not read, so any value that covers the attributes does: their furthest end, at least 16, in 4s.
         let stride = if s.stride() == 0 {
-            let end = attributes
+            let end = read
                 .iter()
                 .filter(|a| a.stream == s.index())
                 .map(|a| a.offset + 16)
@@ -512,6 +521,61 @@ mod tests {
         assert_eq!(sample_swizzle(0x6D, [2, 3, 4, 5]), [2, 3, 4, 1]);
         assert_eq!(sample_swizzle(0x6D, [5, 5, 5, 5]), [1, 1, 1, 1]);
         assert_eq!(sample_swizzle(0x25, [2, 3, 4, 5]), [2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn the_layout_holds_only_the_attributes_the_shader_reads() {
+        let attributes = [
+            Attribute {
+                location: 0,
+                format: 0x25 + 9,
+                offset: 0,
+                stream: 0,
+            },
+            Attribute {
+                location: 1,
+                format: 0x25 + 9,
+                offset: 16,
+                stream: 0,
+            },
+            Attribute {
+                location: 2,
+                format: 0x0D + 9,
+                offset: 0,
+                stream: 1,
+            },
+        ];
+        let streams = [
+            Stream {
+                index: 0,
+                stride: 32,
+                divisor: 0,
+            },
+            Stream {
+                index: 1,
+                stride: 8,
+                divisor: 0,
+            },
+        ];
+        let d = vertex_descriptor(&attributes, &streams, &[(0, VertexFormat::Float4)]).unwrap();
+        assert_eq!(d.attributes.len(), 1);
+        assert_eq!(d.attributes[0].0, 0);
+        assert_eq!(
+            d.layouts.len(),
+            1,
+            "stream 1 has no attribute the shader reads"
+        );
+        assert_eq!(d.layouts[0].buffer, stream_slot(0));
+        assert_eq!(
+            d,
+            vertex_descriptor(
+                &attributes[..1],
+                &streams[..1],
+                &[(0, VertexFormat::Float4)]
+            )
+            .unwrap(),
+            "the attributes the shader does not read change nothing"
+        );
     }
 
     #[test]

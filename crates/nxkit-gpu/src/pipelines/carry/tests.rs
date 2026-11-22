@@ -8,7 +8,7 @@ fn tmp(name: &str) -> PathBuf {
 }
 
 fn list(entries: &[u64]) -> Seen {
-    let mut t = format!("{}\n", super::super::record::HEADER);
+    let mut t = format!("{}\n", nxkit_pipestate::list::HEADER);
     for k in entries {
         t.push_str(&format!("C\t{k:016x}\tlib{k}_b\tmain0\n"));
     }
@@ -30,7 +30,7 @@ fn the_carried_file_is_named_by_the_key_scheme() {
 fn the_text_has_the_scheme_and_reads_back_the_same() {
     let s = list(&[1, 2, 3]);
     let t = text(&s, 7);
-    assert!(t.starts_with(&format!("{}\n#scheme 7\n", super::super::record::HEADER)));
+    assert!(t.starts_with(&format!("{}\n#scheme 7\n", nxkit_pipestate::list::HEADER)));
     assert_eq!(keys(&Seen::parse(&t).unwrap()), keys(&s));
 }
 

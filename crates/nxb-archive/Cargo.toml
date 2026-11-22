@@ -20,6 +20,8 @@ nxb-store.workspace = true
 nxb-sched.workspace = true
 # The index format of the shards (`nxkit_abi::shards`), which the host reads.
 nxkit-abi.workspace = true
+# The text of a pipeline list, shared with the host (the runtime contract R0).
+nxkit-pipestate.workspace = true
 
 [lints]
 workspace = true

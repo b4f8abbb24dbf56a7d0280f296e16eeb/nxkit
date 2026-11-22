@@ -86,7 +86,7 @@ fn an_atomic_write_leaves_no_temporary_file() {
 #[test]
 fn a_missing_or_foreign_list_gives_an_empty_one() {
     assert!(Seen::parse("").is_err());
-    assert_eq!(Seen::parse(record::HEADER).unwrap().len(), 0);
+    assert_eq!(Seen::parse(nxkit_pipestate::list::HEADER).unwrap().len(), 0);
     let Ok(ctx) = Context::system_default() else {
         return;
     };
@@ -94,6 +94,7 @@ fn a_missing_or_foreign_list_gives_an_empty_one() {
     let before = p.counts();
     p.prewarm(
         &Seen::default(),
+        0,
         Path::new("/nonexistent"),
         None,
         None,
@@ -108,12 +109,15 @@ fn a_list_of_missing_libraries_is_skipped() {
     let Ok(ctx) = Context::system_default() else {
         return;
     };
-    let text = format!("{}\nC\t0000000000000001\tgone_b\tmain0\n", record::HEADER);
+    let text = format!(
+        "{}\nC\t0000000000000001\tgone_b\tmain0\n",
+        nxkit_pipestate::list::HEADER
+    );
     let seen = Seen::parse(&text).unwrap();
     assert_eq!(seen.len(), 1);
     let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
     let before = p.counts();
-    p.prewarm(&seen, Path::new("/nonexistent"), None, None, None);
+    p.prewarm(&seen, 0, Path::new("/nonexistent"), None, None, None);
     assert_eq!(p.counts(), before);
 }
 
@@ -128,13 +132,17 @@ fn the_after_hook_runs_before_the_marker() {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     let marker = d.join("prewarm.done");
-    let text = format!("{}\nC\t0000000000000001\tgone_b\tmain0\n", record::HEADER);
+    let text = format!(
+        "{}\nC\t0000000000000001\tgone_b\tmain0\n",
+        nxkit_pipestate::list::HEADER
+    );
     let seen = Seen::parse(&text).unwrap();
     let p = Pipelines::new(&ctx, &ArchiveConfig::default()).unwrap();
     let (flag, m) = (std::sync::Arc::new(AtomicU32::new(0)), marker.clone());
     let f = flag.clone();
     p.prewarm(
         &seen,
+        0,
         Path::new("/nonexistent"),
         Some(marker.clone()),
         Some(Box::new(move || {
@@ -146,4 +154,53 @@ fn the_after_hook_runs_before_the_marker() {
     assert_eq!(flag.load(Ordering::SeqCst), 1);
     assert!(marker.is_file());
     std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+fn the_shipped_list_gets_the_keys_the_encoder_computes() {
+    let d = std::env::temp_dir().join(format!("nxkit-shipped-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let path = d.join("shipped.list");
+    let text = format!(
+        "{}\nR\t-\t-\t0\tv1_b\tmain0_z\tf1_b\tmain0\t0\tTriangle\t1\t0\tRgba8Unorm:f:-\t-\nC\t-\tc1_b\tmain0\n",
+        nxkit_pipestate::list::HEADER
+    );
+    std::fs::write(&path, text).unwrap();
+    let s = read_shipped(&path);
+    assert_eq!(s.len(), 2);
+    let record::Entry::Render(r) = &s.entries()[0] else {
+        panic!("a render entry first");
+    };
+    let colors = vec![Some(nxkit_metal::ColorTarget::new(
+        nxkit_metal::Format::Rgba8Unorm,
+    ))];
+    // the key a draw of `v1` in the depth mode 0 to 1 computes in `render.rs`
+    let want = super::super::keys::render_key(&super::super::keys::RenderKey {
+        vertex: "v1:z",
+        fragment: Some("f1"),
+        targets: &super::super::Targets {
+            colors: vec![Some(nxkit_metal::Format::Rgba8Unorm)],
+            samples: 1,
+        },
+        icb: false,
+        colors: &colors,
+        layout: &nxkit_metal::VertexDescriptor::default(),
+        pull: false,
+        class: nxkit_metal::TopologyClass::Triangle,
+        alpha_to_coverage: false,
+        flat: false,
+        paint: false,
+        paint_dir: false,
+    });
+    assert_eq!(r.key, Some(want));
+    assert_eq!(
+        r.vertex_key,
+        Some(super::super::keys::point_size_key("v1", "main0_z"))
+    );
+    assert_eq!(
+        s.entries()[1].key(),
+        Some(super::super::keys::compute_key("c1"))
+    );
+    assert!(read_shipped(&d.join("missing.list")).is_empty());
 }

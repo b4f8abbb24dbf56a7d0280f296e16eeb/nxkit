@@ -23,19 +23,20 @@
 //! R <key> <vertex key> <fallback> <vstem> <ventry> <fstem|-> <fentry|-> <icb> <topology> <samples> <a2c> <colors> <layout>
 //! ```
 //!
-//! `layout` is `-` or a comma separated list of `a<index>.<Format>.<offset>.<buffer>` attributes and
-//! `l<buffer>.<stride>.<Step>.<rate>` layouts (the format of `nxkit-gpu` `pipelines/record.rs`). A line that does not
-//! parse, or that names a format the script has no name for, is left out. Mesh and compute pipelines are not used.
+//! The text is `nxkit_pipestate::list`, which the host writes. A line that does not parse, or that names a format the
+//! script has no name for, is left out. Mesh and compute pipelines are not used.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use nxb_pyjson::Value;
+use nxkit_pipestate::VertexDescriptor;
+use nxkit_pipestate::list::{Entry, RenderRec, parse_line};
 
 use crate::plan::{PlannedBase, plan_with};
 
 /// The first line of a list.
-pub const HEADER: &str = "nxkit-pipelines-seen 2";
+pub const HEADER: &str = nxkit_pipestate::list::HEADER;
 
 /// A library file stem and an entry name.
 pub type Func = (String, String);
@@ -135,51 +136,34 @@ fn format_name(host: &str) -> Option<String> {
     FORMATS.contains(&name.as_str()).then_some(name)
 }
 
-pub(crate) fn layout_of(s: &str) -> Option<(Vec<Attribute>, Vec<Layout>)> {
-    let (mut attributes, mut layouts) = (Vec::new(), Vec::new());
-    if s == "-" {
-        return Some((attributes, layouts));
-    }
-    for item in s.split(',') {
-        let (kind, rest) = item.split_at_checked(1)?;
-        let p: Vec<&str> = rest.split('.').collect();
-        match (kind, &p[..]) {
-            ("a", [i, format, offset, buffer]) => attributes.push((
-                i.parse().ok()?,
-                format_name(format)?,
-                offset.parse().ok()?,
-                buffer.parse().ok()?,
-            )),
-            ("l", [buffer, stride, step, rate]) => {
-                if !["Constant", "PerVertex", "PerInstance"].contains(step) {
-                    return None;
-                }
-                layouts.push((
-                    buffer.parse().ok()?,
-                    stride.parse().ok()?,
-                    (*step).to_string(),
-                    rate.parse().ok()?,
-                ));
-            }
-            _ => return None,
-        }
-    }
+/// The attributes and layouts of a vertex layout of the list, with the script's names. None for a vertex format that
+/// the script does not name.
+pub(crate) fn layout_parts(d: &VertexDescriptor) -> Option<(Vec<Attribute>, Vec<Layout>)> {
+    let attributes = d
+        .attributes
+        .iter()
+        .map(|(i, a)| {
+            Some((
+                *i,
+                format_name(&format!("{:?}", a.format))?,
+                a.offset,
+                a.buffer,
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let layouts = d
+        .layouts
+        .iter()
+        .map(|l| (l.buffer, l.stride, format!("{:?}", l.step), l.step_rate))
+        .collect();
     Some((attributes, layouts))
 }
 
-pub(crate) fn flag(s: &str) -> Option<bool> {
-    match s {
-        "0" => Some(false),
-        "1" => Some(true),
-        _ => None,
-    }
-}
-
-pub(crate) fn stage(a: &str, b: &str) -> Option<Option<Func>> {
-    let ok = |s: &str| !s.is_empty() && !s.contains(|c: char| c.is_control() || c.is_whitespace());
-    match (a, b) {
-        ("-", "-") => Some(None),
-        _ if ok(a) && ok(b) => Some(Some((a.to_string(), b.to_string()))),
+/// The render pipeline of a line of a list, none for any other line or a line that does not parse
+/// (`nxkit_pipestate::list::parse_line`).
+pub(crate) fn render_of_line(l: &str) -> Option<RenderRec> {
+    match parse_line(l)? {
+        Entry::Render(r) => Some(r),
         _ => None,
     }
 }
@@ -187,33 +171,20 @@ pub(crate) fn stage(a: &str, b: &str) -> Option<Option<Func>> {
 /// The bases of the state of one `R` line: none for a pipeline the plain base serves, one for a state, two for a state
 /// that the host's point size fallback made (it compiles such a pipeline without a primitive class).
 fn bases_of_line(l: &str) -> Vec<StateBase> {
-    let f: Vec<&str> = l.split('\t').collect();
-    if f.len() != 14 || f[0] != "R" {
-        return Vec::new();
-    }
     let parsed = (|| {
-        let fallback = flag(f[3])?;
-        let vertex = stage(f[4], f[5])??;
-        let fragment = stage(f[6], f[7])??;
-        let icb = flag(f[8])?;
-        let topology = f[9];
-        if !["Unspecified", "Point", "Line", "Triangle"].contains(&topology) {
-            return None;
-        }
-        let samples: u32 = f[10].parse().ok()?;
-        let alpha_to_coverage = flag(f[11])?;
-        let (attributes, layouts) = layout_of(f[13])?;
+        let r = render_of_line(l)?;
+        let (attributes, layouts) = layout_parts(&r.layout)?;
         Some((
-            fallback,
+            r.fallback,
             StateBase {
-                vertex,
-                fragment,
+                vertex: r.vertex,
+                fragment: r.fragment?,
                 attributes,
                 layouts,
-                topology: topology.to_string(),
-                samples,
-                alpha_to_coverage,
-                icb,
+                topology: format!("{:?}", r.topology),
+                samples: r.samples,
+                alpha_to_coverage: r.a2c,
+                icb: r.icb,
             },
         ))
     })();

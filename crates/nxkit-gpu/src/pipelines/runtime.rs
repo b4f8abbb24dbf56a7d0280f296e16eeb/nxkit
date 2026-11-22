@@ -11,6 +11,11 @@
 //! captured), and the archive is written when the start's last worker is done, before the start reports and before
 //! `prewarm.done`, so the run after loads it.
 //!
+//! The app can ship a list too (`nxkit_pipestate::list::SHIPPED_LIST`): the pipelines that the build resolved from the
+//! seeds of the title and archived. The start makes them first, at every start, and waits for all of them (they are
+//! archive loads), then what the runtime list adds. The shipped list is read only: the run's list notes only what it
+//! lacks, so the player's list holds what this player met beyond it.
+//!
 //! The archives are in `<root>/pipecache/id-<identity>/`; the list is not: it is kept in
 //! `<root>/pipecache/seen-<scheme>.list` across builds (`carry.rs`), so a rebuilt app starts with the list of the
 //! earlier builds and makes its pipelines before the first frame. The identity is a hash of the app build (`GpuConfig::build_id`), the
@@ -116,8 +121,10 @@ pub(crate) struct Plan {
     dir: PathBuf,
     /// The carried list (`carry.rs`).
     list: PathBuf,
-    /// The descriptions of the earlier runs and builds.
+    /// What the start makes: the shipped list first, then what the descriptions of the earlier runs and builds add.
     pub(super) seen: Seen,
+    /// The entries at the start of `seen` that came from the shipped list. The start waits for all of them.
+    pub(super) shipped: usize,
     /// The start has to make every pipeline of the list and wait for all of them: this identity has not done it yet.
     pub(super) full: bool,
     files: usize,
@@ -131,6 +138,7 @@ pub(crate) fn plan(
     ctx: &Context,
     root: Option<&Path>,
     build_id: u64,
+    shipped: Option<&Path>,
     archive: &mut ArchiveConfig,
 ) -> Option<Plan> {
     let root = root.filter(|_| crate::settings::env().pipeline_cache)?;
@@ -174,22 +182,52 @@ pub(crate) fn plan(
     // The list lives outside the identity folders. The lists of the folders that were removed above are merged in
     // first (the folders of the old layout); they are read before the removal.
     let list = carry::list_path(&base, KEY_SCHEME);
-    let seen = carried.seen;
+    let shipped = shipped.map(read_shipped).unwrap_or_default();
     if record::record_on() {
-        record::arm(seen.clone());
+        record::arm(carried.seen.clone(), shipped.clone());
         if carried.migrated > 0 {
             record::mark_dirty();
         }
     }
+    let n_shipped = shipped.len();
+    let mut seen = shipped;
+    seen.merge(&carried.seen);
     let full = carry::needs_full_start(&dir, &seen);
     Some(Plan {
         dir,
         list,
         seen,
+        shipped: n_shipped,
         full,
         files: files.len(),
         bytes: files.iter().map(|f| f.1).sum(),
     })
+}
+
+/// The shipped list with the keys of this host's key scheme (`keys::entry_keys`). A list that cannot be read is
+/// reported and counts as empty.
+pub(super) fn read_shipped(path: &Path) -> Seen {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("nxkit-gpu: shipped pipeline list {}: {e}", path.display());
+            return Seen::default();
+        }
+    };
+    match Seen::parse(&text) {
+        Ok(s) => s.with_keys(|e| {
+            let key = *super::keys::entry_keys(e).first()?;
+            let vertex = match e {
+                record::Entry::Render(r) => Some(super::keys::entry_vertex_key(r)),
+                _ => None,
+            };
+            Some((key, vertex))
+        }),
+        Err(e) => {
+            eprintln!("nxkit-gpu: shipped pipeline list {}: {e}", path.display());
+            Seen::default()
+        }
+    }
 }
 
 /// What the periodic and the exit write share.
@@ -305,11 +343,12 @@ impl Pipelines {
     /// thread that writes the cache every 30 s. Logs one line with the counts.
     pub(crate) fn runtime_start(&self, plan: Plan, shader_dir: &Path, screen: &super::ScreenHook) {
         eprintln!(
-            "nxkit-gpu: runtime pipeline cache {}: {} archives ({} MiB), {} pipelines listed{}",
+            "nxkit-gpu: runtime pipeline cache {}: {} archives ({} MiB), {} pipelines listed ({} shipped){}",
             plan.dir.display(),
             plan.files,
             plan.bytes >> 20,
             plan.seen.len(),
+            plan.shipped,
             if plan.full {
                 " (this build has not made them yet)"
             } else {
@@ -338,6 +377,7 @@ impl Pipelines {
             let s = session.clone();
             self.prewarm(
                 &plan.seen,
+                plan.shipped,
                 shader_dir,
                 marker,
                 Some(Box::new(move || s.flush(true, false))),

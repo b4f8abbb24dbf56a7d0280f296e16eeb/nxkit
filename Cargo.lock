@@ -394,6 +394,7 @@ dependencies = [
  "nxb-sys",
  "nxb-tool",
  "nxkit-abi",
+ "nxkit-pipestate",
 ]
 
 [[package]]
@@ -2083,6 +2084,7 @@ dependencies = [
  "nxkit-ipc",
  "nxkit-metal",
  "nxkit-nvn",
+ "nxkit-pipestate",
  "nxkit-rt",
  "nxkit-save-sync",
  "nxkit-svc-audio",

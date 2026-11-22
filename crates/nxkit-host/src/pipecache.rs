@@ -76,6 +76,7 @@ pub fn build_id(root: &Path) -> u64 {
         ),
     );
     h = fnv(h, &stamp(&root.join("pipelines.mtl4archive")));
+    h = fnv(h, &read(&root.join(nxkit_pipestate::list::SHIPPED_LIST)));
     fnv(h, &stamp(&root.join("shaders")))
 }
 

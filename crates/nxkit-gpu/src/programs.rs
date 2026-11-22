@@ -130,27 +130,8 @@ pub(crate) struct Bind {
     pub(crate) ubo: Option<crate::ubotex::Source>,
 }
 
-/// Which mesh pipeline stage a task or mesh shader is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MeshKind {
-    /// A task shader, the object function.
-    Task,
-    /// A mesh shader, the mesh function.
-    Mesh,
-}
-
-/// The `mesh_stage` of the reflection of a task or mesh shader (`nxb-xlate` `msl::mesh::reflect`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct MeshInfo {
-    /// The stage.
-    pub(crate) kind: MeshKind,
-    /// The threads of a workgroup.
-    pub(crate) threads: u32,
-    /// The bytes of the payload that a task shader writes and its mesh shader reads.
-    pub(crate) payload: u32,
-    /// For a mesh shader: it reads the payload of a task shader. Without one it reads the first workgroup of the draw.
-    pub(crate) task: bool,
-}
+/// Which mesh pipeline stage a task or mesh shader is, and the `mesh_stage` of the reflection of a task or mesh shader.
+pub(crate) use nxkit_pipestate::program::{MeshFacts as MeshInfo, MeshKind};
 
 /// A shader function with its bindings.
 pub(crate) struct StageProgram {
@@ -295,38 +276,14 @@ impl Programs {
     }
 }
 
-/// The entry of the `_bp` library that a `pull` field names (`main0` when the field has none), or `None` without a
-/// field or for a field at another slot than the host binds the layout block to. `nxb-archive` `plan` archives exactly
-/// this function.
+/// The entry of the `_bp` library that a `pull` field names (`nxkit_pipestate::program::pull_entry`). `nxb-archive`
+/// `plan` archives exactly this function.
 pub(crate) fn pull_entry(json: &Json) -> Option<String> {
-    let p = json.get("pull")?;
-    if p.get("slot").and_then(Json::as_i64) != Some(i64::from(crate::pull::SLOT)) {
-        return None;
-    }
-    Some(
-        p.get("entry")
-            .and_then(Json::as_str)
-            .filter(|e| !e.is_empty())
-            .unwrap_or("main0")
-            .to_owned(),
-    )
+    nxkit_pipestate::program::pull_entry(json)
 }
 
 fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProgram, Skip> {
-    let raster = json.get("raster");
-    if raster
-        .and_then(|r| r.get("primitive_id"))
-        .and_then(Json::as_i64)
-        .unwrap_or(0)
-        != 0
-    {
-        return Err(Skip::Program);
-    }
-    let entry = json
-        .get("entry")
-        .and_then(Json::as_str)
-        .unwrap_or("main0")
-        .to_owned();
+    let facts = nxkit_pipestate::program::read(json, vertex).map_err(|_| Skip::Program)?;
     let mut binds = Vec::new();
     let pass_scale = json
         .get("pass_scale")
@@ -449,34 +406,6 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             ubo,
         });
     }
-    let inputs = if vertex {
-        json.get("vertex_inputs")
-            .map(Json::as_arr)
-            .unwrap_or(&[])
-            .iter()
-            .filter_map(|v| {
-                let location = u32::try_from(v.get("location")?.as_i64()?).ok()?;
-                let ty = v.get("msl_type").and_then(Json::as_str).unwrap_or("float4");
-                let format = if ty.starts_with("uint") {
-                    VertexFormat::UInt4
-                } else if ty.starts_with("int") {
-                    VertexFormat::Int4
-                } else {
-                    VertexFormat::Float4
-                };
-                Some((location, format))
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let colors = raster.and_then(|r| r.get("colors")).map(|c| {
-        c.as_arr()
-            .iter()
-            .filter_map(Json::as_i64)
-            .filter_map(|v| u8::try_from(v).ok())
-            .collect()
-    });
     let mut threadgroup = [1u32; 3];
     for (i, v) in json
         .get("threadgroup_size")
@@ -501,59 +430,25 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         }
         c1.resize(c1.len().next_multiple_of(16).max(16), 0);
     }
-    let mesh = json.get("mesh_stage").map(read_mesh).transpose()?;
     Ok(StageProgram {
         lib,
-        entry,
-        entry_uint: json
-            .get("entry_u")
-            .and_then(Json::as_str)
-            .map(str::to_owned),
-        entry_mixed: json
-            .get("entry_m")
-            .and_then(Json::as_str)
-            .zip(json.get("uint_mask_m").and_then(Json::as_i64))
-            .map(|(entry, mask)| (entry.to_owned(), mask as u8)),
-        entry_layer: json
-            .get("entry_layer")
-            .and_then(Json::as_str)
-            .map(str::to_owned),
-        entry_z: ["entry_z", "entry_layer_z"]
-            .map(|k| json.get(k).and_then(Json::as_str).map(str::to_owned)),
+        entry: facts.entry,
+        entry_uint: facts.entry_uint,
+        entry_mixed: facts.entry_mixed,
+        entry_layer: facts.entry_layer,
+        entry_z: facts.entry_z,
         binds,
         arg_bytes,
-        inputs,
+        inputs: facts.inputs,
         pull: false,
-        colors,
+        colors: facts.colors,
         threadgroup,
         c1,
-        mesh,
+        mesh: facts.mesh,
     })
 }
 
 /// Reads the `mesh_stage` object of a task or mesh library.
-fn read_mesh(m: &Json) -> Result<MeshInfo, Skip> {
-    let kind = match m.get("kind").and_then(Json::as_str) {
-        Some("ts") => MeshKind::Task,
-        Some("ms") => MeshKind::Mesh,
-        _ => return Err(Skip::Program),
-    };
-    let int = |k: &str| {
-        m.get(k)
-            .and_then(Json::as_i64)
-            .and_then(|v| u32::try_from(v).ok())
-    };
-    let threads = int("threads")
-        .filter(|t| (1..=1024).contains(t))
-        .ok_or(Skip::Program)?;
-    Ok(MeshInfo {
-        kind,
-        threads,
-        payload: int("payload").unwrap_or(0),
-        task: m.get("task").and_then(Json::as_bool).unwrap_or(false),
-    })
-}
-
 #[cfg(test)]
 mod img_tests {
     use super::*;

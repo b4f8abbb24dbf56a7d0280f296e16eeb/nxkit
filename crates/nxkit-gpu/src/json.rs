@@ -52,6 +52,24 @@ impl Json {
     }
 }
 
+impl<'a> nxkit_pipestate::program::JsonView<'a> for &'a Json {
+    fn get(self, key: &str) -> Option<Self> {
+        Json::get(self, key)
+    }
+    fn as_str(self) -> Option<&'a str> {
+        Json::as_str(self)
+    }
+    fn as_i64(self) -> Option<i64> {
+        Json::as_i64(self)
+    }
+    fn as_bool(self) -> Option<bool> {
+        Json::as_bool(self)
+    }
+    fn items(self) -> Vec<Self> {
+        self.as_arr().iter().collect()
+    }
+}
+
 struct Parser<'a> {
     s: &'a [u8],
     i: usize,

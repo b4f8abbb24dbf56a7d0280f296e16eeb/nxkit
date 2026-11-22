@@ -91,6 +91,9 @@ pub struct GpuConfig {
     pub runtime_cache: Option<PathBuf>,
     /// A number that changes with the app build, so a cache of another build is dropped.
     pub build_id: u64,
+    /// The pipeline list that the build shipped in the app. Its pipelines are made at every start, before the first
+    /// frame, beside those of the runtime cache's list.
+    pub shipped_list: Option<PathBuf>,
     /// What the start shows while it makes the pipelines of the runtime cache.
     pub prewarm_screen: crate::ScreenHook,
     /// The hooks of the host's diagnostics for each batch.
@@ -123,6 +126,7 @@ impl crate::GpuSettings {
             gob_order: self.gob_order,
             runtime_cache: self.runtime_cache.clone(),
             build_id: self.build_id,
+            shipped_list: self.shipped_list.clone(),
             prewarm_screen: self.prewarm_screen.clone(),
             overlap: self.overlap,
             temporal_upscale: self.temporal_upscale.clone(),
@@ -145,6 +149,7 @@ impl Default for GpuConfig {
             gob_order: GobOrder::default(),
             runtime_cache: None,
             build_id: 0,
+            shipped_list: None,
             prewarm_screen: crate::ScreenHook::default(),
             batch_hooks: None,
             overlap: false,
@@ -221,6 +226,7 @@ impl Gpu {
             ctx,
             config.runtime_cache.as_deref(),
             config.build_id,
+            config.shipped_list.as_deref(),
             &mut archive,
         );
         let pipelines = Pipelines::new(ctx, &archive)?;

@@ -24,8 +24,11 @@ use std::path::Path;
 
 use nxb_pyjson::Value;
 
+use nxkit_pipestate::{BlendState, ColorTarget};
+
 use crate::seen::{
-    Acceptor, Attribute, Func, Layout, flag, layout_invalid, layout_of, stage, vertex_descriptor,
+    Acceptor, Attribute, Func, Layout, layout_invalid, layout_parts, render_of_line,
+    vertex_descriptor,
 };
 
 /// The pixel formats a render target of the host has: its name (`Debug` of `nxkit-metal` `Format`) and the script's.
@@ -157,66 +160,47 @@ pub struct ExactState {
     pub colors: Vec<Option<ColorSlot>>,
 }
 
-fn color_of(slot: &str) -> Option<Option<ColorSlot>> {
-    if slot == "_" {
-        return Some(None);
-    }
-    let mut p = slot.splitn(3, ':');
-    let format = pixel_format(p.next()?)?;
-    let mask = u8::from_str_radix(p.next()?, 16).ok()?;
-    let blend = match p.next()? {
-        "-" => None,
-        b => {
-            let n: Vec<&str> = b.split('/').collect();
-            let [a, b, c, d, e, f] = n[..] else {
-                return None;
-            };
-            Some([
-                blend_factor(a)?,
-                blend_factor(b)?,
-                blend_op(c)?,
-                blend_factor(d)?,
-                blend_factor(e)?,
-                blend_op(f)?,
-            ])
-        }
-    };
-    Some(Some(ColorSlot {
-        format,
-        mask: mask & 0xF,
-        blend,
-    }))
+fn blend_of(b: &BlendState) -> Option<Blend> {
+    let f = |v: &dyn std::fmt::Debug| format!("{v:?}");
+    Some([
+        blend_factor(&f(&b.src_rgb))?,
+        blend_factor(&f(&b.dst_rgb))?,
+        blend_op(&f(&b.op_rgb))?,
+        blend_factor(&f(&b.src_alpha))?,
+        blend_factor(&f(&b.dst_alpha))?,
+        blend_op(&f(&b.op_alpha))?,
+    ])
 }
 
-fn colors_of(s: &str) -> Option<Vec<Option<ColorSlot>>> {
-    if s == "-" {
-        return Some(Vec::new());
-    }
-    s.split(',').map(color_of).collect()
+fn color_of(t: &Option<ColorTarget>) -> Option<Option<ColorSlot>> {
+    let Some(t) = t else {
+        return Some(None);
+    };
+    Some(Some(ColorSlot {
+        format: pixel_format(&format!("{:?}", t.format))?,
+        mask: t.write_mask & 0xF,
+        blend: match &t.blend {
+            None => None,
+            Some(b) => Some(blend_of(b)?),
+        },
+    }))
 }
 
 /// The state of one `R` line with a fragment function, or none for a line that does not parse, names a format or a
 /// factor the script has no name for, or has no fragment stage.
 fn state_of_line(l: &str) -> Option<ExactState> {
-    let f: Vec<&str> = l.split('\t').collect();
-    if f.len() != 14 || f[0] != "R" {
-        return None;
-    }
-    let topology = f[9];
-    if !["Unspecified", "Point", "Line", "Triangle"].contains(&topology) {
-        return None;
-    }
-    let (attributes, layouts) = layout_of(f[13])?;
+    let r = render_of_line(l)?;
+    let (attributes, layouts) = layout_parts(&r.layout)?;
     Some(ExactState {
-        vertex: stage(f[4], f[5])??,
-        fragment: stage(f[6], f[7])??,
+        vertex: r.vertex,
+        fragment: r.fragment?,
         attributes,
         layouts,
-        topology: topology.to_string(),
-        samples: f[10].parse().ok()?,
-        alpha_to_coverage: flag(f[11])?,
-        icb: flag(f[8])?,
-        colors: colors_of(f[12])?,
+        topology: format!("{:?}", r.topology),
+        samples: r.samples,
+        alpha_to_coverage: r.a2c,
+        icb: r.icb,
+        colors: r.colors.iter().map(color_of).collect::<Option<_>>()?,
     })
 }
 

@@ -336,48 +336,20 @@ fn color_targets(
     fs: Option<&StageProgram>,
     targets: &Targets,
 ) -> Vec<Option<nxkit_metal::ColorTarget>> {
-    targets
-        .colors
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            let format = (*f)?;
-            let written =
-                fs.is_some_and(|f| f.colors.as_ref().is_none_or(|c| c.contains(&(i as u8))));
-            let blend = d.blend.get(i).copied().unwrap_or_default();
-            let mask = d.write_masks.get(i).copied().unwrap_or(0xF);
-            Some(translate::color_target(format, &blend, mask, written))
-        })
-        .collect()
+    nxkit_pipestate::draw::color_targets(
+        &d.blend,
+        &d.write_masks,
+        fs.map(|f| f.colors.as_deref()),
+        &targets.colors,
+    )
 }
 
 fn fragment_entry<'a>(fs: &'a StageProgram, targets: &Targets) -> &'a str {
-    let mut present = 0u8;
-    let mut integer = 0u8;
-    for (slot, format) in targets.colors.iter().enumerate() {
-        let Some(format) = format else { continue };
-        if fs
-            .colors
-            .as_ref()
-            .is_some_and(|colors| !colors.contains(&(slot as u8)))
-        {
-            continue;
-        }
-        present |= 1 << slot;
-        if crate::format_map::is_integer(*format) {
-            integer |= 1 << slot;
-        }
-    }
-    if integer != 0 {
-        if integer == present {
-            if let Some(entry) = &fs.entry_uint {
-                return entry;
-            }
-        } else if let Some((entry, mask)) = &fs.entry_mixed
-            && mask & present == integer
-        {
-            return entry;
-        }
-    }
-    &fs.entry
+    nxkit_pipestate::draw::fragment_entry(
+        &fs.entry,
+        fs.entry_uint.as_deref(),
+        fs.entry_mixed.as_ref().map(|(e, m)| (e.as_str(), *m)),
+        fs.colors.as_deref(),
+        &targets.colors,
+    )
 }

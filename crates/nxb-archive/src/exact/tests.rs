@@ -165,7 +165,7 @@ fn a_state_the_compiler_would_refuse_is_named() {
         1,
         0,
         "Rgba8Unorm:f:-",
-        "a0.Int1010102Normalized.12.0,l0.8.PerVertex.1",
+        "a0.Int1010102Norm.12.0,l0.8.PerVertex.1",
     )]));
     let reason = bad[0].invalid(None).unwrap();
     assert!(reason.contains("does not fit the stride"), "{reason}");

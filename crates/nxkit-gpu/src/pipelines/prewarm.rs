@@ -73,6 +73,10 @@ struct Work {
     entries: Vec<Entry>,
     next: AtomicUsize,
     finished: AtomicUsize,
+    /// The first entries that the start waits for whatever the budget (the shipped list), and how many of them are
+    /// done.
+    must: usize,
+    must_done: AtomicUsize,
     alive: AtomicUsize,
     counts: [AtomicUsize; 7],
     libs: Mutex<HashMap<String, Option<ShaderLibrary>>>,
@@ -114,6 +118,7 @@ impl Work {
     }
 
     fn render(&self, r: &RenderRec) -> Option<Outcome> {
+        let (key, vertex_key) = r.key.zip(r.vertex_key)?;
         let vl = self.lib(&r.vertex.0)?;
         let fl = match &r.fragment {
             Some((s, _)) => Some(self.lib(s)?),
@@ -132,11 +137,7 @@ impl Work {
         desc.support_icb = r.icb;
         // what no archive holds is compiled, so that the runtime archive keeps it for the next start
         desc.persist = true;
-        let at = if r.fallback {
-            r.key ^ FALLBACK_KEY
-        } else {
-            r.key
-        };
+        let at = if r.fallback { key ^ FALLBACK_KEY } else { key };
         if self.cache.cached_render(at).is_some() {
             return Some(Outcome::Cached);
         }
@@ -145,11 +146,11 @@ impl Work {
                 .fallbacks
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            set.insert(r.key);
-            set.insert(r.vertex_key);
+            set.insert(key);
+            set.insert(vertex_key);
         }
         Some(
-            build_render(&self.cache, &self.fallbacks, r.key, r.vertex_key, &mut desc).map_or(
+            build_render(&self.cache, &self.fallbacks, key, vertex_key, &mut desc).map_or(
                 Outcome::Failed,
                 |(_, s)| {
                     // `NXKIT_DIAG=stats` or `pipe`: a compile says why the archive missed
@@ -161,13 +162,14 @@ impl Work {
     }
 
     fn mesh(&self, m: &MeshRec) -> Option<Outcome> {
+        let key = m.key?;
         let load = |s: &Option<(String, String)>| match s {
             Some((stem, e)) => self.lib(stem).map(|l| Some((l, e.clone()))),
             None => Some(None),
         };
         let (object, fragment) = (load(&m.object)?, load(&m.fragment)?);
         let mesh = (self.lib(&m.mesh.0)?, m.mesh.1.clone());
-        if self.cache.cached_render(m.key).is_some() {
+        if self.cache.cached_render(key).is_some() {
             return Some(Outcome::Cached);
         }
         fn as_ref(s: &Option<(ShaderLibrary, String)>) -> Option<(&ShaderLibrary, &str)> {
@@ -186,7 +188,7 @@ impl Work {
         };
         Some(
             self.cache
-                .mesh_traced(m.key, &desc)
+                .mesh_traced(key, &desc)
                 .map_or(Outcome::Failed, |(_, s)| s.into()),
         )
     }
@@ -195,8 +197,8 @@ impl Work {
         let done = match e {
             Entry::Render(r) => self.render(r),
             Entry::Mesh(m) => self.mesh(m),
-            Entry::Compute(c) => self.lib(&c.function.0).map(|l| {
-                self.cache.compute_traced(c.key, &l, &c.function.1).map_or(
+            Entry::Compute(c) => c.key.zip(self.lib(&c.function.0)).map(|(key, l)| {
+                self.cache.compute_traced(key, &l, &c.function.1).map_or(
                     Outcome::Failed,
                     |(_, s)| match s {
                         // a compute pipeline of the build's archive is a load, like a render pipeline's
@@ -235,6 +237,9 @@ fn worker(w: &Work) {
         let o = catch_unwind(AssertUnwindSafe(|| w.make(e))).unwrap_or(Outcome::Failed);
         w.counts[o as usize].fetch_add(1, Ordering::Relaxed);
         w.finished.fetch_add(1, Ordering::Relaxed);
+        if i < w.must {
+            w.must_done.fetch_add(1, Ordering::Relaxed);
+        }
     }
     if w.alive.fetch_sub(1, Ordering::AcqRel) == 1 {
         w.libs
@@ -279,10 +284,12 @@ fn threads() -> usize {
 impl Pipelines {
     /// Makes the pipelines of `seen` from the libraries in `shader_dir`. Waits for them up to the budget (see the
     /// module); what is left goes on in the background. `all` is the marker file to write when every pipeline is
-    /// made, and says that the start waits for all of them without a budget.
+    /// made, and says that the start waits for all of them without a budget. The first `must` entries (the shipped
+    /// list) are waited for in any case.
     pub(super) fn prewarm(
         &self,
         seen: &Seen,
+        must: usize,
         shader_dir: &Path,
         all: Option<PathBuf>,
         after: Option<Box<dyn FnOnce() + Send>>,
@@ -296,6 +303,8 @@ impl Pipelines {
             entries: seen.entries().to_vec(),
             next: AtomicUsize::new(0),
             finished: AtomicUsize::new(0),
+            must: must.min(seen.len()),
+            must_done: AtomicUsize::new(0),
             alive: AtomicUsize::new(n),
             counts: Default::default(),
             libs: Mutex::new(HashMap::new()),
@@ -335,7 +344,12 @@ impl Pipelines {
         let mut screened = false;
         let mut shown = Instant::now();
         let mut g = w.over.0.lock().unwrap_or_else(PoisonError::into_inner);
-        while w.alive.load(Ordering::Acquire) > 0 && (all.is_some() || w.start.elapsed() < budget) {
+        let waiting = || {
+            all.is_some()
+                || w.must_done.load(Ordering::Relaxed) < w.must
+                || w.start.elapsed() < budget
+        };
+        while w.alive.load(Ordering::Acquire) > 0 && waiting() {
             g = w
                 .over
                 .1
@@ -408,7 +422,7 @@ mod lookup {
                     .expect("a seen-*.list in pipecache")
             });
         let text = std::fs::read_to_string(list).unwrap();
-        let mut keep = format!("{}\n", super::super::record::HEADER);
+        let mut keep = format!("{}\n", nxkit_pipestate::list::HEADER);
         let mut k = 0;
         // `NXKIT_LOOKUP_ALL=1`: the mesh and compute lines too (`N` counts them all)
         let all = std::env::var_os("NXKIT_LOOKUP_ALL").is_some();
@@ -436,7 +450,7 @@ mod lookup {
         let shaders = std::env::var("NXKIT_LOOKUP_SHADERS")
             .map_or_else(|_| app.join("shaders"), PathBuf::from);
         let p = Pipelines::new(&ctx, &archive).unwrap();
-        p.prewarm(&seen, &shaders, None, None, None);
+        p.prewarm(&seen, 0, &shaders, None, None, None);
         eprintln!("{}", crate::pipelines::coverage::describe());
     }
 
@@ -470,7 +484,7 @@ mod lookup {
                     .expect("a seen-*.list in pipecache")
             });
         let text = std::fs::read_to_string(list).unwrap();
-        let mut keep = format!("{}\n", super::super::record::HEADER);
+        let mut keep = format!("{}\n", nxkit_pipestate::list::HEADER);
         let all = std::env::var_os("NXKIT_LOOKUP_ALL").is_some();
         for l in text
             .lines()
@@ -509,7 +523,7 @@ mod lookup {
             ..build(Vec::new(), true)
         };
         let p = Pipelines::new(&ctx, &first).unwrap();
-        p.prewarm(&seen, &shaders, None, None, None);
+        p.prewarm(&seen, 0, &shaders, None, None, None);
         let t = std::time::Instant::now();
         let written = p.cache.rotate_archive(&file);
         eprintln!(
@@ -521,7 +535,7 @@ mod lookup {
         drop(p);
         let second = build(vec![file], false);
         let p = Pipelines::new(&ctx, &second).unwrap();
-        p.prewarm(&seen, &shaders, None, None, None);
+        p.prewarm(&seen, 0, &shaders, None, None, None);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

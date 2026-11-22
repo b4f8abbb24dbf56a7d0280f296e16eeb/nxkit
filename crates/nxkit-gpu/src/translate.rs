@@ -13,9 +13,7 @@ use nxkit_metal::{
 use nxkit_nvn::tic::Tsc;
 
 use nxkit_pipestate::nvn;
-pub(crate) use nxkit_pipestate::nvn::{
-    DEFAULT_VERTEX_SLOT, LayoutError, QUADS, color_target, stream_slot,
-};
+pub(crate) use nxkit_pipestate::nvn::{DEFAULT_VERTEX_SLOT, LayoutError, QUADS, stream_slot};
 
 use crate::detail::{BlendDetail, DepthStencilDetail, DrawDetail, StencilDetail};
 use crate::format_map::is_integer;
@@ -251,7 +249,7 @@ pub(crate) fn sampler(t: &Tsc) -> SamplerDesc {
 #[cfg(test)]
 mod tests {
     use nxkit_metal::{BlendFactor, BlendOp};
-    use nxkit_pipestate::nvn::{as_read, blend_factor, blend_op};
+    use nxkit_pipestate::nvn::{as_read, blend_factor, blend_op, color_target};
 
     use super::*;
 
