@@ -13,6 +13,7 @@
 //! - [`ipc`]: the trait of a service that answers Horizon IPC requests, and the request and response types (R14, R15).
 //! - [`kernel`]: the kernel and the IPC server as the services see them, registered once by the host.
 //! - [`obs`]: the ids of the observation gates of the rewritten code and the handler type of one.
+//! - [`shader_src`]: where the build keeps the MSL of the shaders for the hot swap (W36).
 //! - [`shards`]: the index of the pipeline archive shards that the build writes and the host reads.
 //! - [`platform`]: the console the game was built for, the Switch or the Switch 2, set once by the host at load.
 //! - [`vk_table`]: the shader table of a Vulkan game, `vk_shaders.tsv`, that the build writes and the host reads.
@@ -26,5 +27,6 @@ pub mod launch;
 pub mod live;
 pub mod obs;
 pub mod platform;
+pub mod shader_src;
 pub mod shards;
 pub mod vk_table;
