@@ -29,6 +29,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         entry_uint: None,
         entry_mixed: None,
         entry_layer: None,
+        entry_z: [None, None],
         binds: vec![],
         arg_bytes: 0,
         inputs: vec![],
@@ -136,6 +137,7 @@ fn a_draw_with_a_layer_picking_geometry_shader_runs_the_layer_entry() {
         entry_uint: None,
         entry_mixed: None,
         entry_layer: None,
+        entry_z: [None, None],
         binds: vec![],
         arg_bytes: 0,
         inputs: vec![],
@@ -150,10 +152,50 @@ fn a_draw_with_a_layer_picking_geometry_shader_runs_the_layer_entry() {
     d.program.geometry = Some("gs".into());
     // Without a layer entry the geometry stage stays ignored.
     assert!(!layered(&d, &vs));
-    assert_eq!(render::vertex_entry(&d, &vs), "vs");
+    assert_eq!(render::vertex_entry(&d, &vs, false), ("vs", ""));
     vs.entry_layer = Some("vs_l".into());
     assert!(layered(&d, &vs));
-    assert_eq!(render::vertex_entry(&d, &vs), "vs_l");
+    assert_eq!(render::vertex_entry(&d, &vs, false), ("vs_l", ":layer"));
     d.program.geometry = None;
-    assert_eq!(render::vertex_entry(&d, &vs), "vs");
+    assert_eq!(render::vertex_entry(&d, &vs, false), ("vs", ""));
+}
+
+#[test]
+fn the_depth_mode_zero_to_one_takes_the_entries_that_keep_the_depth() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let lib = ShaderLibrary::from_source(
+        &ctx,
+        "depth",
+        "#include <metal_stdlib>\nusing namespace metal;\nvertex float4 vs() { return float4(0); }\n",
+    )
+    .unwrap();
+    let mut vs = StageProgram {
+        lib,
+        entry: "main0".into(),
+        entry_uint: None,
+        entry_mixed: None,
+        entry_layer: Some("main0_l".into()),
+        entry_z: [None, None],
+        binds: vec![],
+        arg_bytes: 0,
+        inputs: vec![],
+        pull: false,
+        colors: None,
+        threadgroup: [1; 3],
+        c1: vec![],
+        mesh: None,
+    };
+    let mut d = crate::walk::empty_draw();
+    // A library without the entries keeps converting the depth.
+    assert_eq!(render::vertex_entry(&d, &vs, true), ("main0", ""));
+    vs.entry_z = [Some("main0_z".into()), Some("main0_lz".into())];
+    assert_eq!(render::vertex_entry(&d, &vs, false), ("main0", ""));
+    assert_eq!(render::vertex_entry(&d, &vs, true), ("main0_z", ":z"));
+    d.program.geometry = Some("gs".into());
+    assert_eq!(
+        render::vertex_entry(&d, &vs, true),
+        ("main0_lz", ":layer:z")
+    );
 }

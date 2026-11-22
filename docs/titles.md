@@ -186,6 +186,9 @@ has the same parts:
 - The family is `agl` when the engine column names sead and agl. No other engine has a family in nxkit: a family holds
   facts that every game of an engine shares, and the engine tree records none for the other engines in a form that a
   hook takes.
+- Unreal Engine 4 on NVN calls `nvnDeviceSetDepthMode(NEAR_IS_ZERO)` (seen in OCTOPATH TRAVELER, 4.18). The depth
+  mode is a capability, not a profile key: the host follows the call, and the build learns it from the recorded pipeline
+  list. It is a candidate fact for an Unreal family once a second Unreal title needs a family.
 - `shader_facts.tsv` is the folder's `shader_facts_manual.tsv`, where it has one.
 
 The tests of each module parse its profile and its rules with `nxb-rewrite` and count the rules. The rules of Pokémon

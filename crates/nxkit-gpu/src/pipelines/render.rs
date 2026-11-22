@@ -14,20 +14,22 @@ impl Pipelines {
         targets: &Targets,
         icb: bool,
     ) -> Result<(RenderPipeline, u64), Skip> {
+        let zero_to_one = self.depth_zero_to_one();
         let hit = LAST_PIPELINE.with(|l| {
             l.borrow()
                 .as_ref()
-                .filter(|m| m.matches(self.id, d, targets, icb))
+                .filter(|m| m.matches(self.id, d, targets, icb, zero_to_one))
                 .map(|m| (m.pipeline.clone(), m.key))
         });
         if let Some(hit) = hit {
             return Ok(hit);
         }
-        let (pipeline, key) = self.render_uncached(d, vs, fs, targets, icb)?;
+        let (pipeline, key) = self.render_uncached(d, vs, fs, targets, icb, zero_to_one)?;
         LAST_PIPELINE.with(|l| {
             *l.borrow_mut() = Some(Last {
                 owner: self.id,
                 icb,
+                zero_to_one,
                 topology: d.topology,
                 alpha_to_coverage: d.raster.alpha_to_coverage,
                 program: d.program.clone(),
@@ -63,6 +65,7 @@ impl Pipelines {
         fs: Option<&StageProgram>,
         targets: &Targets,
         icb: bool,
+        zero_to_one: bool,
     ) -> Result<(RenderPipeline, u64), Skip> {
         let class = translate::primitive(d.topology).ok_or(Skip::Primitive)?.1;
         let flat = crate::knob("flat")
@@ -112,8 +115,9 @@ impl Pipelines {
         } else {
             None
         };
+        let (vertex_fn, vertex_kind) = vertex_entry(d, vs, zero_to_one);
         let mut desc = RenderPipelineDesc::new(
-            (&vs.lib, vertex_entry(d, vs)),
+            (&vs.lib, vertex_fn),
             paint_lib
                 .as_ref()
                 .map(|lib| {
@@ -148,13 +152,14 @@ impl Pipelines {
         desc.sample_count = targets.samples;
         desc.alpha_to_coverage = d.raster.alpha_to_coverage;
         desc.support_icb = icb;
-        // The layer entry is another vertex function: its pipelines have keys of their own.
-        let layered_key;
-        let vertex_key: &str = if layered(d, vs) {
-            layered_key = format!("{}:layer", d.program.vertex);
-            &layered_key
-        } else {
+        // The layer entry and the entries that keep the depth are other vertex functions: their pipelines have keys
+        // of their own.
+        let other_key;
+        let vertex_key: &str = if vertex_kind.is_empty() {
             &d.program.vertex
+        } else {
+            other_key = format!("{}{vertex_kind}", d.program.vertex);
+            &other_key
         };
         let key = render_key(&RenderKey {
             vertex: vertex_key,
@@ -237,6 +242,7 @@ impl Pipelines {
     ) -> Result<(RenderPipeline, u64), Skip> {
         let colors = color_targets(d, fs, targets);
         let fragment = fs.map(|f| (&f.lib, fragment_entry(f, targets)));
+        let mesh_fn = mesh_entry(ms, self.depth_zero_to_one());
         let info = |p: &StageProgram| p.mesh.ok_or(Skip::Program);
         let mi = info(ms)?;
         let ti = ts.map(info).transpose()?;
@@ -248,6 +254,7 @@ impl Pipelines {
             targets,
             colors: &colors,
             alpha_to_coverage: d.raster.alpha_to_coverage,
+            keeps_depth: mesh_fn != ms.entry,
         });
         if let Some(p) = self.cache.cached_render(key) {
             return Ok((p, key));
@@ -263,7 +270,7 @@ impl Pipelines {
         }
         let job = MeshJob {
             object: ts.map(|t| (t.lib.clone(), t.entry.clone())),
-            mesh: (ms.lib.clone(), ms.entry.clone()),
+            mesh: (ms.lib.clone(), mesh_fn.to_owned()),
             fragment: fragment.map(|(l, e)| (l.clone(), e.to_owned())),
             colors,
             sample_count: targets.samples,
@@ -311,10 +318,17 @@ pub(crate) fn layered(d: &DrawDetail, vs: &StageProgram) -> bool {
     d.program.geometry.is_some() && vs.entry_layer.is_some()
 }
 
-/// The vertex function of the draw: the layer entry for a [`layered`] draw, the base entry otherwise.
-pub(super) fn vertex_entry<'a>(d: &DrawDetail, vs: &'a StageProgram) -> &'a str {
-    match (&d.program.geometry, &vs.entry_layer) {
-        (Some(_), Some(l)) => l,
+/// The vertex function of the draw and the suffix of its pipeline key: the layer entry (`:layer`) for a [`layered`]
+/// draw, the base entry otherwise. With the device in the depth mode 0 to 1 (`zero_to_one`) it is the form of the
+/// entry that keeps the clip depth (`main0_z`, `main0_lz`; suffix `:z`); the base forms convert the -1 to 1 depth of
+/// the default mode.
+pub(super) fn vertex_entry<'a>(
+    d: &DrawDetail,
+    vs: &'a StageProgram,
+    zero_to_one: bool,
+) -> (&'a str, &'static str) {
+    let layer = match (&d.program.geometry, &vs.entry_layer) {
+        (Some(_), Some(_)) => true,
         (Some(g), None) => {
             nxkit_nvn::diag::note(
                 nxkit_nvn::diag::Reason::StageIgnored,
@@ -323,8 +337,44 @@ pub(super) fn vertex_entry<'a>(d: &DrawDetail, vs: &'a StageProgram) -> &'a str 
                     d.program.vertex
                 ),
             );
-            &vs.entry
+            false
         }
-        _ => &vs.entry,
+        _ => false,
+    };
+    let (plain, kept) = if layer {
+        (
+            vs.entry_layer.as_deref().unwrap_or(&vs.entry),
+            &vs.entry_z[1],
+        )
+    } else {
+        (vs.entry.as_str(), &vs.entry_z[0])
+    };
+    match (zero_to_one, kept) {
+        (true, Some(z)) => (z, if layer { ":layer:z" } else { ":z" }),
+        (true, None) => {
+            depth_mode_ignored(&d.program.vertex);
+            (plain, if layer { ":layer" } else { "" })
+        }
+        (false, _) => (plain, if layer { ":layer" } else { "" }),
     }
+}
+
+/// The mesh function of a mesh draw: `main0_z` with the device in the depth mode 0 to 1, see [`vertex_entry`].
+fn mesh_entry(ms: &StageProgram, zero_to_one: bool) -> &str {
+    match (zero_to_one, &ms.entry_z[0]) {
+        (true, Some(z)) => z,
+        (true, None) => {
+            depth_mode_ignored(&ms.entry);
+            &ms.entry
+        }
+        (false, _) => &ms.entry,
+    }
+}
+
+/// Counts a draw that converts the depth although the device keeps it (`Reason::DepthModeIgnored`).
+fn depth_mode_ignored(what: &str) {
+    nxkit_nvn::diag::note(
+        nxkit_nvn::diag::Reason::DepthModeIgnored,
+        format_args!("{what} has no entry that keeps the clip depth"),
+    );
 }

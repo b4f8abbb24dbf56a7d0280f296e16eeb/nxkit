@@ -13,7 +13,7 @@ use crate::fastmap::{FastMap, FastSet};
 
 use nxkit_metal::{Dependency, Scope, Stages, Visibility};
 use nxkit_nvn::frame::{Cmd, Frame};
-use nxkit_nvn::passes::{LoadAction, Pass, PassKind, PassPlan};
+use nxkit_nvn::passes::{Pass, PassKind, PassPlan};
 use nxkit_nvn::resource::TexId;
 
 /// The textures a pass reads and writes, derived from its commands.
@@ -202,7 +202,7 @@ pub(crate) fn touch(frame: &Frame, plan: &PassPlan, p: &Pass) -> Touch {
     t.reads.extend_from_slice(&t.sampled);
     for a in plan.attachments_of(p) {
         t.writes.push(a.tex);
-        if a.load == LoadAction::Load {
+        if a.loads_old() {
             t.reads.push(a.tex);
         }
     }

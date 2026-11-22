@@ -90,6 +90,9 @@ pub(super) struct MeshKey<'a> {
     pub colors: &'a [Option<ColorTarget>],
     /// Alpha to coverage.
     pub alpha_to_coverage: bool,
+    /// The mesh function keeps the clip depth (`main0_z`, the depth mode 0 to 1). Hashed only when set, so the keys
+    /// of the default mode stay.
+    pub keeps_depth: bool,
 }
 
 /// The key of a mesh pipeline.
@@ -106,6 +109,9 @@ pub(super) fn mesh_key(k: &MeshKey<'_>) -> u64 {
         .hash(&mut h);
     k.colors.hash(&mut h);
     k.alpha_to_coverage.hash(&mut h);
+    if k.keeps_depth {
+        "keeps-depth".hash(&mut h);
+    }
     h.finish()
 }
 
@@ -183,6 +189,7 @@ pub(super) fn entry_keys(e: &super::record::Entry) -> Vec<u64> {
                 targets: &t,
                 colors: &m.colors,
                 alpha_to_coverage: m.a2c,
+                keeps_depth: m.mesh.1 != "main0",
             })]
         }
         Entry::Compute(c) => vec![compute_key(program_of(&c.function.0))],

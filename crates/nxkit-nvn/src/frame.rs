@@ -17,6 +17,62 @@ use crate::resource::TexId;
 /// The number of colour attachments that NVN has.
 pub const MAX_COLOR: usize = 8;
 
+/// The part of a depth and stencil target that a clear leaves as it was. `nvnCommandBufferClearDepthStencil` clears
+/// depth only with its depth mask and stencil only with its stencil mask: Unreal Engine 4 clears the stencil alone
+/// between its lights and its translucency, and the depth there is still the scene's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ClearKeeps {
+    /// Depth and stencil are cleared.
+    #[default]
+    Nothing,
+    /// Only stencil is cleared.
+    Depth,
+    /// Only depth is cleared.
+    Stencil,
+    /// The clear writes nothing.
+    Both,
+}
+
+impl ClearKeeps {
+    /// The part that a clear with these masks leaves: `depth_mask` is the boolean of the call, `stencil_mask` its
+    /// stencil write mask. A partial stencil mask clears the stencil (Metal clears all bits).
+    pub fn of_masks(depth_mask: bool, stencil_mask: u32) -> Self {
+        match (depth_mask, stencil_mask & 0xff != 0) {
+            (true, true) => Self::Nothing,
+            (false, true) => Self::Depth,
+            (true, false) => Self::Stencil,
+            (false, false) => Self::Both,
+        }
+    }
+
+    /// True when the clear leaves the depth as it was.
+    pub fn depth(self) -> bool {
+        matches!(self, Self::Depth | Self::Both)
+    }
+
+    /// True when the clear leaves the stencil as it was.
+    pub fn stencil(self) -> bool {
+        matches!(self, Self::Stencil | Self::Both)
+    }
+
+    /// The code of the command record.
+    pub(crate) fn code(self) -> u16 {
+        match self {
+            Self::Nothing => 0,
+            Self::Depth => 1,
+            Self::Stencil => 2,
+            Self::Both => 3,
+        }
+    }
+
+    /// The part of a record code. `None` for an unknown code.
+    pub(crate) fn from_code(code: u16) -> Option<Self> {
+        [Self::Nothing, Self::Depth, Self::Stencil, Self::Both]
+            .get(usize::from(code))
+            .copied()
+    }
+}
+
 /// The subresource and optional format of a render attachment.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct TargetView(u32);
@@ -110,6 +166,8 @@ pub enum Cmd {
     ClearDepthStencil {
         /// The clear covers the whole target.
         full: bool,
+        /// What the clear leaves as it was.
+        keeps: ClearKeeps,
     },
     /// The game tells that the contents are not needed (`nvnCommandBufferDiscardColor` and the depth variant).
     Discard {
@@ -355,6 +413,22 @@ mod tests {
 
     fn t(n: u32) -> TexId {
         TexId(n)
+    }
+
+    #[test]
+    fn the_masks_of_a_depth_clear_tell_what_it_keeps() {
+        assert_eq!(ClearKeeps::of_masks(true, 0xff), ClearKeeps::Nothing);
+        assert_eq!(ClearKeeps::of_masks(false, 0xff), ClearKeeps::Depth);
+        assert_eq!(ClearKeeps::of_masks(true, 0), ClearKeeps::Stencil);
+        assert_eq!(ClearKeeps::of_masks(false, 0x100), ClearKeeps::Both);
+        for k in [
+            ClearKeeps::Nothing,
+            ClearKeeps::Depth,
+            ClearKeeps::Stencil,
+            ClearKeeps::Both,
+        ] {
+            assert_eq!(ClearKeeps::from_code(k.code()), Some(k));
+        }
     }
 
     #[test]

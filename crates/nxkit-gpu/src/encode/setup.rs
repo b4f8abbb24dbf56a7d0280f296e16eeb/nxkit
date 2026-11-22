@@ -41,7 +41,9 @@ pub(super) fn clear_of(sh: &EncodeCtx<'_>, pass: &Pass, slot: Slot) -> ClearDeta
                 }),
                 Slot::Color(n),
             ) => *s == n,
-            (Some(Cmd::ClearDepthStencil { full: true }), Slot::Depth) => true,
+            (Some(Cmd::ClearDepthStencil { full: true, keeps }), Slot::Depth) => {
+                *keeps != ClearKeeps::Both
+            }
             _ => false,
         };
         if hit {
@@ -309,9 +311,17 @@ pub(super) fn setup(sh: &EncodeCtx<'_>, pass: &Pass) -> Result<Setup, Skip> {
                         );
                     }
                 }
+                // A clear that leaves depth or stencil as it was (`ClearKeeps`) loads that part.
+                let kept = |keeps: bool| {
+                    if keeps && l == MLoad::Clear {
+                        MLoad::Load
+                    } else {
+                        l
+                    }
+                };
                 desc.depth = Some(DepthAttachment {
                     texture: texture.clone(),
-                    load: l,
+                    load: kept(a.clear_keeps.depth()),
                     store: s,
                     clear: f64::from(clear.depth),
                     memoryless: mem,
@@ -320,7 +330,7 @@ pub(super) fn setup(sh: &EncodeCtx<'_>, pass: &Pass) -> Result<Setup, Skip> {
                     has_stencil = true;
                     desc.stencil = Some(StencilAttachment {
                         texture: texture.clone(),
-                        load: l,
+                        load: kept(a.clear_keeps.stencil()),
                         store: s,
                         clear: clear.stencil,
                         memoryless: mem,

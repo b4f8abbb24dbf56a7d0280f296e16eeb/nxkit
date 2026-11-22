@@ -78,7 +78,16 @@ fn run(a: &[String]) -> Result<(), String> {
             .collect();
         s.into_iter().collect()
     };
-    let zero = o.get("depth").map(String::as_str) == Some("zero");
+    let seen_states = crate::seen::read_lists(&lists);
+    let all_exacts = crate::exact::read_lists(&lists);
+    let zero = o.get("depth").map(String::as_str) == Some("zero")
+        || crate::plan::keeps_depth(
+            &lib_dir,
+            seen_states
+                .iter()
+                .map(|s| &s.vertex)
+                .chain(all_exacts.iter().map(|e| &e.vertex)),
+        );
     let text = crate::plan::pair_text(&pairs);
     if text.is_empty() {
         return Err("no pair list".into());
@@ -95,9 +104,7 @@ fn run(a: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let js = work.join("bases.mtl4-json");
-    let (states, refused) =
-        crate::seen::usable(&lib_dir, &chain, &crate::seen::read_lists(&lists), zero);
-    let all_exacts = crate::exact::read_lists(&lists);
+    let (states, refused) = crate::seen::usable(&lib_dir, &chain, &seen_states, zero);
     let (exacts, exact_refused) = crate::exact::usable(&lib_dir, &chain, &all_exacts, zero);
     let script = crate::plan::script_text_full(&lib_dir, &p.bases, &states, &exacts, &computes);
     if std::fs::read(&js).ok().as_deref() != Some(script.as_bytes()) {

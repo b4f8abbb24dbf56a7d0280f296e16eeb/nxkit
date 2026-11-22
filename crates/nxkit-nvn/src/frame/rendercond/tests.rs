@@ -182,7 +182,10 @@ fn only_conditional_commands_are_left_out_and_ranges_join() {
     f.cmds.extend([
         draw(),
         Cmd::Barrier(1),
-        Cmd::ClearDepthStencil { full: true },
+        Cmd::ClearDepthStencil {
+            full: true,
+            keeps: crate::frame::ClearKeeps::Nothing,
+        },
     ]);
     f.disable(0..1);
     f.disable(1..3);

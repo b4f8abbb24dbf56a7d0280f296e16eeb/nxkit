@@ -150,8 +150,10 @@ pub struct Plan {
 /// is drawn through its `_bp` library and the field's `entry` (`main0` without one): it reads its inputs itself, so its
 /// pipelines have no vertex layout (`nxkit-gpu` `pull`, on with `NXKIT_PULL=1`). Every other vertex shader is drawn
 /// with its `_b` library and its `entry`. A vertex shader with stage inputs and no `pull` field needs the vertex layout
-/// of the draw, which a base cannot have, and is left out (`left[2]`). `entry_z` is not used.
-/// `_zero` (depth mode `zero`) stays for the callers; the stamp records it.
+/// of the draw, which a base cannot have, and is left out (`left[2]`). With `zero` (the device's depth mode is 0 to 1,
+/// `nvnDeviceSetDepthMode`) the vertex function is the reflection's `entry_z` (`main0_z`, which keeps the clip depth),
+/// as the host draws it then (`nxkit-gpu` `pipelines::render::vertex_entry`); a pulling `_bp` library has none and
+/// keeps its entry. The stamp records the mode.
 pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool) -> Plan {
     plan_with(lib_dir, chain, pairs, zero, false)
 }
@@ -164,7 +166,7 @@ pub fn plan_with(
     lib_dir: &Path,
     chain: &str,
     pairs: &[(String, String)],
-    _zero: bool,
+    zero: bool,
     with_inputs: bool,
 ) -> Plan {
     let mut js: HashMap<String, Option<Value>> = HashMap::new();
@@ -201,7 +203,12 @@ pub fn plan_with(
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
         };
-        let ventry = vj.get("entry").and_then(Value::as_str).map(str::to_string);
+        let ventry = zero
+            .then(|| vj.get("entry_z"))
+            .flatten()
+            .or_else(|| vj.get("entry"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let fentry = truthy_str(fj.get("entry")).unwrap_or_else(|| "main0".into());
         let has_inputs = match vj.get("vertex_inputs") {
             Some(Value::List(l)) => !l.is_empty(),
@@ -273,6 +280,30 @@ pub fn plan_with(
         }
     }
     out
+}
+
+/// True when a run drew with a vertex function that keeps the clip depth: the `entry_z` or `entry_layer_z` of its
+/// reflection (`<stem>.json` in `lib_dir`). The device of that run was in the depth mode 0 to 1
+/// (`nvnDeviceSetDepthMode`), so the plain bases take those entries too ([`plan`] with `zero`). The
+/// mode is a property of the device that the runs record, not a key of the profile.
+pub fn keeps_depth<'a>(
+    lib_dir: &Path,
+    vertices: impl IntoIterator<Item = &'a (String, String)>,
+) -> bool {
+    let mut checked = HashSet::new();
+    vertices.into_iter().any(|(stem, entry)| {
+        if !entry.ends_with('z') || !checked.insert((stem.as_str(), entry.as_str())) {
+            return false;
+        }
+        std::fs::read(lib_dir.join(format!("{stem}.json")))
+            .ok()
+            .and_then(|t| nxb_pyjson::parse(&String::from_utf8_lossy(&t)).ok())
+            .is_some_and(|j| {
+                ["entry_z", "entry_layer_z"]
+                    .iter()
+                    .any(|k| j.get(k).and_then(Value::as_str) == Some(entry))
+            })
+    })
 }
 
 /// The entry of the `_bp` library that the host draws a vertex shader with: the `entry` of its `pull` field, `main0`

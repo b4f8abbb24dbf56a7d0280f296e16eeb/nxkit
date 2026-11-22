@@ -118,8 +118,14 @@ fn the_mesh_key_is_pinned() {
         targets: &t,
         colors: &c,
         alpha_to_coverage: false,
+        keeps_depth: false,
     };
     pinned("mesh", mesh_key(&key), MESH);
+    let kept = MeshKey {
+        keeps_depth: true,
+        ..key
+    };
+    assert_ne!(mesh_key(&kept), MESH);
 }
 
 #[test]

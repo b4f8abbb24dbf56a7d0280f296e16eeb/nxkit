@@ -544,6 +544,11 @@ pub(super) fn mark_dirty() {
     DIRTY.store(true, Ordering::Release);
 }
 
+/// The pipelines compiled or specialized since the last [`take_fresh`], without taking them.
+pub(super) fn fresh() -> u64 {
+    FRESH.load(Ordering::Acquire)
+}
+
 /// The pipelines compiled or specialized since the last call.
 pub(super) fn take_fresh() -> u64 {
     FRESH.swap(0, Ordering::AcqRel)

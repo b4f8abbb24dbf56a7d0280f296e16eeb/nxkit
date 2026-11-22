@@ -135,3 +135,26 @@ fn a_vertex_shader_with_inputs_that_cannot_pull_is_left_out() {
         )]
     );
 }
+
+/// With the device in the depth mode 0 to 1 the host draws `entry_z` (`main0_z`), so the plan archives that function;
+/// the runs tell the mode by the entries they recorded (`plan::keeps_depth`).
+#[test]
+fn the_depth_mode_zero_to_one_archives_the_entry_that_keeps_the_depth() {
+    let d = dir().join("zero");
+    fs::create_dir_all(&d).unwrap();
+    reflection(&d, "vs", ", \"entry_z\": \"main0_z\"");
+    reflection(&d, "ps", "");
+    fs::write(d.join("vs_b.metallib"), metallib(&["main0", "main0_z"])).unwrap();
+    fs::write(d.join("ps_b.metallib"), metallib(&["main0"])).unwrap();
+    let pairs = [("vs".to_string(), "ps".to_string())];
+    let entry = |zero| plan(&d, "abc", &pairs, zero).bases[0].1.clone();
+    assert_eq!(entry(false), "main0");
+    assert_eq!(entry(true), "main0_z");
+    let z = ("vs_b".to_string(), "main0_z".to_string());
+    let plain = ("vs_b".to_string(), "main0".to_string());
+    assert!(nxb_archive::plan::keeps_depth(&d, [&plain, &z]));
+    assert!(!nxb_archive::plan::keeps_depth(&d, [&plain]));
+    // A name that ends like one but is not the reflection's entry does not count.
+    let other = ("ps_b".to_string(), "main0_z".to_string());
+    assert!(!nxb_archive::plan::keeps_depth(&d, [&other]));
+}

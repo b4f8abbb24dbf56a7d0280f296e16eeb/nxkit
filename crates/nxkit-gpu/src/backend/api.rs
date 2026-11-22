@@ -75,9 +75,10 @@ impl Backend for GpuBackend {
         }
     }
 
-    fn device_modes(&self, origin_lower_left: bool, _depth_zero_to_one: bool) {
+    fn device_modes(&self, origin_lower_left: bool, depth_zero_to_one: bool) {
         self.device_lower_left
             .store(origin_lower_left, Ordering::Release);
+        self.lock_gpu().set_depth_zero_to_one(depth_zero_to_one);
     }
 
     fn submit<'a>(

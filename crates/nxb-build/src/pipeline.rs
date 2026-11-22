@@ -153,7 +153,17 @@ pub fn shaders_and_archive(
     let mut cfg = shader_config(a, b)?;
     let lib = cfg.out.join(format!("b-{}", cfg.chain));
     let arch = b.gpus.first().cloned();
-    let zero = b.profile.1.get("depth_mode").map(String::as_str) == Some("zero");
+    let extras = nxb_archive::seen::read_lists(&b.pipeline_lists);
+    let exacts = nxb_archive::exact::read_lists(&b.pipeline_lists);
+    // The depth mode is what the runs recorded (`seen::keeps_depth`), or the `depth_mode` of the engine tree's game.tsv.
+    let zero = b.profile.1.get("depth_mode").map(String::as_str) == Some("zero")
+        || nxb_archive::plan::keeps_depth(
+            &lib,
+            extras
+                .iter()
+                .map(|s| &s.vertex)
+                .chain(exacts.iter().map(|e| &e.vertex)),
+        );
     let pair_files = [
         b.profile.0.join("shader_pairs.tsv"),
         b.work.join("shader/pso_pairs.tsv"),
@@ -174,8 +184,8 @@ pub fn shaders_and_archive(
         chain: cfg.chain.clone(),
         pairs: nxb_archive::plan::read_pairs(&text),
         computes: compute_shaders(b),
-        extras: nxb_archive::seen::read_lists(&b.pipeline_lists),
-        exacts: nxb_archive::exact::read_lists(&b.pipeline_lists),
+        extras,
+        exacts,
         zero,
         group_target: GROUP_TARGET,
         limits: acfg.as_ref().map_or_else(

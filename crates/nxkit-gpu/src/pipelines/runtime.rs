@@ -20,7 +20,7 @@
 //!
 //! Writes: the list (`seen-<scheme>.list`) is written every `NXKIT_PIPELINE_CACHE_FLUSH` seconds (30) when the list grew; a new
 //! archive file when pipelines were compiled since the last one, at most every 30 s at first and then at doubling
-//! gaps up to 10 minutes, and at once when the serializer has captured `NXKIT_PIPELINE_CACHE_ROTATE` (1000) pipelines (a file is another lookup archive, so a run should not make dozens), and both at the exit
+//! gaps up to 10 minutes, 5 s after a burst of at least 16 compiles ended (at most every 30 s), and at once when the serializer has captured `NXKIT_PIPELINE_CACHE_ROTATE` (1000) pipelines (a file is another lookup archive, so a run should not make dozens), and both at the exit
 //! ([`flush_runtime_cache`]). Every write goes to a temporary file and is renamed. The archives are bounded by
 //! `NXKIT_PIPELINE_CACHE_MB` (512) and 64 files: the oldest go first, and what they held compiles again when asked.
 
@@ -44,6 +44,11 @@ const ARCHIVE_EXT: &str = "mtl4archive";
 const MAX_FILES: usize = 64;
 /// The longest gap between two archive files of a run.
 const MAX_GAP: Duration = Duration::from_secs(600);
+/// A burst of at least this many compiles is written as soon as it settled ([`SETTLED`]), not at the next gap: a load
+/// compiles a few hundred pipelines at once, and a process that is killed later keeps them.
+const BURST: u64 = 16;
+/// The time without a new compile after which a burst counts as settled.
+const SETTLED: Duration = Duration::from_secs(5);
 
 /// A 64-bit FNV-1a hash of the parts, which are told apart.
 pub(super) fn identity(parts: &[&str]) -> u64 {
@@ -265,6 +270,15 @@ impl Session {
         }
     }
 
+    /// The time since the last archive file of the run (or its start).
+    fn archive_age(&self) -> Duration {
+        self.io
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .last_archive
+            .elapsed()
+    }
+
     fn write_archive(&self) -> Result<(), String> {
         let name = archive_name(self.seq.fetch_add(1, Ordering::Relaxed));
         let (to, tmp) = (
@@ -334,12 +348,20 @@ impl Pipelines {
             .name("nxkit-pipecache".into())
             .spawn(move || {
                 let mut last = Instant::now();
+                let (mut fresh, mut changed) = (0, Instant::now());
                 loop {
                     std::thread::sleep(Duration::from_secs(1));
                     let full = session.cache.captured() >= rotate_at;
-                    if full || last.elapsed() >= Duration::from_secs(flush_s) {
+                    let now_fresh = record::fresh();
+                    if now_fresh != fresh {
+                        (fresh, changed) = (now_fresh, Instant::now());
+                    }
+                    let settled = fresh >= BURST
+                        && changed.elapsed() >= SETTLED
+                        && session.archive_age() >= Duration::from_secs(flush_s);
+                    if full || settled || last.elapsed() >= Duration::from_secs(flush_s) {
                         last = Instant::now();
-                        session.flush(false, full);
+                        session.flush(settled, full);
                     }
                 }
             });

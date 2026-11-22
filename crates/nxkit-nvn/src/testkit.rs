@@ -3,7 +3,7 @@
 //! The pass analysis tests use it to write a stream of [`Cmd`] values without command memory.
 //! The real path is [`crate::cmdbuf`] and [`crate::decode`].
 
-use crate::frame::{Cmd, CmdStream, DrawState, MAX_COLOR, RtSet};
+use crate::frame::{ClearKeeps, Cmd, CmdStream, DrawState, MAX_COLOR, RtSet};
 use crate::resource::TexId;
 
 #[derive(Debug)]
@@ -55,8 +55,14 @@ impl Recorder {
     }
 
     pub(crate) fn clear_depth_stencil(&mut self) {
+        self.clear_depth_stencil_keeping(ClearKeeps::Nothing);
+    }
+
+    pub(crate) fn clear_depth_stencil_keeping(&mut self, keeps: ClearKeeps) {
         let full = self.scissor_full;
-        self.stream.cmds.push(Cmd::ClearDepthStencil { full });
+        self.stream
+            .cmds
+            .push(Cmd::ClearDepthStencil { full, keeps });
     }
 
     pub(crate) fn discard(&mut self, color: u8, depth: bool) {

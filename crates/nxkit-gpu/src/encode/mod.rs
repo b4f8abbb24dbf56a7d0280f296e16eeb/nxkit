@@ -41,7 +41,7 @@ use nxkit_metal::{
     RenderCommand, RenderPass, RenderPassDesc, Scissor, Scope, Scratch, Stages, StencilAttachment,
     Storage, StoreAction as MStore, Viewport, Visibility, Winding,
 };
-use nxkit_nvn::frame::Cmd;
+use nxkit_nvn::frame::{ClearKeeps, Cmd};
 use nxkit_nvn::passes::{LoadAction, Pass, Slot, StoreAction};
 use nxkit_nvn::resource::TexId;
 

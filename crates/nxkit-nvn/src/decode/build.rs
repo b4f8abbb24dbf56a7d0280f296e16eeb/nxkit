@@ -157,12 +157,14 @@ impl Builder {
                 let full = self.st.scissor_full;
                 self.stream.cmds.push(Cmd::ClearColor { slot, full });
             }
-            Record::ClearDepthStencil => {
+            Record::ClearDepthStencil { keeps } => {
                 self.needs.scissor |= !self.sets.scissor;
                 self.needs.targets |= !self.sets.targets;
                 self.blockers |= BLOCK_CLEAR;
                 let full = self.st.scissor_full;
-                self.stream.cmds.push(Cmd::ClearDepthStencil { full });
+                self.stream
+                    .cmds
+                    .push(Cmd::ClearDepthStencil { full, keeps });
             }
             Record::Discard { color, depth } => {
                 self.needs.targets |= !self.sets.targets;

@@ -372,6 +372,33 @@ impl Gpu {
             .clear();
     }
 
+    /// Sets the depth mode of the device (`nvnDeviceSetDepthMode`): `true` for 0 to 1, where the vertex functions keep
+    /// the clip depth. The ICBs hold pipelines of the old mode, so a change drops them.
+    pub fn set_depth_zero_to_one(&self, on: bool) {
+        if self.pipelines.depth_zero_to_one() != on {
+            eprintln!(
+                "nxkit-gpu: device depth mode {}: vertex functions {}",
+                if on { "0 to 1" } else { "-1 to 1" },
+                if on {
+                    "keep the clip depth (main0_z; an archive whose pipeline list has none compiles them at the draw)"
+                } else {
+                    "convert the GL depth"
+                }
+            );
+            self.pipelines.set_depth_zero_to_one(on);
+            self.icbs
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clear();
+        }
+    }
+
+    /// The depth mode of the device is 0 to 1 ([`Gpu::set_depth_zero_to_one`]).
+    #[cfg(test)]
+    pub(crate) fn depth_zero_to_one(&self) -> bool {
+        self.pipelines.depth_zero_to_one()
+    }
+
     /// The counters of the command buffers: CPU encode time and GPU time (R16).
     pub fn metrics(&self) -> Arc<Metrics> {
         self.ring.metrics()

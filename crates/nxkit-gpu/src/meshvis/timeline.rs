@@ -161,7 +161,7 @@ pub(crate) fn collect(
         let clear_at = p.cmds.clone().find(|i| {
             matches!(
                 frame.cmds.get(*i as usize),
-                Some(Cmd::ClearDepthStencil { full: true })
+                Some(Cmd::ClearDepthStencil { full: true, .. })
             )
         });
         let value = |i: u32| {

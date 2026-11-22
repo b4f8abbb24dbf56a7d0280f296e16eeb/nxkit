@@ -21,7 +21,12 @@ fn all() -> Vec<Record> {
         },
         Record::SetScissor { full: true },
         Record::ClearColor { slot: 7 },
-        Record::ClearDepthStencil,
+        Record::ClearDepthStencil {
+            keeps: ClearKeeps::Nothing,
+        },
+        Record::ClearDepthStencil {
+            keeps: ClearKeeps::Depth,
+        },
         Record::Discard {
             color: 0x81,
             depth: true,

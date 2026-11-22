@@ -18,7 +18,7 @@
 
 use crate::actions::Actions;
 use crate::error::{NvnError, Result};
-use crate::frame::{Cmd, DrawState, Frame, MAX_COLOR, RtSet, Span};
+use crate::frame::{ClearKeeps, Cmd, DrawState, Frame, MAX_COLOR, RtSet, Span};
 use crate::passes::{
     AttachmentPlan, Boundary, LoadAction, Pass, PassKind, PassPlan, Slot, StoreAction,
 };
@@ -142,8 +142,13 @@ impl Scan<'_> {
                     self.pending = Boundary::Targets;
                 }
             }
-            Cmd::ClearColor { slot, full } => self.clear(i, Slot::Color(slot), full)?,
-            Cmd::ClearDepthStencil { full } => self.clear(i, Slot::Depth, full)?,
+            Cmd::ClearColor { slot, full } => {
+                self.clear(i, Slot::Color(slot), full, ClearKeeps::Nothing)?
+            }
+            Cmd::ClearDepthStencil { full, keeps } if keeps != ClearKeeps::Both => {
+                self.clear(i, Slot::Depth, full, keeps)?
+            }
+            Cmd::ClearDepthStencil { .. } => {}
             Cmd::Discard { color, depth } => self.discard(i, color, depth)?,
             Cmd::Draw { state, reads } => self.draw(i, state, reads)?,
             Cmd::Barrier(bits) => {
@@ -237,6 +242,7 @@ impl Scan<'_> {
                 store: StoreAction::Store,
                 memoryless: false,
                 store_assumed: false,
+                clear_keeps: ClearKeeps::Nothing,
                 clear_start: false,
                 discard_start: false,
                 old_read: false,
@@ -274,7 +280,9 @@ impl Scan<'_> {
             .find(|a| a.slot == slot)
     }
 
-    fn clear(&mut self, i: u32, slot: Slot, full: bool) -> Result<()> {
+    /// A clear of `slot`. `keeps` is the part of a depth and stencil target that the clear leaves: the pass then
+    /// starts with a clear of the rest and a load of that part.
+    fn clear(&mut self, i: u32, slot: Slot, full: bool, keeps: ClearKeeps) -> Result<()> {
         if self.rt.is_empty() {
             // Nothing to clear: the hardware does nothing either. Ocarina of Time clears once without targets after
             // its opening movie, and the frame used to fail (and the present with it).
@@ -296,7 +304,10 @@ impl Scan<'_> {
         }
         let a = self.att(slot).ok_or(missing(slot))?;
         if full {
-            a.clear_start |= !a.touched;
+            if !a.touched {
+                a.clear_start = true;
+                a.clear_keeps = keeps;
+            }
         } else {
             a.old_read |= !a.clear_start;
         }

@@ -241,3 +241,15 @@ fn a_deferred_submit_walks_with_the_device_origin_captured_before_a_device_mode_
     assert_eq!(walker.origins(1), Some([true, false]));
     assert_eq!(walker.origins(2), Some([false, true]));
 }
+
+#[test]
+fn the_depth_mode_of_the_device_reaches_the_pipelines() {
+    let Some((_guest, backend)) = backend(1 << 20) else {
+        return;
+    };
+    assert!(!backend.lock_gpu().depth_zero_to_one());
+    backend.device_modes(true, true);
+    assert!(backend.lock_gpu().depth_zero_to_one());
+    backend.device_modes(false, false);
+    assert!(!backend.lock_gpu().depth_zero_to_one());
+}

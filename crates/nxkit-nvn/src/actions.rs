@@ -17,6 +17,7 @@
 //! store is never memoryless, since a wrong guess would then lose the texture and not only one frame.
 
 use crate::error::Result;
+use crate::frame::ClearKeeps;
 use crate::passes::{LoadAction, PassKind, PassPlan, Slot, StoreAction};
 use crate::resource::ResourceTable;
 
@@ -112,23 +113,26 @@ impl Actions {
                 let store_ev_dead = a.discard_end || after_ev == Live::No;
                 let learned_store = a.store == StoreAction::DontCare && !store_ev_dead;
                 a.load = pick_load(a, a.store == StoreAction::DontCare);
-                let load_ev = pick_load(a, store_ev_dead);
+                // A clear that leaves a part of a depth and stencil target reads the old contents too.
+                let keeps = a.clear_keeps != ClearKeeps::Nothing;
+                let loads = a.loads_old();
+                let loads_ev = pick_load(a, store_ev_dead) == LoadAction::Load || keeps;
                 a.memoryless = a.store == StoreAction::DontCare
                     && !learned_store
-                    && a.load != LoadAction::Load
+                    && !loads
                     && !a.sampled
                     && self.uses[i] == 1;
-                match a.load {
-                    LoadAction::Load => self.live[i] = Live::Proven,
-                    _ if self.single[i] => self.live[i] = Live::No,
-                    _ => {}
+                if loads {
+                    self.live[i] = Live::Proven;
+                } else if self.single[i] {
+                    self.live[i] = Live::No;
                 }
-                match load_ev {
-                    LoadAction::Load => self.evidence[i] = Live::Proven,
-                    _ if self.single[i] => self.evidence[i] = Live::No,
-                    _ => {}
+                if loads_ev {
+                    self.evidence[i] = Live::Proven;
+                } else if self.single[i] {
+                    self.evidence[i] = Live::No;
                 }
-                if a.load == LoadAction::Load {
+                if loads {
                     st.bytes_loaded += a.bytes;
                 }
                 if a.store == StoreAction::Store {

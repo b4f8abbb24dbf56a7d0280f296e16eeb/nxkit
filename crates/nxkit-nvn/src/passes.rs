@@ -126,6 +126,9 @@ pub struct AttachmentPlan {
     pub memoryless: bool,
     /// The store is kept only because the host assumes that a later frame may read it.
     pub store_assumed: bool,
+    /// With the load action `Clear` of a depth and stencil attachment: the part that the clear leaves as it was, which
+    /// the pass loads instead.
+    pub clear_keeps: crate::frame::ClearKeeps,
     pub(crate) clear_start: bool,
     pub(crate) discard_start: bool,
     pub(crate) old_read: bool,
@@ -143,6 +146,13 @@ impl AttachmentPlan {
             && self.store == StoreAction::Store
             && self.touched
             && !(self.clear_start || self.discard_start || self.old_read || self.sampled)
+    }
+
+    /// True when the pass reads the old contents: it loads them, or its clear leaves a part of them.
+    pub fn loads_old(&self) -> bool {
+        self.load == LoadAction::Load
+            || self.load == LoadAction::Clear
+                && self.clear_keeps != crate::frame::ClearKeeps::Nothing
     }
 
     /// True when no draw or clear of the pass wrote the attachment: it is loaded and stored for nothing.

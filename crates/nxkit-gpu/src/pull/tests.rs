@@ -347,6 +347,7 @@ fragment float4 fs() { return float4(1); }
         entry_uint: None,
         entry_mixed: None,
         entry_layer: None,
+        entry_z: [None, None],
         binds: vec![],
         arg_bytes: 0,
         inputs: if pull {

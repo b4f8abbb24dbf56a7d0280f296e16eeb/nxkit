@@ -163,6 +163,9 @@ pub(crate) struct StageProgram {
     pub(crate) entry_mixed: Option<(String, u8)>,
     /// The entry of a vertex shader that writes its layer (`entry_layer`, `[[render_target_array_index]]`).
     pub(crate) entry_layer: Option<String>,
+    /// The entries of a vertex or mesh shader that keep the clip depth as it is, for a device in the depth mode 0 to 1
+    /// (`entry_z` and `entry_layer_z`). `entry` and `entry_layer` convert the -1 to 1 depth of the GL convention.
+    pub(crate) entry_z: [Option<String>; 2],
     /// The members of the argument buffer.
     pub(crate) binds: Vec<Bind>,
     /// The size of the argument buffer in bytes.
@@ -269,6 +272,8 @@ impl Programs {
         if let Some((lib, entry)) = pull {
             p.lib = lib;
             p.entry = entry;
+            // The `_bp` library has only its pulling entry.
+            p.entry_z = [None, None];
             p.pull = true;
         }
         Ok(p)
@@ -511,6 +516,8 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             .get("entry_layer")
             .and_then(Json::as_str)
             .map(str::to_owned),
+        entry_z: ["entry_z", "entry_layer_z"]
+            .map(|k| json.get(k).and_then(Json::as_str).map(str::to_owned)),
         binds,
         arg_bytes,
         inputs,

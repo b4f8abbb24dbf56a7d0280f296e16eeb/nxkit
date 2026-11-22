@@ -391,7 +391,7 @@ impl Walker {
             Record::ClearColor { slot } if slot < MAX_COLOR => {
                 self.out.clears.push(ClearDetail::default())
             }
-            Record::ClearDepthStencil => self.out.clears.push(ClearDetail {
+            Record::ClearDepthStencil { .. } => self.out.clears.push(ClearDetail {
                 depth: 1.0,
                 ..ClearDetail::default()
             }),

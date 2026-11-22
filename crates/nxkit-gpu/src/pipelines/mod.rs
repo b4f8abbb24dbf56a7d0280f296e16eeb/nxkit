@@ -28,7 +28,7 @@ pub(crate) use stats::frame_done;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use nxkit_metal::{
@@ -78,6 +78,8 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 struct Last {
     owner: u64,
     icb: bool,
+    /// The depth mode 0 to 1 of the device (`Pipelines::depth_zero_to_one`).
+    zero_to_one: bool,
     topology: u32,
     alpha_to_coverage: bool,
     program: ProgramRef,
@@ -94,9 +96,17 @@ struct Last {
 }
 
 impl Last {
-    fn matches(&self, owner: u64, d: &DrawDetail, targets: &Targets, icb: bool) -> bool {
+    fn matches(
+        &self,
+        owner: u64,
+        d: &DrawDetail,
+        targets: &Targets,
+        icb: bool,
+        zero_to_one: bool,
+    ) -> bool {
         self.owner == owner
             && self.icb == icb
+            && self.zero_to_one == zero_to_one
             && self.topology == d.topology
             && self.alpha_to_coverage == d.raster.alpha_to_coverage
             && self.write_masks == d.write_masks
@@ -140,6 +150,9 @@ pub(crate) struct Pipelines {
     topology_fallbacks: Arc<Mutex<FastSet<u64>>>,
     /// Render pipelines that compile on the background threads, and those that failed there.
     builds: Arc<Builds>,
+    /// The device's depth mode is 0 to 1 (`NVN_DEPTH_MODE_NEAR_IS_ZERO`): the vertex and mesh functions keep the clip
+    /// depth (`main0_z`) instead of converting the -1 to 1 depth of the default mode.
+    depth_zero_to_one: AtomicBool,
 }
 
 impl Drop for Pipelines {
@@ -221,7 +234,19 @@ impl Pipelines {
             host: Mutex::new(FastMap::default()),
             topology_fallbacks: Arc::new(Mutex::new(FastSet::default())),
             builds: Arc::new(Builds::default()),
+            depth_zero_to_one: AtomicBool::new(false),
         })
+    }
+
+    /// Sets the depth mode of the device (`nvnDeviceSetDepthMode`): `true` for 0 to 1. The draws after it take the
+    /// vertex and mesh functions of that mode.
+    pub(crate) fn set_depth_zero_to_one(&self, on: bool) {
+        self.depth_zero_to_one.store(on, Ordering::Relaxed);
+    }
+
+    /// The depth mode of the device is 0 to 1.
+    pub(crate) fn depth_zero_to_one(&self) -> bool {
+        self.depth_zero_to_one.load(Ordering::Relaxed)
     }
 
     /// The cache that the deswizzle kernels and compute pipelines share.

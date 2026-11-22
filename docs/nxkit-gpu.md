@@ -201,6 +201,24 @@ The translator turns a 1D fetch from a texture buffer (`NVN_TEXTURE_TARGET_BUFFE
 
 The encoder has no geometry stage. Unreal Engine builds its 32x32x32 colour-grading LUT with a vertex shader, one instance per depth plane, and a geometry shader that copies the triangle and writes the plane into `gl_Layer`; drawn without the geometry stage every instance landed in plane 0, and the tone mapper read a wrong LUT (Octopath Traveler's boot logos on a pink background). The walker keeps a geometry shader whose reflection allows that (`walk::programs::Kind::Geometry`: at most 3 vertices out of one invocation) in `ProgramRef::geometry`; when the vertex shader has the translator's layer entry (`entry_layer`, `main0_l`, which writes the integer output component that carries the layer as `[[render_target_array_index]]`), the draw runs that entry instead (`pipelines::render::layered`, its pipelines keyed apart) and its pass is layered over the depth planes of its 3D colour attachments, which then start at plane 0 (`encode::setup::layers_of`, `CommandBuffer::layer_next_pass`). Other geometry shaders, and layered draws into attachments that are not 3D colour targets, stay as before and are counted as `walk.stage-ignored`.
 
+### The depth mode of the device
+
+NVN maps the clip depth -1 to 1 onto the depth range by default (`NVN_DEPTH_MODE_NEAR_IS_MINUS_W`), so the translator
+ends the base vertex entry with `z = (z + w) / 2`. A game that calls `nvnDeviceSetDepthMode(NEAR_IS_ZERO)` (Unreal
+Engine 4 does) writes a clip depth of 0 to 1 that must stay as it is. The translator emits that form too: `main0_z`,
+`main0_lz` for the layer entry and `main0_z` of a mesh shader (`entry_z`, `entry_layer_z` in `_b.json`).
+`Backend::device_modes` passes the mode to `Gpu::set_depth_zero_to_one`; `Pipelines` then picks those entries
+(`pipelines::render::vertex_entry`), and their pipeline keys get the suffix `:z` (a mesh key a flag), so the keys of
+the default mode stay. A function without such an entry (a pulling `_bp` library) keeps the conversion and counts
+`pipe.depth-mode-ignored`. Octopath Traveler read `0.5 + z / 2` as its scene depth: every pixel had the same circle
+of confusion and the whole picture was blurred. The archive step learns the mode from the pipeline list of the runs
+(`nxb_archive::plan::keeps_depth`) and plans the `main0_z` bases then.
+
+A depth and stencil clear (`nvnCommandBufferClearDepthStencil`) clears depth only with its depth mask and stencil only
+with its stencil mask (`nxkit_nvn::frame::ClearKeeps`). A clear of one part starts the pass with a clear of that part
+and a load of the other (separate Metal load actions), and the part it keeps counts as read for the store of the pass
+before. Unreal Engine 4 clears the stencil alone between its lights and its translucency.
+
 ### Pitch-linear textures over guest memory
 
 On the console the GPU samples a pitch-linear texture (`NVN_TEXTURE_FLAGS_LINEAR`) straight from its memory pool, so a CPU write into the pool reaches the texture without `nvnMemoryPoolFlushMappedRange` or `nvnTextureWriteTexels`. Games rely on it: Super Mario Bros. Wonder rasterizes the glyphs of its menus on the CPU into a 2048x8192 R8 atlas (stride 2048) in a CPU-visible pool as they are first needed and never tells the GPU. The front end saw no write, the record stayed `InSync` after the first upload, and every glyph drawn after it stayed empty ("utzer   en" for "Nutzer wählen"; `NXKIT_DIAG=stale` printed `changed, residency InSync needs upload false` for the atlas). Its four 64x1 RGBA16F sky ramps and a 256x256 sRGB texture are linear textures of the same kind.

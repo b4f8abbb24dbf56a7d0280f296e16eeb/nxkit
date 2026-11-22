@@ -6,7 +6,7 @@
 
 use super::{Builder, Ctx};
 use crate::ext::{Ext, ExtCode, Setting, StateKind};
-use crate::frame::{Cmd, MAX_COLOR, TargetView};
+use crate::frame::{ClearKeeps, Cmd, MAX_COLOR, TargetView};
 use crate::marks::{Mark, MarkOp};
 use crate::mem::GuestMem;
 use crate::record::Record;
@@ -36,7 +36,10 @@ impl Builder {
                     self.clear(cx, partial, Record::ClearColor { slot });
                 }
             }
-            ExtCode::ClearDepthStencil => self.apply(cx, Record::ClearDepthStencil),
+            ExtCode::ClearDepthStencil => {
+                let keeps = ClearKeeps::of_masks(x.word(1) != 0, x.word(3));
+                self.apply(cx, Record::ClearDepthStencil { keeps });
+            }
             ExtCode::ClearBuffer | ExtCode::CopyBufferToBuffer => {
                 self.blockers |= super::BLOCK_COPY;
                 self.stream.cmds.push(Cmd::BufferCopy);

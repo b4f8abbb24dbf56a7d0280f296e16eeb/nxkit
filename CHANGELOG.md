@@ -6,6 +6,14 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- Octopath Traveler: the first story scene (Cyrus, Atlasdam) renders lit and sharp instead of a white plane over
+  black. A depth and stencil clear honours its masks: Unreal Engine 4 clears only the stencil between its lights and
+  its translucency, and the host cleared the depth with it (`ClearKeeps` in the pass plan, separate Metal load actions
+  for depth and stencil). The host honours `nvnDeviceSetDepthMode`: with the depth mode 0 to 1 the draws use the vertex
+  entries that keep the clip depth (`main0_z`, `main0_lz`), so the depth that the game reads back (depth of field) is
+  its own and not `0.5 + z / 2`. The archive step plans these entries when the recorded pipeline list shows the mode.
+- The runtime pipeline cache is written 5 s after a burst of at least 16 compiles, and `SIGTERM`, `SIGINT` and `SIGHUP`
+  stop the host as a closed window does, so a killed load keeps what it compiled.
 - Octopath Traveler: the load after confirming a traveler no longer stalls for about 50 s. GPU counter and timestamp
   reports are written when their batch completes on the GPU, also when no CPU wait follows.
 

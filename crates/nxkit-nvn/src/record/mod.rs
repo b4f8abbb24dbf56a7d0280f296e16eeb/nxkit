@@ -16,7 +16,7 @@
 pub mod ext;
 use crate::error::{NvnError, Result};
 use crate::ext::{Ext, ExtCode, FIRST_EXT_OP};
-use crate::frame::{DrawState, MAX_COLOR};
+use crate::frame::{ClearKeeps, DrawState, MAX_COLOR};
 use crate::mem::GuestMem;
 
 /// The size of the header of a record.
@@ -55,7 +55,10 @@ pub enum Record {
         slot: u8,
     },
     /// A clear of depth and stencil.
-    ClearDepthStencil,
+    ClearDepthStencil {
+        /// What the clear leaves as it was.
+        keeps: ClearKeeps,
+    },
     /// Tells that contents are not needed.
     Discard {
         /// Bit n is set for colour slot n.
@@ -229,7 +232,7 @@ impl Record {
             }
             Self::SetScissor { full } => (OP_SCISSOR, u16::from(full)),
             Self::ClearColor { slot } => (OP_CLEAR_COLOR, u16::from(slot)),
-            Self::ClearDepthStencil => (OP_CLEAR_DEPTH, 0),
+            Self::ClearDepthStencil { keeps } => (OP_CLEAR_DEPTH, keeps.code()),
             Self::Discard { color, depth } => {
                 (OP_DISCARD, u16::from(color) | u16::from(depth) << 8)
             }
@@ -363,7 +366,10 @@ impl Record {
             }
             OP_SCISSOR => Self::SetScissor { full: arg != 0 },
             OP_CLEAR_COLOR if (arg as usize) < MAX_COLOR => Self::ClearColor { slot: arg as u8 },
-            OP_CLEAR_DEPTH => Self::ClearDepthStencil,
+            OP_CLEAR_DEPTH => Self::ClearDepthStencil {
+                keeps: ClearKeeps::from_code(arg)
+                    .ok_or(NvnError::BadRecord("unknown depth clear"))?,
+            },
             OP_DISCARD => Self::Discard {
                 color: arg as u8,
                 depth: arg >> 8 != 0,

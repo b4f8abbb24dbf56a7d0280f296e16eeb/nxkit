@@ -323,6 +323,7 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `skip.listed` | encoder | A draw whose program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`. A debugging aid; the frame does not render correctly. |
 | `walk.draw-no-args` | walker | A draw record without draw arguments (transform feedback, `DrawTexture` or an unknown draw kind). The draw gets an empty detail. |
 | `walk.draw-no-vertex` | walker | The bound program has no vertex stage, or a mesh draw finds no program with a mesh stage. |
+| `pipe.depth-mode-ignored` | encoder | The device is in the depth mode 0 to 1 (`nvnDeviceSetDepthMode`), but a vertex or mesh function has no entry that keeps the clip depth (a pulling `_bp` library, or a library from before `main0_z`). The draw converts the depth as for -1 to 1. |
 | `walk.stage-ignored` | walker | A geometry or tessellation stage. The encoder runs the vertex, fragment, task and mesh stages only. It counts once per program key. |
 | `decode.unresolved` | decoder | A texture handle or address in a recording names no texture. It counts once per decoded recording. A recording that the cache answers does not count again. A handle of texture id 0 is an unbind (NVN reserves the first descriptors) and does not count. The examples name the handle or address. |
 | `decode.bad-record` | decoder | A record could not be read. The rest of the recording is lost. |

@@ -109,6 +109,10 @@ reasons! {
     DrawNoVertex => "walk.draw-no-vertex",
     /// Walker: a program stage that the encoder ignores (geometry, tessellation).
     StageIgnored => "walk.stage-ignored",
+    /// Encoder: the device is in the depth mode 0 to 1 (`nvnDeviceSetDepthMode`), but the vertex or mesh function of a
+    /// draw has no entry that keeps the clip depth (a pulling `_bp` library, or a library from before `main0_z`). The
+    /// draw converts the depth as for -1 to 1 and its depth values are wrong.
+    DepthModeIgnored => "pipe.depth-mode-ignored",
     /// Decoder: a texture handle or address of a recording names no texture.
     DecodeUnresolved => "decode.unresolved",
     /// Decoder: a record could not be read, the rest of the recording is lost.

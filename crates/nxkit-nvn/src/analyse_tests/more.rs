@@ -395,3 +395,38 @@ fn a_buffer_command_cuts_the_render_pass() {
     let kinds: Vec<_> = f.plan.passes.iter().map(|p| p.kind).collect();
     assert_eq!(kinds, [PassKind::Render, PassKind::Copy, PassKind::Render]);
 }
+
+#[test]
+fn a_stencil_clear_keeps_the_depth_of_the_pass_before() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(D32F));
+    f.table.set_frame_local(d, true).unwrap();
+    f.rec.set_render_targets(&[c], Some(d));
+    f.rec.clear_depth_stencil();
+    f.rec.draw(depth_draw());
+    f.rec
+        .clear_depth_stencil_keeping(crate::frame::ClearKeeps::Depth);
+    f.rec.draw(depth_draw());
+    f.run().unwrap();
+    assert_eq!(f.plan.passes.len(), 2);
+    let (first, second) = (f.plan.attachments[1], f.plan.attachments[3]);
+    assert_eq!(first.store, StoreAction::Store);
+    assert!(!first.memoryless);
+    assert_eq!(second.load, LoadAction::Clear);
+    assert_eq!(second.clear_keeps, crate::frame::ClearKeeps::Depth);
+    assert!(second.loads_old());
+}
+
+#[test]
+fn a_depth_clear_that_writes_nothing_is_no_clear() {
+    let mut f = Fx::new();
+    let (c, d) = (f.tex(RGBA8), f.tex(D32F));
+    f.rec.set_render_targets(&[c], Some(d));
+    f.rec.draw(depth_draw());
+    f.rec
+        .clear_depth_stencil_keeping(crate::frame::ClearKeeps::Both);
+    f.rec.draw(depth_draw());
+    f.run().unwrap();
+    assert_eq!(f.plan.passes.len(), 1);
+    assert_eq!(f.plan.attachments[1].load, LoadAction::Load);
+}
