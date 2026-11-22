@@ -73,6 +73,9 @@ pub struct HostEnv {
     /// `NXKIT_FPS_TARGET` (a whole number, a launch option): the frame rate over `fps_target` of the title module.
     /// `Settings::with_env` keeps it only when the title offers it.
     pub fps_target: Option<u32>,
+    /// `NXKIT_RENDER_SIZE` (a launch option): the width and the height the game renders at, `None` for the game's own
+    /// size. It takes effect for a game whose `game.json` has `render_args`.
+    pub render_size: Option<(u32, u32)>,
     /// `NXKIT_STICK_DEADZONE_L` (0 to 50, a whole number, 0 otherwise, a launch option): the dead zone of the left
     /// stick of a controller in percent.
     pub stick_deadzone_l: u8,
@@ -198,6 +201,10 @@ impl HostEnv {
                 .var(launch::FPS_TARGET)
                 .ok()
                 .and_then(|v| v.trim().parse::<u32>().ok()),
+            render_size: env
+                .var(launch::RENDER_SIZE)
+                .ok()
+                .and_then(|v| launch::render_size(v.trim())),
             stick_deadzone_l: percent(env, launch::STICK_DEADZONE_L),
             stick_deadzone_r: percent(env, launch::STICK_DEADZONE_R),
             pad_merge: env.var(launch::PAD_MERGE).is_ok_and(|v| v.trim() == "1"),

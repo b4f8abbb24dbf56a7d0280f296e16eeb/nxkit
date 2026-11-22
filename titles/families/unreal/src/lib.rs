@@ -9,10 +9,15 @@
 //! The object holds at `+0x10` the pointer to the value: a float for the game thread, then a float for the render
 //! thread. Unreal steps the game by the time that really passed, so a higher limit gives more frames at the same speed.
 //! A game whose speed at a rate is checked says so with `fps_max` in its title module.
+//!
+//! The back buffer size comes from the program arguments `-ResX=` and `-ResY=`: the Switch platform code of the engine
+//! reads them in `nninitStartup` into the display size (1280x720 when absent), the platform application reports that
+//! size as the display, and `UGameEngine::DetermineGameWindowResolution` gives the game window the display size. The
+//! renderer scales its view by `r.ScreenPercentage` of the device profile on top of that size.
 
 use nxtitle::{
     BuildHooks, Evidence, Fact, Family, LimitKind, LimitRow, LimitRule, LimitSite, Match,
-    RuntimeHooks, TitleFacts,
+    RenderArgs, RuntimeHooks, TitleFacts,
 };
 
 /// The family.
@@ -43,11 +48,28 @@ const LIMITS: &[Fact<LimitRule>] = &[Fact::new(
     FPSLOCK,
 )];
 
+/// `-ResX=` and `-ResY=` in `nninitStartup`: read in OCTOPATH TRAVELER (UE 4.18) and checked by a run at 1920x1080
+/// and 3840x2160.
+const RES_ARGS: Evidence = Evidence::Recorded {
+    source: "OCTOPATH TRAVELER v327680 main: nninitStartup main+0x2c6000 (1280x720) and main+0x2c63f4, main+0x2c642c \
+             (-ResX=, -ResY=), FSwitchApplication display metrics main+0x3017c4; nxkit runs of 2026-11-22",
+    read: "2026-11-22",
+};
+
 impl BuildHooks for Unreal {}
 
 impl RuntimeHooks for Unreal {
     fn limits(&self) -> &'static [Fact<LimitRule>] {
         LIMITS
+    }
+
+    fn render_args(&self) -> Option<Fact<RenderArgs>> {
+        Some(Fact::new(
+            RenderArgs {
+                size: "-ResX={w} -ResY={h}",
+            },
+            RES_ARGS,
+        ))
     }
 }
 
@@ -87,5 +109,14 @@ mod tests {
             }
         );
         assert_eq!((row.kind, row.copies), (LimitKind::FpsF32, 2));
+    }
+
+    #[test]
+    fn the_back_buffer_size_is_two_program_arguments() {
+        let args = UNREAL.render_args().map(|f| f.value);
+        assert_eq!(
+            args.map(|a| a.size_args(1920, 1080)).as_deref(),
+            Some("-ResX=1920 -ResY=1080")
+        );
     }
 }

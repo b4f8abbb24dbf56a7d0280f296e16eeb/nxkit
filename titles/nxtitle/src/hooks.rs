@@ -338,4 +338,25 @@ pub trait RuntimeHooks: Sync {
     fn sf_services(&self) -> &'static [Fact<&'static str>] {
         &[]
     }
+    /// The program arguments that set the size the game renders at, for the launch option `NXKIT_RENDER_SIZE`.
+    /// `None`: the game has no such arguments, and the launcher shows no row.
+    fn render_args(&self) -> Option<Fact<RenderArgs>> {
+        None
+    }
+}
+
+/// Program arguments of the game that the host fills in from a launch option. The engine reads them at its start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RenderArgs {
+    /// The back buffer size, with `{w}` and `{h}` for the width and the height in pixels (`-ResX={w} -ResY={h}`).
+    pub size: &'static str,
+}
+
+impl RenderArgs {
+    /// `size` with the width and the height filled in.
+    pub fn size_args(&self, w: u32, h: u32) -> String {
+        self.size
+            .replace("{w}", &w.to_string())
+            .replace("{h}", &h.to_string())
+    }
 }

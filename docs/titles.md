@@ -190,6 +190,8 @@ has the same parts:
   `main`). The object holds at `+0x10` the pointer to the value, a float for the game thread and one for the render
   thread (`dm/host/hle_fpslock.c` and `dm/host/hle_uecvar.c` at `034e91a8`, read 2026-11-22). OCTOPATH TRAVELER names
   the family. The other Unreal titles name none yet: each needs a run that shows its speed at the written limit.
+- The family `unreal` also names the program arguments of the render size, `-ResX={w} -ResY={h}` (R71). The engine's
+  Switch platform code reads them in `nninitStartup`, 1280x720 when absent.
 - Unreal Engine 4 on NVN calls `nvnDeviceSetDepthMode(NEAR_IS_ZERO)` (seen in OCTOPATH TRAVELER, 4.18). The depth
   mode is a capability, not a profile key: the host follows the call, and the build learns it from the recorded pipeline
   list. It is a candidate fact for the family `unreal` once a second Unreal title names the family.

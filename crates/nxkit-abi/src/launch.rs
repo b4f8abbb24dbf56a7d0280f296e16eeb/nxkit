@@ -74,6 +74,10 @@ pub const PRESENT_UPSCALE: &str = "NXKIT_PRESENT_UPSCALE";
 /// `30`, `60` or `120`: the frame rate in place of `fps_target` of the title module. Unset: the title's.
 pub const FPS_TARGET: &str = "NXKIT_FPS_TARGET";
 
+/// `0`, `720`, `1080`, `1440` or `2160`: the height of the size the game renders at, 16:9. `0`: the game's own size.
+/// Only for a title whose family or module names the program arguments of the size (`RuntimeHooks::render_args`).
+pub const RENDER_SIZE: &str = "NXKIT_RENDER_SIZE";
+
 /// 0 to 50: the radial dead zone of the left stick of a controller, in percent of its travel. 0: none.
 pub const STICK_DEADZONE_L: &str = "NXKIT_STICK_DEADZONE_L";
 
@@ -233,6 +237,22 @@ pub fn game_languages(flags: u32) -> Vec<(&'static str, &'static str)> {
 /// The options of [`PRESENT_UPSCALE`], with the labels of the old engine.
 pub const PRESENT_UPSCALES: &[(&str, &str)] = &[("off", "Standard"), ("metalfx", "MetalFX")];
 
+/// The options of [`RENDER_SIZE`].
+pub const RENDER_SIZES: &[(&str, &str)] = &[
+    ("0", "The game's own"),
+    ("720", "1280x720"),
+    ("1080", "1920x1080"),
+    ("1440", "2560x1440"),
+    ("2160", "3840x2160"),
+];
+
+/// The width and the height of a value of [`RENDER_SIZE`], `None` for `0` (the game's own size) and a value that is not
+/// an option.
+pub fn render_size(value: &str) -> Option<(u32, u32)> {
+    let h: u32 = value.parse().ok()?;
+    (h != 0 && RENDER_SIZES.iter().any(|(v, _)| *v == value)).then_some((h * 16 / 9, h))
+}
+
 /// The options of [`FPS_TARGET`]. The build lists only the rates of the title ([`game_fps_targets`]).
 pub const FPS_TARGETS: &[(&str, &str)] = &[("30", "30 fps"), ("60", "60 fps"), ("120", "120 fps")];
 
@@ -281,6 +301,17 @@ pub const OPTIONS: &[Opt] = &[
         default: "60",
         section: "Game",
         basic: true,
+        needs: None,
+    },
+    Opt {
+        env: RENDER_SIZE,
+        kind: Kind::Choice(RENDER_SIZES),
+        label: "Render resolution",
+        note: "The size the game draws its picture at, its menus included. Larger sizes are sharper and cost more GPU \
+               time.",
+        default: "0",
+        section: "Game",
+        basic: false,
         needs: None,
     },
     Opt {

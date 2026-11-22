@@ -112,6 +112,7 @@ impl Analysis {
             shared_font_decode: false,
             sf_services: vec![],
             limits: vec![],
+            render_args: None,
             vertex_stream_null_bind: false,
         })
     }

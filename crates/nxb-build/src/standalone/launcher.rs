@@ -5,7 +5,8 @@
 //! (a touch screen game starts in handheld mode), the game language lists the languages of the game's
 //! `control.nacp`, the frame rate lists the rates up to `fps_max` of the title module, with its `fps_target` as
 //! the default, and spatial audio is on by default when the title module sets `spatial_audio`. A game with one
-//! language gets no language row, and a game without a target frame rate or with one rate gets no frame rate row.
+//! language gets no language row, and a game without a target frame rate or with one rate gets no frame rate row. The
+//! render size row is there only when the family or the title names the program arguments of the size.
 
 use nxb_pyjson::Value;
 use nxkit_abi::launch::{self, Kind, Opt};
@@ -41,11 +42,13 @@ struct Game {
     spatial_audio: bool,
     languages: Choices,
     fps_targets: Choices,
+    render_size: bool,
 }
 
 impl Game {
-    fn new(settings: &nxtitle::Settings, nacp: Option<&[u8]>) -> Self {
+    fn new(settings: &nxtitle::Settings, nacp: Option<&[u8]>, render_size: bool) -> Self {
         Game {
+            render_size,
             op_mode: settings.op_mode,
             fps_target: settings.fps_target,
             spatial_audio: settings.spatial_audio,
@@ -87,6 +90,7 @@ impl Game {
             // the Mac's language and at least two of the game's
             launch::LANGUAGE => (self.languages.len() >= 3).then_some(&self.languages[..]),
             launch::FPS_TARGET => (self.fps_targets.len() >= 2).then_some(&self.fps_targets[..]),
+            launch::RENDER_SIZE => self.render_size.then_some(list),
             _ => Some(list),
         }
     }
@@ -124,13 +128,14 @@ fn row(o: &Opt, game: &Game) -> Option<Value> {
 }
 
 /// The text of `launcher.json` for the title `title_id` with the run settings of its module, with the game's
-/// `control.nacp` when the extract has one.
+/// `control.nacp` when the extract has one. `render_size`: the title names the program arguments of its render size.
 pub(crate) fn launcher_json(
     title_id: u64,
     settings: &nxtitle::Settings,
     nacp: Option<&[u8]>,
+    render_size: bool,
 ) -> String {
-    let game = Game::new(settings, nacp);
+    let game = Game::new(settings, nacp, render_size);
     let v = Value::Object(vec![
         ("schema".to_string(), Value::Int(i64::from(launch::SCHEMA))),
         ("game".to_string(), s(&format!("{title_id:016X}"))),
@@ -189,7 +194,12 @@ mod tests {
 
     #[test]
     fn the_rows_follow_the_table_and_the_title() {
-        let text = launcher_json(0x0100_3460_1730_4000, &title("handheld", 60, 60), None);
+        let text = launcher_json(
+            0x0100_3460_1730_4000,
+            &title("handheld", 60, 60),
+            None,
+            true,
+        );
         let v = nxb_pyjson::parse(&text).unwrap();
         assert_eq!(v.get("schema").and_then(Value::as_i64), Some(1));
         assert_eq!(
@@ -200,7 +210,7 @@ mod tests {
         assert_eq!(
             rows.len(),
             launch::OPTIONS.len(),
-            "no NACP: every language, and two frame rates, so every row"
+            "no NACP: every language, two frame rates and a render size, so every row"
         );
         let op = &rows[0];
         assert_eq!(op.get("env").and_then(Value::as_str), Some(launch::OP_MODE));
@@ -211,6 +221,13 @@ mod tests {
             .as_list()
             .unwrap();
         assert_eq!(first[0].as_str(), Some("docked"));
+        let size = find(&rows, launch::RENDER_SIZE).unwrap();
+        assert_eq!(size.get("default").and_then(Value::as_str), Some("0"));
+        let none = self::rows(&launcher_json(1, &title("console", 60, 60), None, false));
+        assert!(
+            find(&none, launch::RENDER_SIZE).is_none(),
+            "no render arguments, no row"
+        );
         let full = find(&rows, launch::FULLSCREEN).unwrap();
         assert_eq!(full.get("on").and_then(Value::as_str), Some("1"));
         assert_eq!(full.get("off").and_then(Value::as_str), Some("0"));
@@ -220,7 +237,7 @@ mod tests {
             Some("NXKIT_RUMBLE=1")
         );
         assert_eq!(gain.get("kind").and_then(Value::as_str), Some("range"));
-        let docked = rows_of(launcher_json(1, &title("console", 0, 60), None));
+        let docked = rows_of(launcher_json(1, &title("console", 0, 60), None, false));
         assert_eq!(
             docked[0].get("default").and_then(Value::as_str),
             Some("docked")
@@ -234,11 +251,16 @@ mod tests {
     #[test]
     fn the_language_row_lists_the_languages_of_the_game() {
         let console = title("console", 0, 60);
-        let both = rows_of(launcher_json(1, &console, Some(&nacp(1 << 0 | 1 << 4))));
+        let both = rows_of(launcher_json(
+            1,
+            &console,
+            Some(&nacp(1 << 0 | 1 << 4)),
+            false,
+        ));
         let lang = find(&both, launch::LANGUAGE).unwrap();
         assert_eq!(values(lang), ["", "en-US", "de"]);
         assert_eq!(lang.get("default").and_then(Value::as_str), Some(""));
-        let one = rows_of(launcher_json(1, &console, Some(&nacp(1 << 2))));
+        let one = rows_of(launcher_json(1, &console, Some(&nacp(1 << 2)), false));
         assert!(
             find(&one, launch::LANGUAGE).is_none(),
             "one language: nothing to choose"
@@ -252,17 +274,17 @@ mod tests {
 
     #[test]
     fn the_frame_rate_row_lists_the_rates_of_the_title() {
-        let high = rows_of(launcher_json(1, &title("console", 30, 120), None));
+        let high = rows_of(launcher_json(1, &title("console", 30, 120), None, false));
         let fps = find(&high, launch::FPS_TARGET).unwrap();
         assert_eq!(values(fps), ["30", "60", "120"]);
         assert_eq!(fps.get("default").and_then(Value::as_str), Some("30"));
         assert_eq!(fps.get("level").and_then(Value::as_str), Some("basic"));
-        let own = rows_of(launcher_json(1, &title("console", 0, 120), None));
+        let own = rows_of(launcher_json(1, &title("console", 0, 120), None, false));
         assert!(
             find(&own, launch::FPS_TARGET).is_none(),
             "no target: the game's own limit"
         );
-        let one = rows_of(launcher_json(1, &title("console", 30, 30), None));
+        let one = rows_of(launcher_json(1, &title("console", 30, 30), None, false));
         assert!(
             find(&one, launch::FPS_TARGET).is_none(),
             "one rate: nothing to choose"
@@ -278,7 +300,7 @@ mod tests {
                 spatial_audio,
                 ..title("console", 0, 60)
             };
-            let rows = rows_of(launcher_json(1, &t, None));
+            let rows = rows_of(launcher_json(1, &t, None, false));
             let row = find(&rows, launch::SPATIAL_AUDIO).unwrap();
             row.get("default")
                 .and_then(Value::as_str)

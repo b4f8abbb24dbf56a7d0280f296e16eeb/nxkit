@@ -236,6 +236,11 @@ impl Resolved {
         self.runtime_hooks().find_map(|h| h.shared_font_decode())
     }
 
+    /// The program arguments that set the render size. The title's answer, then the family's.
+    pub fn render_args(&self) -> Option<Fact<crate::RenderArgs>> {
+        self.runtime_hooks().find_map(|h| h.render_args())
+    }
+
     /// The services the game opens through `nn::sf::hipc`, of the family and then the title.
     pub fn sf_services(&self) -> Vec<Fact<&'static str>> {
         let hooks: Vec<_> = self.runtime_hooks().collect();

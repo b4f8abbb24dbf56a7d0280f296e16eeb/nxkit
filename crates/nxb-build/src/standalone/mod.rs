@@ -99,6 +99,8 @@ struct Game {
     sf_services: Vec<&'static str>,
     /// The frame limits of the family and the title (`RuntimeHooks::limits`).
     limits: Vec<nxtitle::LimitRule>,
+    /// The program arguments that set the render size (`RuntimeHooks::render_args`).
+    render_args: Option<nxtitle::RenderArgs>,
     /// The title needs the command buffer to ignore a bind of one null range at a stream of 16 or more.
     vertex_stream_null_bind: bool,
 }
@@ -128,6 +130,7 @@ fn module(src: &Inputs) -> Result<Option<Game>, String> {
         shared_font_decode: r.shared_font_decode().is_some_and(|f| f.value),
         sf_services: r.sf_services().into_iter().map(|f| f.value).collect(),
         limits: r.limits().into_iter().map(|f| f.value).collect(),
+        render_args: r.render_args().map(|f| f.value),
         vertex_stream_null_bind: r.needs().iter().any(|n| {
             n.value.capability == "vertex_stream_null_bind" && n.value.setting == "ignore"
         }),
@@ -440,6 +443,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             shared_font_decode: t.shared_font_decode,
             sf_services: t.sf_services.clone(),
             limits: t.limits.clone(),
+            render_args: t.render_args,
             vertex_stream_null_bind: t.vertex_stream_null_bind,
         };
         let put = |n: &str, d: &[u8]| {
@@ -447,7 +451,8 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
         };
         put("game.json", manifest::game_json(&m).as_bytes())?;
         let nacp = std::fs::read(ver_dir.join("control.nacp")).ok();
-        let options = launcher::launcher_json(t.id, &m.settings, nacp.as_deref());
+        let options =
+            launcher::launcher_json(t.id, &m.settings, nacp.as_deref(), t.render_args.is_some());
         put(nxkit_abi::launch::FILE, options.as_bytes())?;
         put("patches.toml", t.rules.as_bytes())?;
         put("main.npdm", &npdm_bytes)?;

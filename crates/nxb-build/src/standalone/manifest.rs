@@ -50,6 +50,8 @@ pub(crate) struct Manifest<'a> {
     pub sf_services: Vec<&'static str>,
     /// The frame limits of the family and the title (`RuntimeHooks::limits`), written as `limits`.
     pub limits: Vec<nxtitle::LimitRule>,
+    /// The program arguments that set the render size (`RuntimeHooks::render_args`), written as `render_args`.
+    pub render_args: Option<nxtitle::RenderArgs>,
     /// The need `vertex_stream_null_bind` of the title.
     pub vertex_stream_null_bind: bool,
 }
@@ -322,6 +324,9 @@ pub(crate) fn game_json(m: &Manifest) -> String {
     f.push(("npdm", s("main.npdm")));
     f.push(("memory", memory(&m.settings.memory)));
     f.push(("settings", settings(m)));
+    if let Some(r) = m.render_args {
+        f.push(("render_args", obj(vec![("size", s(r.size))])));
+    }
     if !m.limits.is_empty() {
         f.push(("limits", Value::List(m.limits.iter().map(limit).collect())));
     }

@@ -129,6 +129,7 @@ pub fn run(opts: &Options) -> Result<()> {
     seams::register_server(mask)?;
     seams::init_services(&placed.game, mask, env, &refresh)?;
 
+    let program_args = placed.game.program_args(env.render_size);
     let mut loaded = loader::load(placed, mask)?;
     crate::stall::start(env.stall_dump);
     eprintln!(
@@ -150,7 +151,7 @@ pub fn run(opts: &Options) -> Result<()> {
     );
     nxkit_metal::set_pc_namer(sys::crashsig::guest_place);
     guestsym::set(std::mem::take(&mut loaded.exports));
-    let boot = Boot::resolve(std::mem::take(&mut loaded.inits), &settings.args)?;
+    let boot = Boot::resolve(std::mem::take(&mut loaded.inits), &program_args)?;
 
     // Only the layer of the game's graphics API is made (R64).
     let hooks = match loaded.game.graphics {

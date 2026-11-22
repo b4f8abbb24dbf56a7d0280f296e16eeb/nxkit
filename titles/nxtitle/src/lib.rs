@@ -32,8 +32,8 @@ pub use evidence::{Evidence, Fact};
 pub use facts::{Match, TitleFacts};
 pub use hooks::{
     BuildHooks, GraphicsApi, LimitKind, LimitRow, LimitRule, LimitSite, Need, PaceProfile, Pacing,
-    PresentInterval, ReflectLayout, ReflectedLimit, RuntimeHooks, Seed, ShaderRole, ShaderStage,
-    ShaderView, Standalone, Upscaler,
+    PresentInterval, ReflectLayout, ReflectedLimit, RenderArgs, RuntimeHooks, Seed, ShaderRole,
+    ShaderStage, ShaderView, Standalone, Upscaler,
 };
 
 pub use nxb_model::{Digest, TitleId};

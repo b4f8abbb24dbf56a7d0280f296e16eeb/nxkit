@@ -38,6 +38,7 @@ A number is a JSON number or a string in decimal or with a `0x` prefix. Every pa
 | `memory` | The memory profile of the game. See below. |
 | `settings` | The run settings of the title module. See below. |
 | `aoc` | The DLC packages. It may be absent, which means no DLC. See below. |
+| `render_args` | `{ "size" }`: the program arguments that set the render size, with `{w}` and `{h}` (`RuntimeHooks::render_args`). It may be absent. The host fills it in from `NXKIT_RENDER_SIZE` and puts it after `args` (R71). |
 | `limits` | The frame limit rules of the family and the title module (`RuntimeHooks::limits`). It may be absent, which means no rule. See below. |
 | `dylib` | The library with the module segments, `nxgame.dylib`. |
 | `page_size` | The page size of the build, 16384. The host stops if it differs from its own. |
@@ -109,6 +110,7 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 |---|---|---|---|
 | `NXKIT_OP_MODE` | choice | `docked`, `handheld` | the mode of the title module: `handheld` for a touch screen game, else `docked` |
 | `NXKIT_FPS_TARGET` | choice | `30`, `60`, `120` up to `fps_max` of the title module, and its own `fps_target`. A title with `fps_target` 0 or with one rate gets no row. | the `fps_target` of the title module |
+| `NXKIT_RENDER_SIZE` | choice | `0` (the game's own size), `720`, `1080`, `1440`, `2160` (16:9). Only a title whose family or module names `render_args` gets the row (R71). | `0` |
 | `NXKIT_FULLSCREEN` | toggle | `1`, `0` | `0` |
 | `NXKIT_LANGUAGE` | choice | empty (the Mac's language) and the languages of `SupportedLanguageFlag` in the game's `control.nacp`, all 16 without a NACP. A game with one language gets no row. | empty |
 | `NXKIT_PRESENT_UPSCALE` | choice | `off` (Standard), `metalfx` (MetalFX): how the present scales a picture that is smaller than the window (R70) | `off` |

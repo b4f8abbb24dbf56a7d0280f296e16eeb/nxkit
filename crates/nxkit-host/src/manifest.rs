@@ -89,6 +89,9 @@ pub struct Game {
     pub aoc: Vec<Aoc>,
     /// The frame limit rules of the family and the title (`limits`).
     pub limits: crate::limits::LimitRules,
+    /// The program arguments that set the render size, with `{w}` and `{h}` (`render_args.size`). `None`: the game has
+    /// none.
+    pub render_size_args: Option<String>,
 }
 
 /// One entry of an export list.
@@ -275,6 +278,10 @@ impl Game {
             settings: Settings::parse(field(&v, "settings", ctx)?)?,
             aoc: settings::parse_aoc(v.get("aoc"))?,
             limits: crate::limits::LimitRules::parse(v.get("limits"))?,
+            render_size_args: match v.get("render_args") {
+                Some(r) => Some(text(r, "size", "render_args")?),
+                None => None,
+            },
         };
         let page = num(&v, "page_size", ctx)?;
         if page != PAGE {
@@ -292,6 +299,28 @@ impl Game {
             .iter()
             .find(|m| m.entry.is_some())
             .ok_or_else(|| bad("no module has an \"entry\""))
+    }
+
+    /// The program arguments of the game: the `args` setting, then the render size arguments filled in with `size`
+    /// (`NXKIT_RENDER_SIZE`) when the game has them. Without them a chosen size is told and left out.
+    pub fn program_args(&self, size: Option<(u32, u32)>) -> String {
+        let mut args = self.settings.args.trim().to_owned();
+        match (size, &self.render_size_args) {
+            (Some((w, h)), Some(t)) => {
+                let filled = t
+                    .replace("{w}", &w.to_string())
+                    .replace("{h}", &h.to_string());
+                if !args.is_empty() {
+                    args.push(' ');
+                }
+                args.push_str(&filled);
+            }
+            (Some((w, h)), None) => eprintln!(
+                "nxkit-host: NXKIT_RENDER_SIZE {w}x{h} ignored: this game has no render size arguments"
+            ),
+            (None, _) => {}
+        }
+        args
     }
 
     /// A value of the fixups table of the main module (`# KEY\t0x...`). `None` when the key or the file is missing.
@@ -568,5 +597,23 @@ mod tests {
             }]
         );
         assert!(parse_imports(r#"[{"name": "f", "slot": 64}]"#).is_err());
+    }
+
+    #[test]
+    fn a_render_size_fills_the_arguments_of_the_game() {
+        let mut g = parse(r#""render_args": {"size": "-ResX={w} -ResY={h}"},"#).unwrap();
+        assert_eq!(g.program_args(None), "");
+        assert_eq!(g.program_args(Some((1920, 1080))), "-ResX=1920 -ResY=1080");
+        g.settings.args = "-x".into();
+        assert_eq!(
+            g.program_args(Some((3840, 2160))),
+            "-x -ResX=3840 -ResY=2160"
+        );
+        g.render_size_args = None;
+        assert_eq!(
+            g.program_args(Some((1920, 1080))),
+            "-x",
+            "no arguments: the game's own size"
+        );
     }
 }
