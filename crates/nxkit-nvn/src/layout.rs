@@ -149,6 +149,9 @@ fn adjust_tile(mut shift: u32, unit: u32, dim: u32) -> u32 {
     shift
 }
 
+/// The largest buffer texture in texels.
+const MAX_BUFFER_TEXELS: u32 = 1 << 27;
+
 fn sample_factors(samples: u8) -> (u32, u32) {
     match samples {
         2 => (2, 1),
@@ -205,7 +208,15 @@ impl TextureDesc {
         if self.width == 0 {
             return Err(NvnError::BadTexture("width is 0"));
         }
-        if self.width > 1 << 20 || self.height > 1 << 20 || self.depth > 1 << 20 {
+        // A buffer texture is a plain array of texels: the device reports 2^27 of them as its largest
+        // (`NVN_DEVICE_INFO_MAX_TEXTURE_BUFFER_SIZE` in the device table of `nxkit-rt`).
+        if self.target == Target::Buffer {
+            if self.width > MAX_BUFFER_TEXELS {
+                return Err(NvnError::BadTexture(
+                    "a buffer texture is above 2^27 texels",
+                ));
+            }
+        } else if self.width > 1 << 20 || self.height > 1 << 20 || self.depth > 1 << 20 {
             return Err(NvnError::BadTexture("size is above 2^20"));
         }
         if self.levels > 32 {
@@ -524,6 +535,11 @@ mod tests {
         d.target = Target::Buffer;
         let l = d.layout().unwrap();
         assert_eq!((l.size, l.align), (400, 4));
+        // 1920x1088 texels: one per pixel of a 1080p target (OCTOPATH TRAVELER at -ResX=1920).
+        d.width = 1920 * 1088;
+        assert_eq!(d.layout().unwrap().size, 1920 * 1088 * 4);
+        d.width = (1 << 27) + 1;
+        assert!(d.layout().is_err());
     }
 
     #[test]

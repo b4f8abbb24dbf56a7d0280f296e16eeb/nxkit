@@ -19,6 +19,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- The host passes the `args` setting of the title module to the game as its program arguments (`argv` after
+  `game`), as the old engine passed `game_args`. Before, `argv` was `game` alone and `args` went unread.
+- A buffer texture may have up to 2^27 texels, the size the device reports. The layout check and the texture header
+  allowed 2^20 as for a 2D width, so OCTOPATH TRAVELER at a 1080p back buffer (`-ResX=1920 -ResY=1080`) stopped at a
+  buffer of one texel per pixel (1920x1088).
 - The rewriter finds Unreal console variables that Unreal Engine 4.18 registers in inlined static constructors, from a
   page base made far before the name (`base_of` of the engine's `ue_cvar.py`). OCTOPATH TRAVELER's `t.MaxFPS` and
   `nvn.SyncInterval` were not found.

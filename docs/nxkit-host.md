@@ -79,7 +79,7 @@ One row for each rewritten site, with four tab-separated columns: the return add
 
 The title module and its family module answer the settings through their `nxtitle` hooks. The build writes them here. The host types the keys that name a mechanism of the core and gives them to the part that uses them (see Seams). It does not use them itself.
 
-Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target` (`NXKIT_FPS_TARGET` wins where the title offers the rate, see launcher.json), `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
+Required keys: `args` (the program arguments of the game, split at white space, after `game` in `argv`), `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target` (`NXKIT_FPS_TARGET` wins where the title offers the rate, see launcher.json), `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
 Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`), `spatial_audio` (a flag, false when absent: the default of `NXKIT_SPATIAL_AUDIO`, which wins, see launcher.json) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
 
@@ -387,7 +387,7 @@ The main guest thread does the work of `rtld` and `nn::init::Start` (R57). The s
 | 2 | `nnosInitialize(handle, 0)`. `handle` is the kernel handle of the main thread, which `attach_main_thread` returns. |
 | 3 | `_init_libc1()` |
 | 4 | `nninitInitializeSdkModule()` |
-| 5 | `nn::os::SetHostArgc(1)` and `nn::os::SetHostArgv(argv)`. `argv` is `{ "game", NULL }` in host memory, which is never freed. |
+| 5 | `nn::os::SetHostArgc(argc)` and `nn::os::SetHostArgv(argv)`. `argv` is `{ "game", <the words of the args setting>..., NULL }` in host memory, which is never freed. |
 | 6 | `nninitStartup()` |
 | 7 | `_init_libc2()` |
 | 8 | The `DT_INIT` function of each module, in module order. A module without one is skipped. The log line is `>>> DT_INIT <module> +<offset>`. |

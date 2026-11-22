@@ -24,6 +24,7 @@
 //! | levels, view levels | 6 | 15 (`g_devinfo[0x2C]`) | fits |
 //! | base level | 5 | 15 | fits |
 //! | width, height, depth minus 1 | 20 | 16384 (`g_devinfo[0x3D]`) | fits |
+//! | width minus 1 of a buffer | 27, the upper 7 in the height field | 2^27 (`g_devinfo[0x3E]`) | fits |
 //! | layers, base layer | 16 | 2048 (`g_devinfo[0x2D]`) | fits |
 //! | flags | 12 | `NVN_TEXTURE_FLAGS_ZCULL_SUPPORT_STENCIL` 0x400 | fits |
 //! | block shape `tile_h`, `tile_d` | 3 each | `sparse_tile_h` in `nvn_tex.c` gives 5 at most | fits |
@@ -166,8 +167,17 @@ impl Tic {
             layout: kind,
             samples: desc.samples.max(1),
             width: desc.width,
-            height: desc.height,
-            depth: desc.depth.max(1),
+            // A buffer is one row, whatever height the builder holds (the layout takes it as 1 too).
+            height: if kind == TicLayout::Buffer {
+                1
+            } else {
+                desc.height
+            },
+            depth: if kind == TicLayout::Buffer {
+                1
+            } else {
+                desc.depth.max(1)
+            },
             levels: u8::try_from(desc.level_count()).map_err(|_| NvnError::FieldRange("levels"))?,
             view,
             flags: u16::try_from(desc.flags).map_err(|_| NvnError::FieldRange("flags"))?,
@@ -215,9 +225,20 @@ impl Tic {
             | self.view.target.map_or(0, |t| t as u32) << 14
             | field(u32::from(self.levels), 6, "levels")? << 18
             | field(u32::from(self.view.levels), 6, "view levels")? << 24;
-        let w4 = field(self.width.wrapping_sub(1), 20, "width")?
-            | field(u32::from(self.view.base_level), 5, "base level")? << 20;
-        let w5 = field(self.height.wrapping_sub(1), 20, "height")?;
+        // A buffer is one row of up to 2^27 texels: the width takes the height field for its upper bits.
+        let (w_lo, w5) = if self.layout == TicLayout::Buffer {
+            if self.height != 1 {
+                return Err(NvnError::FieldRange("height"));
+            }
+            let w = field(self.width.wrapping_sub(1), 27, "width")?;
+            (w & 0xF_FFFF, w >> 20)
+        } else {
+            (
+                field(self.width.wrapping_sub(1), 20, "width")?,
+                field(self.height.wrapping_sub(1), 20, "height")?,
+            )
+        };
+        let w4 = w_lo | field(u32::from(self.view.base_level), 5, "base level")? << 20;
         let w6 = field(self.depth.wrapping_sub(1), 20, "depth")?
             | field(u32::from(self.flags), 12, "flags")? << 20;
         let w7 = u32::from(self.view.base_layer) | u32::from(self.view.layers) << 16;
@@ -265,8 +286,16 @@ impl Tic {
             target: Target::from_raw(bits(w[0], 8, 4) as u8)?,
             layout,
             samples: 1 << bits(w[0], 24, 3),
-            width: bits(w[4], 0, 20) + 1,
-            height: bits(w[5], 0, 20) + 1,
+            width: if layout == TicLayout::Buffer {
+                (bits(w[4], 0, 20) | bits(w[5], 0, 7) << 20) + 1
+            } else {
+                bits(w[4], 0, 20) + 1
+            },
+            height: if layout == TicLayout::Buffer {
+                1
+            } else {
+                bits(w[5], 0, 20) + 1
+            },
             depth: bits(w[6], 0, 20) + 1,
             levels: bits(w[2], 18, 6) as u8,
             view: TextureView {
@@ -439,6 +468,14 @@ mod tests {
         let tic = Tic::for_texture(&d, addr, TextureView::identity()).unwrap();
         assert_eq!(tic.layout, TicLayout::Buffer);
         assert_eq!(Tic::decode(&tic.encode().unwrap()).unwrap(), tic);
+        // One texel per pixel of a 1920x1088 target is above the 2^20 of a 2D width.
+        d.width = 1920 * 1088;
+        let big = Tic::for_texture(&d, addr, TextureView::identity()).unwrap();
+        assert_eq!(Tic::decode(&big.encode().unwrap()).unwrap(), big);
+        d.width = 1 << 27;
+        let top = Tic::for_texture(&d, addr, TextureView::identity()).unwrap();
+        assert_eq!(Tic::decode(&top.encode().unwrap()).unwrap().width, 1 << 27);
+        d.width = desc().width;
         d.target = Target::D2Multisample;
         d.samples = 8;
         let tic = Tic::for_texture(&d, addr, TextureView::identity()).unwrap();

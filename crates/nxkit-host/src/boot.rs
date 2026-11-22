@@ -57,8 +57,10 @@ pub struct Boot {
     libc2: Func,
     nn_main: Func,
     inits: Vec<ModuleInit>,
-    /// The address of the `char *argv[2]` array. The memory is never freed, because the SDK keeps the pointers for the
-    /// whole run.
+    /// The number of arguments, `argv[0]` included.
+    argc: u64,
+    /// The address of the `char *argv[]` array, ended by a null pointer. The memory is never freed, because the SDK keeps
+    /// the pointers for the whole run.
     argv: u64,
 }
 
@@ -71,17 +73,34 @@ fn symbol(name: &'static str) -> Result<Func> {
     }
 }
 
-/// Makes `argv = { "game", NULL }` and leaks it. It returns the address of the array.
-fn leak_argv() -> Result<u64> {
-    let arg = CString::new(ARGV0).map_err(|e| HostError::Load(format!("argv[0]: {e}")))?;
-    let argv: &'static mut [*mut c_char; 2] =
-        Box::leak(Box::new([arg.into_raw(), std::ptr::null_mut()]));
-    Ok(argv.as_mut_ptr() as usize as u64)
+/// The arguments of the game: `"game"`, then the words of `args` (the `args` setting of the title module, split at white
+/// space), as `nn::init` hands the process arguments to the SDK on the console.
+fn argv_words(args: &str) -> Vec<&str> {
+    std::iter::once(ARGV0)
+        .chain(args.split_whitespace())
+        .collect()
+}
+
+/// Makes `argv = { "game", <args>..., NULL }` and leaks it. It returns the count and the address of the array.
+fn leak_argv(args: &str) -> Result<(u64, u64)> {
+    let words = argv_words(args);
+    let mut ptrs = Vec::with_capacity(words.len() + 1);
+    for w in &words {
+        let arg = CString::new(*w).map_err(|e| HostError::Load(format!("argv: {e}")))?;
+        ptrs.push(arg.into_raw());
+    }
+    ptrs.push(std::ptr::null_mut::<c_char>());
+    let argv: &'static mut [*mut c_char] = Box::leak(ptrs.into_boxed_slice());
+    Ok((words.len() as u64, argv.as_mut_ptr() as usize as u64))
 }
 
 impl Boot {
     /// Looks up every guest function of the boot in the symbols of the modules. [`guestsym::set`] must have run.
-    pub fn resolve(inits: Vec<ModuleInit>) -> Result<Boot> {
+    pub fn resolve(inits: Vec<ModuleInit>, args: &str) -> Result<Boot> {
+        let (argc, argv) = leak_argv(args)?;
+        if argc > 1 {
+            eprintln!("nxkit-host: game arguments {args}");
+        }
         Ok(Boot {
             libc0: symbol(INIT_LIBC0)?,
             os_initialize: symbol(OS_INITIALIZE)?,
@@ -93,7 +112,8 @@ impl Boot {
             libc2: symbol(INIT_LIBC2)?,
             nn_main: symbol(NN_MAIN)?,
             inits,
-            argv: leak_argv()?,
+            argc,
+            argv,
         })
     }
 
@@ -110,7 +130,7 @@ impl Boot {
         Self::call(self.os_initialize, u64::from(main_handle), 0, sp);
         Self::call(self.libc1, 0, 0, sp);
         Self::call(self.sdk_module, 0, 0, sp);
-        Self::call(self.set_argc, 1, 0, sp);
+        Self::call(self.set_argc, self.argc, 0, sp);
         Self::call(self.set_argv, self.argv, 0, sp);
         Self::call(self.startup, 0, 0, sp);
         Self::call(self.libc2, 0, 0, sp);
@@ -120,5 +140,19 @@ impl Boot {
         }
         Self::call(self.nn_main, 0, 0, sp);
         eprintln!("nnMain returned");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_arguments_follow_the_program_name() {
+        assert_eq!(argv_words(""), ["game"]);
+        assert_eq!(
+            argv_words(" -ResX=1920  -ResY=1080 "),
+            ["game", "-ResX=1920", "-ResY=1080"]
+        );
     }
 }

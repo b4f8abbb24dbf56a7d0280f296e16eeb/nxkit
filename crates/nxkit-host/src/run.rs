@@ -150,7 +150,7 @@ pub fn run(opts: &Options) -> Result<()> {
     );
     nxkit_metal::set_pc_namer(sys::crashsig::guest_place);
     guestsym::set(std::mem::take(&mut loaded.exports));
-    let boot = Boot::resolve(std::mem::take(&mut loaded.inits))?;
+    let boot = Boot::resolve(std::mem::take(&mut loaded.inits), &settings.args)?;
 
     // Only the layer of the game's graphics API is made (R64).
     let hooks = match loaded.game.graphics {
