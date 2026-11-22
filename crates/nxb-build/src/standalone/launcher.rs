@@ -39,25 +39,27 @@ fn choices(list: &[(&str, &str)]) -> Value {
 struct Game {
     op_mode: &'static str,
     fps_target: u32,
+    render_size: u32,
     spatial_audio: bool,
     languages: Choices,
     fps_targets: Choices,
-    render_size: bool,
+    render_args: bool,
 }
 
 impl Game {
     fn new(settings: &nxtitle::Settings, nacp: Option<&[u8]>, render_size: bool) -> Self {
         Game {
-            render_size,
+            render_args: render_size,
             op_mode: settings.op_mode,
             fps_target: settings.fps_target,
+            render_size: settings.render_size,
             spatial_audio: settings.spatial_audio,
             languages: launch::game_languages(language_flags(nacp)),
             fps_targets: launch::game_fps_targets(settings.fps_target, settings.fps_max),
         }
     }
 
-    /// The default of `o`: the title's for the console mode, the frame rate and spatial audio.
+    /// The default of `o`: the title's for the console mode, the frame rate, the render size and spatial audio.
     fn default(&self, o: &Opt) -> &'static str {
         match o.env {
             launch::OP_MODE => launch::op_mode_value(self.op_mode),
@@ -71,6 +73,10 @@ impl Game {
                 }
                 _ => o.default,
             },
+            launch::RENDER_SIZE => launch::RENDER_SIZES
+                .iter()
+                .find(|(v, _)| v.parse() == Ok(self.render_size))
+                .map_or(o.default, |r| r.0),
             launch::FPS_TARGET => self
                 .fps_targets
                 .iter()
@@ -90,7 +96,7 @@ impl Game {
             // the Mac's language and at least two of the game's
             launch::LANGUAGE => (self.languages.len() >= 3).then_some(&self.languages[..]),
             launch::FPS_TARGET => (self.fps_targets.len() >= 2).then_some(&self.fps_targets[..]),
-            launch::RENDER_SIZE => self.render_size.then_some(list),
+            launch::RENDER_SIZE => self.render_args.then_some(list),
             _ => Some(list),
         }
     }
@@ -223,6 +229,15 @@ mod tests {
         assert_eq!(first[0].as_str(), Some("docked"));
         let size = find(&rows, launch::RENDER_SIZE).unwrap();
         assert_eq!(size.get("default").and_then(Value::as_str), Some("0"));
+        let mut big = title("console", 60, 60);
+        big.render_size = 2160;
+        let big = self::rows(&launcher_json(1, &big, None, true));
+        let size = find(&big, launch::RENDER_SIZE).unwrap();
+        assert_eq!(
+            size.get("default").and_then(Value::as_str),
+            Some("2160"),
+            "the title's own default"
+        );
         let none = self::rows(&launcher_json(1, &title("console", 60, 60), None, false));
         assert!(
             find(&none, launch::RENDER_SIZE).is_none(),

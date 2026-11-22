@@ -152,6 +152,9 @@ fn settings(m: &Manifest) -> Value {
         ("shared_font_decode", flag(m.shared_font_decode)),
         ("sf_services", list(&m.sf_services)),
     ];
+    if t.render_size != 0 {
+        f.push(("render_size", n(t.render_size)));
+    }
     if let Some(cvar) = t.fps_cvar {
         f.push(("fps_cvar", s(cvar)));
     }

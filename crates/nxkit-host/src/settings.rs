@@ -31,6 +31,7 @@ const TYPED: &[&str] = &[
     "screen_aspect",
     "pad_layout",
     "op_mode",
+    "render_size",
     "spatial_audio",
     "perf_boost",
     "tex_flush_upload",
@@ -95,6 +96,9 @@ pub struct Settings {
     pub pad_layout: String,
     /// The operation mode that the applet service reports, `handheld` or `docked`.
     pub op_mode: String,
+    /// The height of the render size when `NXKIT_RENDER_SIZE` is not set (`render_size`, optional: absent is 0, the
+    /// game's own).
+    pub render_size: u32,
     /// Whether the game gets 5.1 played as spatial audio when `NXKIT_SPATIAL_AUDIO` is not set (`spatial_audio`,
     /// optional: absent is off).
     pub spatial_audio: bool,
@@ -247,6 +251,11 @@ impl Settings {
             screen_aspect: flag(v, "screen_aspect")?,
             pad_layout: text(v, "pad_layout", "settings")?,
             op_mode: text(v, "op_mode", "settings")?,
+            render_size: v
+                .get("render_size")
+                .and_then(Value::as_u64)
+                .and_then(|h| u32::try_from(h).ok())
+                .unwrap_or(0),
             spatial_audio: v
                 .get("spatial_audio")
                 .and_then(Value::as_bool)
@@ -297,6 +306,14 @@ impl Settings {
         if let Some(fps) = env.fps_target {
             self.choose_fps(fps);
         }
+        if let Some(h) = env.render_size {
+            self.render_size = h;
+        }
+    }
+
+    /// The width and the height of `render_size`, `None` for the game's own size.
+    pub fn render_dims(&self) -> Option<(u32, u32)> {
+        nxkit_abi::launch::render_size(&self.render_size.to_string())
     }
 
     /// Sets `fps_target` to `fps` when it is one of the rates of the launch option for this title
@@ -397,6 +414,35 @@ mod tests {
         assert_eq!(s.op_mode, "handheld");
         s.with_env(&env("docked"));
         assert_eq!(s.op_mode, "docked");
+    }
+
+    #[test]
+    fn the_render_size_of_the_title_holds_unless_the_launcher_sets_one() {
+        let env = |pairs: &[(&str, &str)]| {
+            crate::hostenv::HostEnv::from_env(&nxkit_abi::env::Env::from_pairs(
+                pairs.iter().copied(),
+            ))
+        };
+        let title = Settings {
+            render_size: 2160,
+            ..Settings::default()
+        };
+        let mut s = title.clone();
+        s.with_env(&env(&[]));
+        assert_eq!(s.render_dims(), Some((3840, 2160)));
+        let mut s = title.clone();
+        s.with_env(&env(&[("NXKIT_RENDER_SIZE", "1080")]));
+        assert_eq!(s.render_dims(), Some((1920, 1080)));
+        let mut s = title.clone();
+        s.with_env(&env(&[("NXKIT_RENDER_SIZE", "0")]));
+        assert_eq!(s.render_dims(), None, "the game's own size");
+        let mut s = title;
+        s.with_env(&env(&[("NXKIT_RENDER_SIZE", "999")]));
+        assert_eq!(
+            s.render_dims(),
+            Some((3840, 2160)),
+            "not an option: the title's stays"
+        );
     }
 
     #[test]

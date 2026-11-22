@@ -59,6 +59,18 @@ const FPS_MAX: Fact<u32> = Fact::new(
     },
 );
 
+/// The default render size, 3840x2160. The pak of the console variables sets `r.ScreenPercentage=50` at build time, so
+/// the game's own 1280x720 back buffer rendered the scene at 640x360. At 3840x2160 the scene is 1920x1080 and MetalFX
+/// scales it to the back buffer. `NXKIT_RENDER_SIZE` still wins.
+const RENDER_SIZE: Fact<u32> = Fact::new(
+    2160,
+    Evidence::Recorded {
+        source: "nxkit runs of the temporal upscaling of 2026-11-22 (commit af12c951): a 3840x2160 back buffer with a \
+                 1920x1080 scene, MetalFX output close to native 4K with the same colours",
+        read: "2026-11-22",
+    },
+);
+
 /// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The display
 /// version is the one of the build row of v327680.
 const SETTINGS: Fact<Settings> = Fact::new(
@@ -77,6 +89,9 @@ const SETTINGS: Fact<Settings> = Fact::new(
         fps_target: 60,
         // Not from game.tsv: a run checked the game's speed above 60 ([`FPS_MAX`]).
         fps_max: FPS_MAX.value,
+        // Not from game.tsv: the console variables of the pak render the scene at half the back buffer for MetalFX
+        // ([`RENDER_SIZE`]).
+        render_size: RENDER_SIZE.value,
         fps_cvar: Some("t.MaxFPS"),
         tex_flush_upload: true,
         tex_dirty_upload: true,

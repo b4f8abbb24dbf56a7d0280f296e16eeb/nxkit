@@ -77,6 +77,9 @@ pub struct Settings {
     pub pad_layout: &'static str,
     /// `op_mode`: `console` (docked) or `handheld`.
     pub op_mode: &'static str,
+    /// `render_size`: the height of the size the game renders at when `NXKIT_RENDER_SIZE` is not set: 0 (the game's
+    /// own), 720, 1080, 1440 or 2160, 16:9. It needs the program arguments of the size (`RuntimeHooks::render_args`).
+    pub render_size: u32,
     /// `spatial_audio`: the default of the launch option `NXKIT_SPATIAL_AUDIO` (5.1 to the game, played as spatial
     /// audio). The player's choice wins.
     pub spatial_audio: bool,
@@ -139,6 +142,7 @@ impl Settings {
         shared_font: None,
         pad_layout: "simple",
         op_mode: "console",
+        render_size: 0,
         spatial_audio: false,
         perf_boost: false,
         tex_flush_upload: false,

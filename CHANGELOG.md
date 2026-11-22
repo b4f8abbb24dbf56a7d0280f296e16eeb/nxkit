@@ -32,10 +32,14 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The frame limit rules of a title (`RuntimeHooks::limits`) reach the game. `nxb build` writes them as the `limits`
   list of `game.json`, and the host passes them with the offsets from the fixups of `main` to the pacing service. Before,
   the host passed no rule at all.
-- The launch option `NXKIT_RENDER_SIZE` sets the size the game renders at, its menus included: the game's own (the
-  default), 1280x720, 1920x1080, 2560x1440 or 3840x2160. The family or the title module names the program arguments
-  of the size (`RuntimeHooks::render_args`), and only such a title gets the row. The family `unreal` names
+- The launch option `NXKIT_RENDER_SIZE` sets the size the game renders at, its menus included: the game's own,
+  1280x720, 1920x1080, 2560x1440 or 3840x2160. The family or the title module names the program arguments of the size
+  (`RuntimeHooks::render_args`), and only such a title gets the row. The family `unreal` names
   `-ResX={w} -ResY={h}`. OCTOPATH TRAVELER renders at the chosen size, from the swap chain to every scene pass.
+- A title module can set the default of `NXKIT_RENDER_SIZE` (`render_size` of its run settings, written to `game.json`
+  and as the default of the row in `launcher.json`). The launch option still wins. OCTOPATH TRAVELER renders at
+  3840x2160 by default: its scene is half that size (`r.ScreenPercentage=50` of its console variables), 1920x1080, and
+  MetalFX scales it to 4K. At the game's own 1280x720 the scene was 640x360.
 - A game with an engine frame limit can run at 120 fps when its title module sets `fps_max` to 120. The link and the
   vsync of the step run at 120 Hz, the limit gets 120, and the load-driven step holds a frame for two ticks when it does not fit 1/120 s (R30b).
 - OCTOPATH TRAVELER offers 120 fps (`fps_max` 120). A run at 120 kept the speed of a run at 60. In Atlasdam it runs at

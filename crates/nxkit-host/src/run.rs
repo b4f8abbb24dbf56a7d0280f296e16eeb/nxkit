@@ -129,7 +129,7 @@ pub fn run(opts: &Options) -> Result<()> {
     seams::register_server(mask)?;
     seams::init_services(&placed.game, mask, env, &refresh)?;
 
-    let program_args = placed.game.program_args(env.render_size);
+    let program_args = placed.game.program_args(placed.game.settings.render_dims());
     let mut loaded = loader::load(placed, mask)?;
     crate::stall::start(env.stall_dump);
     eprintln!(
