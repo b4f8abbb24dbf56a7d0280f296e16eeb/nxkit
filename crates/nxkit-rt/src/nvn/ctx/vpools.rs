@@ -14,6 +14,7 @@ use nxkit_nvn::error::{NvnError, Result as NvnResult};
 use nxkit_nvn::space::{GpuAddr, GpuSpace};
 use nxkit_nvn::vspace::{PageTables, VirtualSpace};
 
+use super::vwatch::Watches;
 use super::{Front, Gpu};
 
 /// How a virtual pool reaches its memory.
@@ -55,6 +56,8 @@ pub(crate) struct VPools {
     inner: Mutex<Inner>,
     /// The virtual ranges that changed since the last [`Gpu::lock`].
     pending: Mutex<Vec<(GpuAddr, u64)>>,
+    /// The physical pages of recent mapping requests, which the CPU may still fill (`vwatch`).
+    watches: Mutex<Watches>,
 }
 
 impl VPools {
@@ -76,6 +79,7 @@ impl VPools {
                 pools: HashMap::new(),
             }),
             pending: Mutex::new(Vec::new()),
+            watches: Mutex::new(Watches::default()),
         }
     }
 
@@ -85,6 +89,10 @@ impl VPools {
 
     fn queue(&self) -> std::sync::MutexGuard<'_, Vec<(GpuAddr, u64)>> {
         self.pending.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn watches(&self) -> std::sync::MutexGuard<'_, Watches> {
+        self.watches.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -113,6 +121,7 @@ impl Gpu {
         );
         if let Some(old) = old {
             release(&mut g, old);
+            self.vpools.watches().released(old.base, old.size);
         }
         Some(base)
     }
@@ -164,12 +173,13 @@ impl Gpu {
         let mut g = self.vpools.inner();
         if let Some(v) = g.pools.remove(&pool) {
             release(&mut g, v);
+            self.vpools.watches().released(v.base, v.size);
         }
     }
 
     /// `nvnMemoryPoolMapVirtual` of a sparse pool: maps `[voff, voff + size)` of the pool at the GPU address `base`
     /// onto the guest memory at the host address `phys`, or unmaps it when `phys` is None. The textures in the range
-    /// load again.
+    /// load again, and again at each flush that finds the physical pages changed (`vwatch`).
     pub(crate) fn vpool_map(
         &self,
         base: u64,
@@ -178,6 +188,7 @@ impl Gpu {
         phys: Option<u64>,
     ) -> NvnResult<()> {
         let base = GpuAddr::new(base)?;
+        let host = phys;
         let phys = phys.map(|h| self.space.gpu_address(h, size)).transpose()?;
         let changed = {
             let mut g = self.vpools.inner();
@@ -186,9 +197,20 @@ impl Gpu {
             ))?;
             s.map(base, voff, size, phys)?
         };
+        self.vpools.watches().mapped(changed, host);
         self.vpools.queue().push(changed);
         self.writes_dirty.store(true, Ordering::Release);
         Ok(())
+    }
+
+    /// One flush of the watches: the virtual ranges whose physical pages the CPU changed since the last flush go to
+    /// the front end. [`Gpu::flush_locked`] calls it before it ends the frame.
+    pub(super) fn vpool_watch(&self, front: &mut Front) {
+        let mut changed = Vec::new();
+        self.vpools.watches().step(&mut changed);
+        for (start, len) in changed {
+            front.virtual_changed(start, len);
+        }
     }
 
     /// The CPU wrote `[host, host + len)` of guest memory: the virtual pages that show those bytes changed too.

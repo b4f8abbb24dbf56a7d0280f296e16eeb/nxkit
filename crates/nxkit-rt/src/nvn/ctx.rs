@@ -56,6 +56,7 @@ use super::program::ProgramRecord;
 mod gate;
 mod order;
 mod vpools;
+mod vwatch;
 pub(crate) use vpools::VMode;
 
 /// Guest memory for the front end: the range that the host named with `nxkit_abi::guest::set_range`.
@@ -401,6 +402,7 @@ impl Gpu {
                 format_args!("a held submit failed at the flush: {e}"),
             );
         }
+        self.vpool_watch(front);
         if front.frame_is_empty() {
             super::gateseq::note(format_args!("FLUSH {reason:?} found an empty frame"));
             return Ok(Fence(self.flushed()));

@@ -320,3 +320,57 @@ fn a_virtual_pool_whose_range_never_left_the_host_becomes_an_alias() {
     assert_eq!(g.vpool_init(0x5000, 0x1_0000), None);
     assert_eq!(g.vpool_decide(0x5000, true), None);
 }
+
+#[test]
+fn a_cpu_write_after_a_mapping_loads_the_sparse_texture_again_at_the_next_flush() {
+    use nxkit_nvn::resource::Residency::{GuestNewer, InSync};
+    let phys = crate::nvn::abi::testing::alloc(0x1000);
+    let spy = Arc::new(Spy {
+        window: Some((0x20_0000_0000, 0x100_0000)),
+        ..Spy::default()
+    });
+    let space = LinearSpace::new(phys, 0x10_0000_0000, 0x1000).expect("space");
+    let g = Gpu::new(space, spy, Settings::default());
+    let pool = 0x5000;
+    let base = g.vpool_init(pool, 0x1_0000).expect("a range");
+    g.vpool_take(pool);
+    assert_eq!(g.vpool_decide(pool, true), Some(VMode::Sparse));
+    let desc = nxkit_nvn::layout::TextureDesc {
+        target: nxkit_nvn::layout::Target::D2,
+        format: 0x06,
+        flags: 0,
+        samples: 0,
+        width: 32,
+        height: 32,
+        depth: 1,
+        levels: 1,
+        stride: 0,
+        packaged_block: None,
+    };
+    let id = g
+        .with_front(|f| {
+            let at = nxkit_nvn::space::GpuAddr::new(base)?;
+            Ok(f.create_texture_shared_at(desc, at)?.0)
+        })
+        .expect("texture");
+    let synced = |g: &Gpu| g.lock().resources_mut().synced(id).expect("synced");
+    g.vpool_map(base, 0, 0x1000, Some(phys)).expect("map");
+    assert_eq!(residency(&g, id), GuestNewer);
+    // the host loads the texture while the page still holds zeros
+    synced(&g);
+    g.flush(FlushReason::CpuWait).expect("flush");
+    assert_eq!(residency(&g, id), InSync, "the zeros did not change");
+    // the game copies the mip into the physical page with the CPU, without a flush of the pool
+    nxkit_abi::guest::fill(phys, 0x1000, 0x5A).expect("write");
+    g.flush(FlushReason::CpuWait).expect("flush");
+    assert_eq!(residency(&g, id), GuestNewer, "the flush saw the new bytes");
+    synced(&g);
+    g.flush(FlushReason::CpuWait).expect("flush");
+    assert_eq!(residency(&g, id), InSync, "the same bytes load nothing");
+    // an unmap ends the watch
+    g.vpool_map(base, 0, 0x1000, None).expect("unmap");
+    synced(&g);
+    nxkit_abi::guest::fill(phys, 0x1000, 0x33).expect("write");
+    g.flush(FlushReason::CpuWait).expect("flush");
+    assert_eq!(residency(&g, id), InSync);
+}
