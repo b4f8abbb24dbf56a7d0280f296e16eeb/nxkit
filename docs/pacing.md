@@ -82,7 +82,7 @@ A game whose engine steps by the time that really passed follows a frame limit t
 
 - The refresh plans the link at 120 Hz and the vsync of the step at 120 Hz, so a hold of one tick shows each frame for 1/120 s.
 - The load-driven step runs without a state page and counts in ticks of 1/120 s. It decides the hold from the cost of the frames as at 60.
-- Each present writes 120 into the limit while the hold is one tick, and 60 while it is longer. The game then makes as many frames as the screen shows.
+- The limit stays 120 while the hold is longer than one tick, and the hold paces the game. A limit of 60 there made the engine sleep inside its frame, the sleep counted as the cost of the frame, and the step never went back to one tick (OCTOPATH TRAVELER, 2026-11-22).
 
 Without one of these the host prints why and the game runs at 60. At 30 and 60 the limit gets the target and the game keeps its own step.
 

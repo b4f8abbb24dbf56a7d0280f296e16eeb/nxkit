@@ -24,7 +24,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   of the size (`RuntimeHooks::render_args`), and only such a title gets the row. The family `unreal` names
   `-ResX={w} -ResY={h}`. OCTOPATH TRAVELER renders at the chosen size, from the swap chain to every scene pass.
 - A game with an engine frame limit can run at 120 fps when its title module sets `fps_max` to 120. The link and the
-  vsync of the step run at 120 Hz, and the limit gets 120 while frames fit 1/120 s and 60 otherwise (R30b).
+  vsync of the step run at 120 Hz, the limit gets 120, and the load-driven step holds a frame for two ticks when it does not fit 1/120 s (R30b).
 - The host logs what it writes into a frame limit (`nxkit-pacing: Unreal t.MaxFPS (game thread) 30 -> 60 fps`) and
   the notices of the pacing service at the start.
 
