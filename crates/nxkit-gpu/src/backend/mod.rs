@@ -15,6 +15,7 @@
 mod api;
 mod events;
 mod gputs;
+mod landing;
 mod poolops;
 mod presdiag;
 mod present;
@@ -153,6 +154,10 @@ pub struct GpuBackend {
     forced_pending: Mutex<Vec<(u64, nxkit_nvn::backend::ForcedWait)>>,
     /// The GPU event signals of the frames that the GPU has not finished (`events`).
     events: Arc<events::EventSignals>,
+    /// Writes the reports of a frame when its batch completes (`landing`).
+    lander: Arc<landing::Lander>,
+    /// The backend itself, for the completion callbacks of `landing`.
+    this: Weak<Self>,
 }
 
 impl GpuBackend {
@@ -236,6 +241,8 @@ impl GpuBackend {
                 forced: Mutex::new(Vec::new()),
                 forced_pending: Mutex::new(Vec::new()),
                 events,
+                lander: Arc::default(),
+                this: weak.clone(),
             }
         }))
     }
@@ -298,7 +305,9 @@ impl GpuBackend {
         detail: &FrameDetail,
         result: &Result<EncodeReport, E>,
     ) {
-        if detail.reports.iter().any(|r| !r.is_event()) {
+        let counted = detail.reports.iter().any(|r| !r.is_event());
+        let queried = result.as_ref().is_ok_and(|r| r.queries.is_some());
+        if counted {
             locked(&self.counters).extend(
                 detail
                     .reports
@@ -311,6 +320,7 @@ impl GpuBackend {
             locked(&self.queries).push((fence.0, q));
         }
         crate::gatediag::hold(fence.0);
+        self.land_when_done(fence.0, counted || queried);
     }
 }
 

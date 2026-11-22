@@ -4,6 +4,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- Octopath Traveler: the load after confirming a traveler no longer stalls for about 50 s. GPU counter and timestamp
+  reports are written when their batch completes on the GPU, also when no CPU wait follows.
+
 ## 0.14.0 - 2026-11-21
 
 ### Added
