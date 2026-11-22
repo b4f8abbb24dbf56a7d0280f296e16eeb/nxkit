@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.15.2 - 2026-11-22
+
 ### Fixed
 
 - A samples report whose draws were not all encoded lands as visible, at least one sample (#51). It did not land,
