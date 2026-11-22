@@ -26,6 +26,7 @@
 //! - [`Presenter`]: a `CAMetalLayer` drawable path, with `Frame::present_at` for a tick.
 //! - [`SpatialUpscaler`], [`FrameInterpolator`]: MetalFX spatial scaling and frame interpolation.
 //! - [`PresentUpscaler`], [`PresentUpscale`]: MetalFX spatial scaling of the shown picture in the present.
+//! - [`TemporalUpscaler`]: MetalFX temporal scaling of a jittered picture with depth and motion.
 //! - [`RenderScale`], [`choose_render_scale`]: the scale the host renders at.
 //! - [`Deswizzler`]: block-linear deswizzle from guest memory into a texture.
 //!
@@ -78,6 +79,7 @@ mod space;
 mod state;
 mod stats;
 mod table;
+mod temporal;
 mod texture;
 pub mod thread;
 mod timed;
@@ -150,6 +152,7 @@ pub use stats::{
     interval_bucket,
 };
 pub use table::ArgumentTable;
+pub use temporal::{TemporalDesc, TemporalFrame, TemporalUpscaler};
 pub use texture::{
     InPlaceRefusal, Storage, Texture, TextureDesc, TextureKind, TextureRegion, ViewDesc,
 };

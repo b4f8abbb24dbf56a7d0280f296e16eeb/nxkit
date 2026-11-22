@@ -54,6 +54,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - Diagnostics: with `NXKIT_DIAG_FS`, the `draw` line names the render pass of the draw in the frame and the size of
   its attachments, and the `ubo` category prints every float of the uniform buffers of a listed draw. The knob
   `fsquiet` holds the listed draws back until the game shows the scene to look at.
+- `nxkit_metal::TemporalUpscaler`: MetalFX temporal scaling (`MTL4FXTemporalScaler`) of a jittered picture with its
+  depth, motion, jitter and an optional reactive mask, typed so that no input can be left out. A GPU test scales a
+  still green picture from 32x32 to 64x64. Nothing uses it yet.
 
 ## 0.15.0 - 2026-11-22
 
