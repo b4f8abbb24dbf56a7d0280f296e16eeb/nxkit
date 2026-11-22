@@ -2,7 +2,7 @@
 
 | path | purpose |
 |---|---|
-| `check.sh` | all quality gates. CI runs it |
+| `check.sh` | all quality gates. `tools/check.sh clippy` runs one step. CI runs the steps in parallel jobs |
 | `no-game-data.sh` | fails on big files, game or toolchain files, private paths, attribution lines and key patterns |
 | `ste_check.py` | finds candidates for Simplified Technical English problems in a text file |
 | `front/` | scripts for the own front end (`airc`): corpus checks, IR and library equality, speed, GPU machine code comparison. They need inputs that you provide |

@@ -249,7 +249,10 @@ naga = { version = "=30.0.1", default-features = false, features = ["spv-in", "m
 block2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 
 [profile.test]
-# the parser tests recurse deeply: optimise them as the front-end project did
+debug = "line-tables-only"
+
+# The parser recurses deeply. At opt-level 0 its recursion-limit test overflows the default 2 MiB test thread stack.
+[profile.test.package.msl-parse]
 opt-level = 1
 
 # The software AV1 decoder is too slow at the default level of a debug build for a movie at 30 fps.

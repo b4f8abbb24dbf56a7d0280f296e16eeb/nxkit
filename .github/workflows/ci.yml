@@ -6,20 +6,40 @@ on:
   pull_request:
 
 jobs:
-  check:
-    runs-on: macos-latest
+  hygiene:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
+        run: rustup toolchain install stable --profile minimal --component rustfmt && rustup default stable
       - name: Hygiene
         run: tools/no-game-data.sh
+      - name: Format
+        run: tools/check.sh fmt
+
+  check:
+    # The cargo gates of tools/check.sh, one job per step so that they run in parallel.
+    name: check (${{ matrix.steps }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        steps: [clippy, test, doc xtask]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+      - name: Cache the dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # pull requests read the cache of main but do not write their own
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch dependencies
         # tools/check.sh runs offline, nxb-layer needs naga and glslang from crates.io
         run: cargo fetch --locked
       - name: Quality gates
         # Tests that need game data are ignored or skip themselves. No NXB_PARITY variable is set here.
-        run: tools/check.sh
+        run: tools/check.sh ${{ matrix.steps }}
 
   docs-lint:
     # Informational at first: it prints candidates and never fails the build.
