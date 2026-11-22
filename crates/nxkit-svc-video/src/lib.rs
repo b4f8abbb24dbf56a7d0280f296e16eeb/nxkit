@@ -46,7 +46,7 @@ pub trait Host: Send + Sync {
     fn resolve(&self, symbol: &str) -> Option<usize>;
 
     /// Runs `job` on a guest thread after `delay`. `SignalEvent` of the game's SDK is guest code, so the events of a
-    /// decoder go out through this.
+    /// decoder go out through this. Any thread may call it: the decoder's worker is a host thread.
     fn run_on_guest_thread(&self, delay: Duration, job: Box<dyn FnOnce() + Send>);
 
     /// Makes the `nn::os::SystemEventType` at `event` (a guest address) an event of the host that is not signalled and

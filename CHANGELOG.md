@@ -8,6 +8,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 - The guest threads that the services start get the priority of `nn::os`, 16 (#42). They got 44, the kernel's
   default, which the kernel refused as 72. The SDK of Xenoblade Chronicles 3 aborted when the opening movie started.
+- A decoder event that a host thread asks for runs on one guest thread of the video service (#42). Each event
+  started a guest thread of its own, which a host thread cannot do, and the game stopped with
+  `video seam run_on_guest_thread could not start a guest thread`.
 - The sampler pools of a game share an id space of 65536 sampler ids (#42). It had 4096, the ids of one console
   pool, and Xenoblade Chronicles 3 stopped at its second sampler pool (4096 and 2048 samplers) in
   `nvnSamplerPoolInitialize` with `ids above the handle limit`. It now reaches the title menu.

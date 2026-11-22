@@ -42,6 +42,8 @@ pub mod boot;
 #[allow(unsafe_code)]
 pub mod gate;
 #[cfg(target_os = "macos")]
+mod guestjobs;
+#[cfg(target_os = "macos")]
 pub mod guestsym;
 #[cfg(target_os = "macos")]
 pub mod loader;

@@ -4,12 +4,13 @@
 //! A seam that has no proper implementation yet stops the game with its name (R15).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use nxkit_hos::{GuestThread, Kernel};
 use nxkit_svc_system::TextRequest;
 
+use crate::guestjobs::Jobs;
 use crate::{guestsym, stop};
 
 /// The priority of the threads that a service starts when its seam gives none: `nn::os::DefaultThreadPriority`.
@@ -169,6 +170,9 @@ pub(crate) fn audio_host() -> nxkit_svc_audio::Host {
     }
 }
 
+// Process-wide (W26): the jobs of the video service that run on its guest thread (`guestjobs.rs`).
+static GUEST_JOBS: LazyLock<Jobs> = LazyLock::new(Jobs::default);
+
 /// The video service's view of the host.
 pub(crate) struct VideoHost;
 
@@ -178,13 +182,20 @@ impl nxkit_svc_video::Host for VideoHost {
     }
 
     fn run_on_guest_thread(&self, delay: Duration, job: Box<dyn FnOnce() + Send>) {
-        reap();
-        let body = move || {
-            std::thread::sleep(delay);
-            job();
-        };
-        if spawn(body, SERVICE_THREAD_PRIORITY, SERVICE_THREAD_STACK).is_none() {
-            stop::fatal("video seam run_on_guest_thread could not start a guest thread");
+        let on_guest = nxkit_hos::current_thread().is_some();
+        if GUEST_JOBS.push(Instant::now() + delay, job, on_guest) {
+            reap();
+            if spawn(
+                || loop {
+                    GUEST_JOBS.next()();
+                },
+                SERVICE_THREAD_PRIORITY,
+                SERVICE_THREAD_STACK,
+            )
+            .is_none()
+            {
+                stop::fatal("video seam run_on_guest_thread could not start a guest thread");
+            }
         }
     }
 
