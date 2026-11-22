@@ -21,6 +21,8 @@ const GRID: [u32; 2] = [96, 54];
 fn grid(width: u32, height: u32) -> [u32; 2] {
     if !crate::diag("img") {
         [3, 3]
+    } else if width >= 640 && height >= 360 && full() {
+        [width, height]
     } else if width >= 640 && height >= 360 {
         GRID
     } else if (8..=64).contains(&width) && (4..=64).contains(&height) {
@@ -28,6 +30,12 @@ fn grid(width: u32, height: u32) -> [u32; 2] {
     } else {
         [3, 3]
     }
+}
+
+/// With the knob `imgfull`, `img` writes targets of the main resolution texel by texel: one copy of the whole target
+/// and one read of it. Only for formats of 4 bytes per texel.
+fn full() -> bool {
+    crate::knob("imgfull")
 }
 
 /// A sampled target: its pass, texture id, probe grid and texture.
@@ -80,7 +88,23 @@ pub(crate) fn capture(
         Use::AttachmentWrite,
         Use::CopyRead,
     )));
-    for j in 0..g[1] {
+    let whole = full() && g == [d.width, d.height] && d.width >= 640;
+    if whole {
+        let _ = cp.encode(&ComputeCommand::CopyTexture {
+            src: tex.clone(),
+            dst: snapshot.clone(),
+            src_region: TextureRegion {
+                level: 0,
+                slice: 0,
+                origin: [0, 0, depth_plane],
+                size: [d.width, d.height, 1],
+            },
+            dst_level: 0,
+            dst_slice: 0,
+            dst_origin: [0, 0, 0],
+        });
+    }
+    for j in (0..g[1]).filter(|_| !whole) {
         for i in 0..g[0] {
             let region = TextureRegion {
                 level: 0,
@@ -129,6 +153,13 @@ pub(crate) fn dump(ctx: &Context) {
     for (cmd, id, size, tex) in all {
         let d = tex.desc();
         let g = grid(size[0], size[1]);
+        if full() && g == size && size[0] >= 640 {
+            if let Some(all) = tex.debug_read_all(ctx) {
+                let px: Vec<Vec<u8>> = all.as_chunks::<4>().0.iter().map(|c| c.to_vec()).collect();
+                write_picture(cmd, id, d.format, g, &px);
+            }
+            continue;
+        }
         let pts: Vec<[u32; 2]> = (0..g[1])
             .flat_map(|j| (0..g[0]).map(move |i| [i, j]))
             .collect();

@@ -166,6 +166,9 @@ const KNOBS: &[&str] = &[
     "tupjy",
     "tupmx",
     "tupmy",
+    // With `NXKIT_DIAG=lum,img`, targets of the main resolution are written texel by texel (`lum.rs`), for formats of
+    // 4 bytes per texel.
+    "imgfull",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.
