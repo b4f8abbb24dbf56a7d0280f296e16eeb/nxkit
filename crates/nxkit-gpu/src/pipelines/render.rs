@@ -200,7 +200,7 @@ impl Pipelines {
             }
             let job = Job {
                 key,
-                what: format!("render {} / {:?}", vs.entry, fs.map(|f| f.entry.as_str())),
+                what: render_what(d, vs, fs),
                 kind: JobKind::Render(RenderJob {
                     vertex_key: vertex,
                     vertex: (desc.vertex.0.clone(), desc.vertex.1.to_string()),
@@ -216,7 +216,7 @@ impl Pipelines {
                 .start(&self.cache, &self.topology_fallbacks, job);
             return Err(Skip::Pending);
         }
-        let what = || format!("render {} / {:?}", vs.entry, fs.map(|f| f.entry.as_str()));
+        let what = || render_what(d, vs, fs);
         let (p, source) = build_render(
             &self.cache,
             &self.topology_fallbacks,
@@ -377,4 +377,15 @@ fn depth_mode_ignored(what: &str) {
         nxkit_nvn::diag::Reason::DepthModeIgnored,
         format_args!("{what} has no entry that keeps the clip depth"),
     );
+}
+
+/// The render pipeline of a draw for the health report and the `pipe` lines: the entries and the program keys.
+fn render_what(d: &DrawDetail, vs: &StageProgram, fs: Option<&StageProgram>) -> String {
+    format!(
+        "render {} / {:?} (vertex {} fragment {:?})",
+        vs.entry,
+        fs.map(|f| f.entry.as_str()),
+        d.program.vertex,
+        d.program.fragment.as_deref()
+    )
 }
