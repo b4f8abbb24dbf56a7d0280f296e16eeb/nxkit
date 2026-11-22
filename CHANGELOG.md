@@ -6,6 +6,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- OCTOPATH TRAVELER II gets an alias region of 4608 MiB, a reserve of 6 GiB and the argument `-nothreadtimeout`
+  (#51). With 3200 MiB the Unreal heap ran out at the character selection. Unreal's hang detector ended the game
+  while the first load compiled pipelines for more than 5 s without a present.
 - The RGBX texture formats (0x6D to 0x78) are made as the RGBA format of the same size, and a sampling view reads
   their alpha as one (#42). The draws that sampled one were left out. Xenoblade Chronicles 3 samples an RGBX8
   colour grading table, and its tone mapping pass did not run.

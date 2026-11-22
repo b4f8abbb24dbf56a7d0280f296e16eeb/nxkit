@@ -27,18 +27,25 @@ pub struct Octo2;
 /// The one instance the registry lists.
 pub static OCTO2: Octo2 = Octo2;
 
-const GAME_TSV: Evidence = Evidence::Recorded {
-    source: "engine tree dm/games/0100A3501946E000/game.tsv and the defaults of dm/games/game.py at 034e91a8",
-    read: "2026-11-12",
+/// The memory layout and the arguments, checked by nxkit runs from the title screen to the first scene after the
+/// character selection.
+const RUNS: Evidence = Evidence::Recorded {
+    source: "the other values: engine tree dm/games/0100A3501946E000/game.tsv and the defaults of dm/games/game.py at \
+             034e91a8, read 2026-11-12. nxkit runs of 2026-11-22 (issue 51): with the alias region of game.tsv \
+             (3200 MiB) the Unreal heap (40 %, 1280 MiB) ran out at the character selection, and a heap of 2 GiB left \
+             the engine region too small for an allocation of 832 MiB. An alias region of 4608 MiB (heap 1824 MiB, \
+             engine region 2.41 GiB) needs a reserve of 6 GiB. Unreal's hang detector ended the game while the first \
+             load compiled pipelines without a present for more than 5 s. -nothreadtimeout keeps it from starting",
+    read: "2026-11-22",
 };
 
-/// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`. The display
-/// version is the one of the build row of v131072.
+/// The run settings: the values of `game.tsv`, and for a key it does not set the defaults of `game.py`, except the
+/// reserve, the alias region and the arguments ([`RUNS`]). The display version is the one of the build row of v131072.
 const SETTINGS: Fact<Settings> = Fact::new(
     Settings {
         memory: Memory {
-            reserve: 0xF000_0000,
-            alias: 0xC800_0000,
+            reserve: 0x1_8000_0000,
+            alias: 0x1_2000_0000,
             stack: 0x1000_0000,
             app_pool: 0xCD50_0000,
             system_resource: 0x500_0000,
@@ -48,9 +55,10 @@ const SETTINGS: Fact<Settings> = Fact::new(
         fps_target: 60,
         fps_cvar: Some("t.MaxFPS"),
         pad_layout: "full",
+        args: "-nothreadtimeout",
         ..Settings::DEFAULT
     },
-    GAME_TSV,
+    RUNS,
 );
 
 /// No list here: the build reads the NVN function names from the modules.
