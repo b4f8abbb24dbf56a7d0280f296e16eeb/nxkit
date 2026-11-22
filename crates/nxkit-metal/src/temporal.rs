@@ -17,6 +17,7 @@ use objc2_metal_fx::{
     MTL4FXTemporalScaler, MTLFXTemporalScalerBase, MTLFXTemporalScalerDescriptor,
 };
 
+use crate::convert::Mtl;
 use crate::device::Context;
 use crate::encode::CommandBuffer;
 use crate::error::{MetalError, Result, create};

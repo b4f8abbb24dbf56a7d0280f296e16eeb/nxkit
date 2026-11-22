@@ -10,6 +10,7 @@ use objc2_metal::{
     MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureUsage,
 };
 
+use crate::convert::Mtl;
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
 use crate::format::Format;

@@ -10,6 +10,7 @@ use objc2_metal::{
 };
 
 use super::{Storage, Texture, TextureDesc, TextureKind};
+use crate::convert::Mtl;
 use crate::device::Context;
 use crate::guest::GuestMemory;
 

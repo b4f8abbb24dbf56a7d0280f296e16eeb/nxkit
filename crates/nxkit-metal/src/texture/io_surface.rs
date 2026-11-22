@@ -6,6 +6,7 @@ use objc2_io_surface::IOSurfaceRef;
 use objc2_metal::{MTLDevice, MTLTextureDescriptor, MTLTextureUsage};
 
 use super::{Texture, TextureDesc};
+use crate::convert::Mtl;
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
 use crate::format::Format;

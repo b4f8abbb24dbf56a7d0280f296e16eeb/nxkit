@@ -7,9 +7,12 @@ use objc2_metal::{
 };
 
 use super::{MissWhy, PipelineCache};
+use crate::convert::Mtl;
 use crate::error::Result;
 use crate::pipeline::RenderPipelineDesc;
+use crate::state::ColorTargetMtl;
 use crate::state::TopologyClass;
+use crate::state::VertexDescriptorMtl;
 
 impl PipelineCache {
     /// Why the archive lacks `desc`: asks it for the pair with the build's assumed state, then for that pair with one

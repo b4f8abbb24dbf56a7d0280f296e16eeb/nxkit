@@ -22,6 +22,9 @@ use crate::state::check_sample_count;
 
 use super::shards::{self, ShardSet};
 use super::{ComputePipeline, RenderPipeline, RenderPipelineDesc, ShaderLibrary};
+use crate::convert::Mtl;
+use crate::state::ColorTargetMtl;
+use crate::state::VertexDescriptorMtl;
 pub use specialize::BaseStats;
 use specialize::Bases;
 

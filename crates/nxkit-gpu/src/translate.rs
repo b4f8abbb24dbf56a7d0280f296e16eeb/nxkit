@@ -1,39 +1,24 @@
-//! NVN state values to `nxkit-metal` state.
+//! NVN state values to `nxkit-metal` state. The values of a pipeline's state are `nxkit-pipestate`'s tables (`nvn`),
+//! shared with the build. This module holds the rest (depth, stencil, raster, samplers) and the draw's adapters.
 //!
 //! Every function takes the raw `NVN*` enum value and returns the Metal side, or `None` when Metal has no equivalent.
 //! The tables follow `NVN_*` in `nvn.h` of the NVN headers.
 //! The behaviour for the values that Metal lacks (fan, quads, byte indices) is the caller's decision.
 
 use nxkit_metal::{
-    BlendFactor, BlendOp, BlendState, Border, ColorTarget, CompareFn, CullMode, DepthStencilDesc,
-    FillMode, Filter, Format, IndexType, MipFilter, Primitive, Reduction, SamplerDesc, StencilFace,
-    StencilOp, StepFunction, TopologyClass, VertexAttribute, VertexDescriptor, VertexFormat,
-    VertexLayout, Winding, Wrap,
+    Border, CompareFn, CullMode, DepthStencilDesc, FillMode, Filter, Format, IndexType, MipFilter,
+    Primitive, Reduction, SamplerDesc, StencilFace, StencilOp, TopologyClass, VertexDescriptor,
+    VertexFormat, Winding, Wrap,
 };
 use nxkit_nvn::tic::Tsc;
 
+use nxkit_pipestate::nvn;
+pub(crate) use nxkit_pipestate::nvn::{
+    DEFAULT_VERTEX_SLOT, LayoutError, QUADS, color_target, stream_slot,
+};
+
 use crate::detail::{BlendDetail, DepthStencilDetail, DrawDetail, StencilDetail};
-use crate::format_map::{is_integer, vertex_format};
-
-/// The Metal buffer slot of vertex stream `stream`. The streams use the slots from 16 so that they do not meet the
-/// argument buffer at slot 0 and the draw support buffers.
-pub(crate) fn stream_slot(stream: u32) -> u32 {
-    if stream < 14 { 16 + stream } else { stream }
-}
-
-/// A constant stream for shader inputs with no enabled, bound vertex attribute.
-pub(crate) const DEFAULT_VERTEX_SLOT: u32 = 30;
-
-pub(crate) fn needs_default_vertex(d: &DrawDetail, inputs: &[(u32, VertexFormat)]) -> bool {
-    inputs.iter().any(|(location, _)| {
-        !d.attributes
-            .iter()
-            .any(|a| a.location == *location && d.streams.iter().any(|s| s.index == a.stream))
-    })
-}
-
-/// `NVN_DRAW_PRIMITIVE_QUADS`.
-pub(crate) const QUADS: u32 = 7;
+use crate::format_map::is_integer;
 
 /// `NVNdrawPrimitive` to the Metal primitive and its topology class. Quads draw as triangles, and
 /// `crate::geometry::geometry` writes the indices of two triangles for each quad.
@@ -82,42 +67,6 @@ pub(crate) fn stencil_op(nvn: u32) -> StencilOp {
         7 => StencilOp::IncrementWrap,
         8 => StencilOp::DecrementWrap,
         _ => StencilOp::Keep,
-    }
-}
-
-/// `NVNblendFunc`. Unknown values give `One`.
-pub(crate) fn blend_factor(nvn: u32) -> BlendFactor {
-    match nvn {
-        1 => BlendFactor::Zero,
-        3 => BlendFactor::SrcColor,
-        4 => BlendFactor::OneMinusSrcColor,
-        5 => BlendFactor::SrcAlpha,
-        6 => BlendFactor::OneMinusSrcAlpha,
-        7 => BlendFactor::DstAlpha,
-        8 => BlendFactor::OneMinusDstAlpha,
-        9 => BlendFactor::DstColor,
-        10 => BlendFactor::OneMinusDstColor,
-        11 => BlendFactor::SrcAlphaSaturated,
-        0x10 => BlendFactor::Src1Color,
-        0x11 => BlendFactor::OneMinusSrc1Color,
-        0x12 => BlendFactor::Src1Alpha,
-        0x13 => BlendFactor::OneMinusSrc1Alpha,
-        0x61 => BlendFactor::BlendColor,
-        0x62 => BlendFactor::OneMinusBlendColor,
-        0x63 => BlendFactor::BlendAlpha,
-        0x64 => BlendFactor::OneMinusBlendAlpha,
-        _ => BlendFactor::One,
-    }
-}
-
-/// `NVNblendEquation`. Unknown values give `Add`.
-pub(crate) fn blend_op(nvn: u32) -> BlendOp {
-    match nvn {
-        2 => BlendOp::Subtract,
-        3 => BlendOp::ReverseSubtract,
-        4 => BlendOp::Min,
-        5 => BlendOp::Max,
-        _ => BlendOp::Add,
     }
 }
 
@@ -178,29 +127,6 @@ pub(crate) fn depth_stencil(d: &DepthStencilDetail) -> DepthStencilDesc {
     }
 }
 
-/// The colour target of a draw for a target of `format`. Integer formats never blend. `written` is false when the
-/// shader does not write the output, and then the mask is zero.
-pub(crate) fn color_target(
-    format: Format,
-    blend: &BlendDetail,
-    mask: u8,
-    written: bool,
-) -> ColorTarget {
-    let mut t = ColorTarget::new(format);
-    t.write_mask = if written { mask & 0xF } else { 0 };
-    if blend.enable && !is_integer(format) {
-        t.blend = Some(BlendState {
-            src_rgb: blend_factor(blend.src_rgb),
-            dst_rgb: blend_factor(blend.dst_rgb),
-            op_rgb: blend_op(blend.op_rgb),
-            src_alpha: blend_factor(blend.src_alpha),
-            dst_alpha: blend_factor(blend.dst_alpha),
-            op_alpha: blend_op(blend.op_alpha),
-        });
-    }
-    t
-}
-
 /// The kind of a blend source factor in the blend word (`blendz`): 1 `ZERO`, 2 `SRC_ALPHA`, 3 `ONE_MINUS_SRC_ALPHA`.
 /// Every other factor is 0: the shader does not know its value, or it is not 0 for any alpha.
 fn blend_zero_kind(src_rgb: u32) -> u32 {
@@ -252,117 +178,17 @@ pub(crate) fn blend_zero_bits(
     word
 }
 
-/// `format` with the scalar type that the shader reads (`read` is `Float4`, `UInt4` or `Int4`).
-///
-/// The vertex input registers of Maxwell have no type: an attribute of 32-bit floats that the shader reads as
-/// integers hands over the bits of the floats. Metal refuses a pipeline whose attribute format and shader type differ
-/// in kind, so a 32-bit format takes the kind of the shader, which keeps the bits. The other formats convert their
-/// values on fetch and have no bit-exact equivalent; they stay as they are.
-pub(crate) fn as_read(format: VertexFormat, read: VertexFormat) -> VertexFormat {
-    use VertexFormat as V;
-    let width = match format {
-        V::Float | V::UInt | V::Int => 1,
-        V::Float2 | V::UInt2 | V::Int2 => 2,
-        V::Float3 | V::UInt3 | V::Int3 => 3,
-        V::Float4 | V::UInt4 | V::Int4 => 4,
-        _ => return format,
-    };
-    let row = match read {
-        V::UInt4 => [V::UInt, V::UInt2, V::UInt3, V::UInt4],
-        V::Int4 => [V::Int, V::Int2, V::Int3, V::Int4],
-        _ => [V::Float, V::Float2, V::Float3, V::Float4],
-    };
-    row[width - 1]
-}
-
-/// Why a vertex layout could not be translated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LayoutError {
-    /// The `NVNformat` of an attribute has no Metal vertex format.
-    Format(u32),
-}
-
-/// The vertex descriptor of a draw. A stream with stride 0 steps as a constant. A stream with a divisor steps per
-/// instance. Shader inputs without a bound attribute read a constant zero stream. Metal requires a descriptor
-/// even for those inputs; omitting one makes the entire pipeline fail to compile.
+/// The vertex descriptor of a draw ([`nxkit_pipestate::nvn::vertex_descriptor`]).
 pub(crate) fn vertex_descriptor(
     d: &DrawDetail,
     inputs: &[(u32, VertexFormat)],
 ) -> Result<VertexDescriptor, LayoutError> {
-    let mut out = VertexDescriptor::default();
-    for a in &d.attributes {
-        if !d.streams.iter().any(|s| s.index == a.stream) {
-            continue;
-        }
-        let mut format = vertex_format(a.format).ok_or(LayoutError::Format(a.format))?;
-        if let Some((_, read)) = inputs.iter().find(|(l, _)| *l == a.location) {
-            format = as_read(format, *read);
-        }
-        out.attributes.push((
-            a.location,
-            VertexAttribute {
-                format,
-                offset: a.offset,
-                buffer: stream_slot(a.stream),
-            },
-        ));
-    }
-    for (location, format) in inputs {
-        if !out.attributes.iter().any(|(l, _)| l == location) {
-            out.attributes.push((
-                *location,
-                VertexAttribute {
-                    format: *format,
-                    offset: 0,
-                    buffer: DEFAULT_VERTEX_SLOT,
-                },
-            ));
-        }
-    }
-    out.attributes.sort_by_key(|(l, _)| *l);
-    for s in &d.streams {
-        if !d.attributes.iter().any(|a| a.stream == s.index) {
-            continue;
-        }
-        let (step, step_rate) = if s.stride == 0 {
-            (StepFunction::Constant, 0)
-        } else if s.divisor != 0 {
-            (StepFunction::PerInstance, s.divisor)
-        } else {
-            (StepFunction::PerVertex, 1)
-        };
-        // Metal refuses a layout with stride 0, also for a constant step that never moves (an assertion in the archive,
-        // "references a buffer ... that has no stride"; Ocarina of Time after its opening). The stride of a constant
-        // step is not read, so any value that covers the attributes does: their furthest end, at least 16, in 4s.
-        let stride = if s.stride == 0 {
-            let end = d
-                .attributes
-                .iter()
-                .filter(|a| a.stream == s.index)
-                .map(|a| a.offset + 16)
-                .max()
-                .unwrap_or(16);
-            end.max(16).next_multiple_of(4)
-        } else {
-            s.stride
-        };
-        out.layouts.push(VertexLayout {
-            buffer: stream_slot(s.index),
-            stride,
-            step,
-            step_rate,
-        });
-    }
-    if needs_default_vertex(d, inputs) {
-        out.layouts.push(VertexLayout {
-            buffer: DEFAULT_VERTEX_SLOT,
-            stride: 16,
-            step: StepFunction::Constant,
-            step_rate: 0,
-        });
-    }
-    out.layouts.sort_by_key(|l| l.buffer);
-    Ok(out)
+    nvn::vertex_descriptor(&d.attributes, &d.streams, inputs)
+}
+
+/// True when a shader input of the draw reads the constant default vertex.
+pub(crate) fn needs_default_vertex(d: &DrawDetail, inputs: &[(u32, VertexFormat)]) -> bool {
+    nvn::needs_default_vertex(&d.attributes, &d.streams, inputs)
 }
 
 fn wrap(nvn: u8) -> Wrap {
@@ -424,6 +250,9 @@ pub(crate) fn sampler(t: &Tsc) -> SamplerDesc {
 
 #[cfg(test)]
 mod tests {
+    use nxkit_metal::{BlendFactor, BlendOp};
+    use nxkit_pipestate::nvn::{as_read, blend_factor, blend_op};
+
     use super::*;
 
     #[test]

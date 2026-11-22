@@ -7,9 +7,11 @@ use objc2_metal::{
 };
 
 use super::{Entry, PipelineCache, Source};
+use crate::convert::Mtl;
 use crate::device::ns;
 use crate::error::{MetalError, Result};
 use crate::pipeline::{MeshPipelineDesc, RenderPipeline, ShaderLibrary};
+use crate::state::ColorTargetMtl;
 use crate::state::check_sample_count;
 
 /// The empty fragment function of a depth-only mesh pipeline.

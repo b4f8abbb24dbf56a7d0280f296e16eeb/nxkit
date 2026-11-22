@@ -43,6 +43,7 @@ mod blocklinear;
 mod compute;
 mod compute_copy;
 mod compute_icb;
+mod convert;
 mod databuf;
 mod deswizzle;
 mod device;

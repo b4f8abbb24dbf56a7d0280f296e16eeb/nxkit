@@ -44,7 +44,7 @@ flowchart TD
   R3["R3 adapters: nxkit-rt (the C ABI of the guest, unsafe code), nxkit-gpu (the NVN backend on Metal 4), nxkit-vk-gpu (the Vulkan backend on Metal 4)"]
   R2["R2 subsystems: nxkit-hos (kernel), nxkit-ipc, nxkit-nvn, nxkit-vk, nxkit-svc-*, nxkit-save-sync, nxkit-ndve, nxkit-ndsr"]
   R1["R1 platform bindings: nxkit-metal, nxkit-coreml (unsafe code, macOS only)"]
-  R0["R0 contract: nxkit-abi (guest ABI, shared formats), nxkit-native-plan"]
+  R0["R0 contract: nxkit-abi (guest ABI, shared formats), nxkit-native-plan, nxkit-pipestate"]
   R4 --> R3 --> R2 --> R1 --> R0
   R2 --> R0
   R0 -.->|R crates may use| BL0["build L0: nxb-model"]
@@ -115,6 +115,7 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxkit-ue | R2 | no | impl | the Unreal Engine take-overs: the engine heap in place of FMallocBinned3 (a size-class and best-fit allocator over the arena the kernel keeps at the end of the alias region, behind a vtable of the guest's layout) and the cap of the engine region. No `unsafe` code; the vtable's slots are `extern "C"` functions over one process-wide heap |
 | nxkit-svc-pacing | R2 | no | impl | the `pacing` service: the `Pacer` for present intervals and the frame pace profile |
 | nxkit-save-sync | R2 | no | impl | the cloud saves (R69): the save of user 1 and the device save packed into one file in a cloud folder, byte-compatible with `dm/host/save_sync.c` of the old engine, the decision at the first mount with the journal of a pull, the sender after commits and the report for a launcher. It works on folders and knows nothing of the fs service. `unsafe` only in `sys` (`renamex_np`, `clonefile`, the guest-name attribute, `localtime_r`, `sysctlbyname`) |
+| nxkit-pipestate | R0 | no | impl | the state of a pipeline as plain data, shared by the host and the build: pixel formats, blend, topology and vertex state, the NVN tables of a draw and its descriptor rules. `nxkit-metal` maps the types to Metal, `nxkit-gpu` translates a draw with the tables. No Metal code |
 | nxkit-native-plan | R0 | no | impl | the native passes as data (`Plan`, `Step`, `GameResource`, `Binding`), shared by the networks that `nxkit-gpu` runs natively. No Metal code |
 | nxkit-ndve | R2 | no | impl | the movie network of `nn::ndve` run natively: file reader, weight packing, the plan and Metal kernels, and the `ane` module that writes the Core ML model for the Neural Engine. Refer to [plans/ndve-native.md](plans/ndve-native.md) |
 | nxkit-ndsr | R2 | no | impl | the agl upscaler NDSR run natively: network table and fingerprint of the packs `vr` and `vr_light`, pack reader, CPU reference, kernels and plan. Refer to [plans/ndsr-native.md](plans/ndsr-native.md) |

@@ -1,6 +1,8 @@
 //! Fixed-function state: blending, depth and stencil, the vertex layout and the rasteriser settings.
 //!
-//! All types are plain data so the frame encoder can build them from the game's registers and use them as keys.
+//! All types are plain data so the frame encoder can build them from the game's registers and use them as keys. The
+//! pipeline state (blend, topology, vertex layout) is `nxkit-pipestate`'s, shared with the build. This module maps it
+//! to Metal.
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -11,9 +13,26 @@ use objc2_metal::{
     MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLWinding,
 };
 
+use crate::convert::Mtl;
 use crate::device::Context;
 use crate::error::{MetalError, Result, create};
-use crate::format::Format;
+
+pub use nxkit_pipestate::{
+    BlendFactor, BlendOp, BlendState, ColorTarget, StepFunction, TopologyClass, VertexAttribute,
+    VertexDescriptor, VertexFormat, VertexLayout,
+};
+
+macro_rules! mtl_map {
+    ($name:ident => $mtl:ty { $($v:ident => $mv:ident),+ $(,)? }) => {
+        impl Mtl for $name {
+            type Out = $mtl;
+
+            fn to_mtl(self) -> $mtl {
+                match self { $(Self::$v => <$mtl>::$mv),+ }
+            }
+        }
+    };
+}
 
 macro_rules! mtl_enum {
     ($(#[$m:meta])* $name:ident => $mtl:ty { $($(#[$vm:meta])* $v:ident => $mv:ident),+ $(,)? }) => {
@@ -31,62 +50,36 @@ macro_rules! mtl_enum {
     };
 }
 
-mtl_enum! {
-    /// A blend factor.
+mtl_map! {
     BlendFactor => MTLBlendFactor {
-        /// 0.
         Zero => Zero,
-        /// 1.
         One => One,
-        /// The source colour.
         SrcColor => SourceColor,
-        /// 1 minus the source colour.
         OneMinusSrcColor => OneMinusSourceColor,
-        /// The source alpha.
         SrcAlpha => SourceAlpha,
-        /// 1 minus the source alpha.
         OneMinusSrcAlpha => OneMinusSourceAlpha,
-        /// The destination colour.
         DstColor => DestinationColor,
-        /// 1 minus the destination colour.
         OneMinusDstColor => OneMinusDestinationColor,
-        /// The destination alpha.
         DstAlpha => DestinationAlpha,
-        /// 1 minus the destination alpha.
         OneMinusDstAlpha => OneMinusDestinationAlpha,
-        /// The source alpha, saturated.
         SrcAlphaSaturated => SourceAlphaSaturated,
-        /// The constant blend colour.
         BlendColor => BlendColor,
-        /// 1 minus the constant blend colour.
         OneMinusBlendColor => OneMinusBlendColor,
-        /// The constant blend alpha.
         BlendAlpha => BlendAlpha,
-        /// 1 minus the constant blend alpha.
         OneMinusBlendAlpha => OneMinusBlendAlpha,
-        /// The second fragment output colour (dual-source blending).
         Src1Color => Source1Color,
-        /// 1 minus the second fragment output colour.
         OneMinusSrc1Color => OneMinusSource1Color,
-        /// The second fragment output alpha.
         Src1Alpha => Source1Alpha,
-        /// 1 minus the second fragment output alpha.
         OneMinusSrc1Alpha => OneMinusSource1Alpha,
     }
 }
 
-mtl_enum! {
-    /// A blend operation.
+mtl_map! {
     BlendOp => MTLBlendOperation {
-        /// source + destination.
         Add => Add,
-        /// source - destination.
         Subtract => Subtract,
-        /// destination - source.
         ReverseSubtract => ReverseSubtract,
-        /// The smaller value.
         Min => Min,
-        /// The larger value.
         Max => Max,
     }
 }
@@ -165,199 +158,90 @@ mtl_enum! {
     }
 }
 
-mtl_enum! {
-    /// The primitive class a pipeline draws. Metal needs it when the pipeline is built.
+mtl_map! {
     TopologyClass => MTLPrimitiveTopologyClass {
-        /// No class. Metal accepts a vertex shader that writes the point size, but not layered rendering.
         Unspecified => Unspecified,
-        /// Points.
         Point => Point,
-        /// Lines.
         Line => Line,
-        /// Triangles.
         Triangle => Triangle,
     }
 }
 
-mtl_enum! {
-    /// The format of one vertex attribute.
+mtl_map! {
     VertexFormat => MTLVertexFormat {
-        /// One f32.
         Float => Float,
-        /// Two f32.
         Float2 => Float2,
-        /// Three f32.
         Float3 => Float3,
-        /// Four f32.
         Float4 => Float4,
-        /// One u32.
         UInt => UInt,
-        /// Two u32.
         UInt2 => UInt2,
-        /// Three u32.
         UInt3 => UInt3,
-        /// Four u32.
         UInt4 => UInt4,
-        /// One i32.
         Int => Int,
-        /// Two i32.
         Int2 => Int2,
-        /// Three i32.
         Int3 => Int3,
-        /// Four i32.
         Int4 => Int4,
-        /// Two f16.
         Half2 => Half2,
-        /// Four f16.
         Half4 => Half4,
-        /// Four u8, normalised.
         UChar4Norm => UChar4Normalized,
-        /// Four u8, normalised, in BGRA order.
         UChar4NormBgra => UChar4Normalized_BGRA,
-        /// Four i8, normalised.
         Char4Norm => Char4Normalized,
-        /// Two u16, normalised.
         UShort2Norm => UShort2Normalized,
-        /// Four u16, normalised.
         UShort4Norm => UShort4Normalized,
-        /// Two i16, normalised.
         Short2Norm => Short2Normalized,
-        /// Four i16, normalised.
         Short4Norm => Short4Normalized,
-        /// Four u8, not normalised.
         UChar4 => UChar4,
-        /// Four u16, not normalised.
         UShort4 => UShort4,
-        /// Four i16, not normalised.
         Short4 => Short4,
-        /// 10-10-10-2 signed, normalised.
         Int1010102Norm => Int1010102Normalized,
-        /// 10-10-10-2 unsigned, normalised.
         UInt1010102Norm => UInt1010102Normalized,
-        /// One u8, not normalised.
         UChar => UChar,
-        /// One i8, not normalised.
         Char => Char,
-        /// One u8, normalised.
         UCharNorm => UCharNormalized,
-        /// One i8, normalised.
         CharNorm => CharNormalized,
-        /// Two u8, not normalised.
         UChar2 => UChar2,
-        /// Two i8, not normalised.
         Char2 => Char2,
-        /// Two u8, normalised.
         UChar2Norm => UChar2Normalized,
-        /// Two i8, normalised.
         Char2Norm => Char2Normalized,
-        /// Three u8, not normalised.
         UChar3 => UChar3,
-        /// Three i8, not normalised.
         Char3 => Char3,
-        /// Three u8, normalised.
         UChar3Norm => UChar3Normalized,
-        /// Three i8, normalised.
         Char3Norm => Char3Normalized,
-        /// Four i8, not normalised.
         Char4 => Char4,
-        /// One u16, not normalised.
         UShort => UShort,
-        /// One i16, not normalised.
         Short => Short,
-        /// One u16, normalised.
         UShortNorm => UShortNormalized,
-        /// One i16, normalised.
         ShortNorm => ShortNormalized,
-        /// Two u16, not normalised.
         UShort2 => UShort2,
-        /// Two i16, not normalised.
         Short2 => Short2,
-        /// Three u16, not normalised.
         UShort3 => UShort3,
-        /// Three i16, not normalised.
         Short3 => Short3,
-        /// Three u16, normalised.
         UShort3Norm => UShort3Normalized,
-        /// Three i16, normalised.
         Short3Norm => Short3Normalized,
-        /// One f16.
         Half => Half,
-        /// Three f16.
         Half3 => Half3,
-        /// 11-11-10 float.
         FloatRg11B10 => FloatRG11B10,
     }
 }
 
-mtl_enum! {
-    /// How often a vertex buffer advances.
+mtl_map! {
     StepFunction => MTLVertexStepFunction {
-        /// Never, every vertex reads the same data.
         Constant => Constant,
-        /// Once per vertex.
         PerVertex => PerVertex,
-        /// Once per instance (or per `step_rate` instances).
         PerInstance => PerInstance,
     }
 }
 
-/// The blending of one colour attachment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BlendState {
-    /// The factor for the source colour.
-    pub src_rgb: BlendFactor,
-    /// The factor for the destination colour.
-    pub dst_rgb: BlendFactor,
-    /// The operation on the colour.
-    pub op_rgb: BlendOp,
-    /// The factor for the source alpha.
-    pub src_alpha: BlendFactor,
-    /// The factor for the destination alpha.
-    pub dst_alpha: BlendFactor,
-    /// The operation on the alpha.
-    pub op_alpha: BlendOp,
+/// The Metal side of a colour target.
+pub(crate) trait ColorTargetMtl {
+    /// The write mask.
+    fn mask(&self) -> MTLColorWriteMask;
+    /// Whether blending is on.
+    fn blend_state(&self) -> MTL4BlendState;
 }
 
-impl BlendState {
-    /// Classic alpha blending: source alpha over the destination.
-    pub const ALPHA: Self = Self {
-        src_rgb: BlendFactor::SrcAlpha,
-        dst_rgb: BlendFactor::OneMinusSrcAlpha,
-        op_rgb: BlendOp::Add,
-        src_alpha: BlendFactor::One,
-        dst_alpha: BlendFactor::OneMinusSrcAlpha,
-        op_alpha: BlendOp::Add,
-    };
-}
-
-/// One colour attachment of a render pipeline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ColorTarget {
-    /// The pixel format.
-    pub format: Format,
-    /// The blending, or none for plain replacement.
-    pub blend: Option<BlendState>,
-    /// The channels that are written, as bits R=1, G=2, B=4, A=8.
-    pub write_mask: u8,
-}
-
-impl ColorTarget {
-    /// A target without blending that writes all channels.
-    pub const fn new(format: Format) -> Self {
-        Self {
-            format,
-            blend: None,
-            write_mask: 0xF,
-        }
-    }
-
-    /// The same target with blending.
-    pub const fn with_blend(mut self, blend: BlendState) -> Self {
-        self.blend = Some(blend);
-        self
-    }
-
-    pub(crate) fn mask(&self) -> MTLColorWriteMask {
+impl ColorTargetMtl for ColorTarget {
+    fn mask(&self) -> MTLColorWriteMask {
         let mut m = MTLColorWriteMask::None;
         for (bit, v) in [
             (1, MTLColorWriteMask::Red),
@@ -372,7 +256,7 @@ impl ColorTarget {
         m
     }
 
-    pub(crate) fn blend_state(&self) -> MTL4BlendState {
+    fn blend_state(&self) -> MTL4BlendState {
         if self.blend.is_some() {
             MTL4BlendState::Enabled
         } else {
@@ -381,41 +265,14 @@ impl ColorTarget {
     }
 }
 
-/// One vertex attribute.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct VertexAttribute {
-    /// The data format.
-    pub format: VertexFormat,
-    /// The byte offset inside the vertex.
-    pub offset: u32,
-    /// The vertex buffer slot.
-    pub buffer: u32,
+/// The Metal side of a vertex layout.
+pub(crate) trait VertexDescriptorMtl {
+    /// The Metal descriptor, or none for an empty layout.
+    fn build(&self) -> Option<Retained<MTLVertexDescriptor>>;
 }
 
-/// One vertex buffer layout.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct VertexLayout {
-    /// The vertex buffer slot.
-    pub buffer: u32,
-    /// The distance between two vertices in bytes.
-    pub stride: u32,
-    /// How often the buffer advances.
-    pub step: StepFunction,
-    /// The step rate for `PerInstance`.
-    pub step_rate: u32,
-}
-
-/// The vertex input of a pipeline. An empty descriptor means the shader fetches its own vertices.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct VertexDescriptor {
-    /// The attributes, by attribute index.
-    pub attributes: Vec<(u32, VertexAttribute)>,
-    /// The buffer layouts.
-    pub layouts: Vec<VertexLayout>,
-}
-
-impl VertexDescriptor {
-    pub(crate) fn build(&self) -> Option<Retained<MTLVertexDescriptor>> {
+impl VertexDescriptorMtl for VertexDescriptor {
+    fn build(&self) -> Option<Retained<MTLVertexDescriptor>> {
         if self.attributes.is_empty() && self.layouts.is_empty() {
             return None;
         }

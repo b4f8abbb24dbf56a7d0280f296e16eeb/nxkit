@@ -43,23 +43,7 @@ pub struct ProgramRef {
 }
 
 /// The blend state of one colour target (`NVNblendFunc` and `NVNblendEquation` values).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct BlendDetail {
-    /// Whether blending is on.
-    pub enable: bool,
-    /// The source factor of RGB.
-    pub src_rgb: u32,
-    /// The destination factor of RGB.
-    pub dst_rgb: u32,
-    /// The equation of RGB.
-    pub op_rgb: u32,
-    /// The source factor of alpha.
-    pub src_alpha: u32,
-    /// The destination factor of alpha.
-    pub dst_alpha: u32,
-    /// The equation of alpha.
-    pub op_alpha: u32,
-}
+pub use nxkit_pipestate::nvn::Blend as BlendDetail;
 
 /// The stencil state of one face (`NVNstencilFunc` and `NVNstencilOp` values).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -113,17 +97,7 @@ pub struct RasterDetail {
 }
 
 /// One vertex attribute.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct AttributeDetail {
-    /// The attribute index. It is the `location` of the vertex input of the shader.
-    pub location: u32,
-    /// The `NVNformat` value of the attribute.
-    pub format: u32,
-    /// The byte offset in the vertex.
-    pub offset: u32,
-    /// The stream (vertex buffer binding) the attribute reads.
-    pub stream: u32,
-}
+pub use nxkit_pipestate::nvn::Attribute as AttributeDetail;
 
 /// One vertex stream with its buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -138,6 +112,18 @@ pub struct StreamDetail {
     pub stride: u32,
     /// The instance divisor. 0 means per vertex.
     pub divisor: u32,
+}
+
+impl nxkit_pipestate::nvn::StreamState for StreamDetail {
+    fn index(&self) -> u32 {
+        self.index
+    }
+    fn stride(&self) -> u32 {
+        self.stride
+    }
+    fn divisor(&self) -> u32 {
+        self.divisor
+    }
 }
 
 /// The arguments of a draw.
