@@ -49,6 +49,7 @@ const TYPED: &[&str] = &[
     "sf_services",
     "set_refresh",
     "fps_free",
+    "temporal_upscale",
 ];
 
 /// The settings of the title module. The names follow `game.json`.
@@ -128,6 +129,8 @@ pub struct Settings {
     pub shared_font_decode: bool,
     /// The services the game opens through `nn::sf::hipc` that the system service answers with zeroed output.
     pub sf_services: Vec<String>,
+    /// The draws that the encoder replaces by MetalFX temporal upscaling (`temporal_upscale`, optional, R72).
+    pub temporal_upscale: Option<crate::tupscale::TemporalUpscale>,
     /// The keys that no core mechanism names, in key order. The host does not read them. The title-addressed service
     /// reads them.
     pub extra: Vec<(String, Value)>,
@@ -274,6 +277,10 @@ impl Settings {
             sf_services: match v.get("sf_services") {
                 None | Some(Value::Null) => Vec::new(),
                 Some(_) => strings(v, "sf_services")?,
+            },
+            temporal_upscale: match v.get("temporal_upscale") {
+                None | Some(Value::Null) => None,
+                Some(t) => Some(crate::tupscale::parse(t)?),
             },
             extra: extra(v),
         })

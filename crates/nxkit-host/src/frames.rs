@@ -73,6 +73,9 @@ pub fn gpu_settings(
         scale: run.host.scale,
         // `NXKIT_PRESENT_UPSCALE`, a launch option: MetalFX in the present (R70).
         present_upscale: run.host.present_upscale,
+        // `temporal_upscale` of the title: MetalFX temporal upscaling in place of the game's upscale pass (R72).
+        // `NXKIT_TEMPORAL_UPSCALE=0` turns it off in the encoder.
+        temporal_upscale: settings.temporal_upscale.as_ref().map(temporal_upscale),
         compile_bases: run.gpu_bases,
         specialize: run.gpu_specialize,
         // The encoder makes the pipelines of the recorded list before it returns; a long wait shows a loading screen.
@@ -90,6 +93,42 @@ pub fn gpu_settings(
             Platform::Ounce => GobOrder::Switch2,
         },
         ..GpuSettings::default()
+    }
+}
+
+/// The temporal upscale of `game.json` in the types of the encoder.
+fn temporal_upscale(t: &crate::tupscale::TemporalUpscale) -> nxkit_gpu::TemporalUpscale {
+    let draw = |d: &crate::tupscale::DrawTexture| nxkit_gpu::DrawTexture {
+        fragment: d.fragment.clone(),
+        slot: d.slot,
+    };
+    nxkit_gpu::TemporalUpscale {
+        upscale: draw(&t.upscale),
+        source: nxkit_gpu::TemporalSource {
+            fragment: t.source.fragment.clone(),
+            depth_slot: t.source.depth_slot,
+            velocity_slot: t.source.velocity_slot,
+            view: nxkit_gpu::UboSlot {
+                stage: match t.source.view.0 {
+                    crate::tupscale::UboStage::Vertex => nxkit_gpu::detail::Stage::Vertex,
+                    crate::tupscale::UboStage::Fragment => nxkit_gpu::detail::Stage::Fragment,
+                },
+                slot: t.source.view.1,
+            },
+        },
+        passthrough: t.passthrough.iter().map(draw).collect(),
+        view: nxkit_gpu::ViewLayout {
+            clip_to_prev_clip: t.view[0],
+            jitter: t.view[1],
+            view_size: t.view[2],
+        },
+        velocity: nxkit_gpu::VelocityCode {
+            scale: t.velocity_scale,
+            bias: t.velocity_bias,
+            y_up: t.velocity_y_up,
+            zero_means_camera: t.zero_means_camera,
+        },
+        depth_reversed: t.depth_reversed,
     }
 }
 

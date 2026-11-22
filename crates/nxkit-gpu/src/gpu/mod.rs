@@ -97,6 +97,8 @@ pub struct GpuConfig {
     pub batch_hooks: Option<nxkit_metal::BatchHooks>,
     /// The CPU runs one frame ahead of the GPU (`game.json` key `overlap`).
     pub overlap: bool,
+    /// The draws that the temporal upscale replaces (`temporal_upscale` of `game.json`, R72), or none.
+    pub temporal_upscale: Option<crate::TemporalUpscale>,
 }
 
 impl crate::GpuSettings {
@@ -123,6 +125,7 @@ impl crate::GpuSettings {
             build_id: self.build_id,
             prewarm_screen: self.prewarm_screen.clone(),
             overlap: self.overlap,
+            temporal_upscale: self.temporal_upscale.clone(),
             batch_hooks: self.batch_hooks.map(|h| nxkit_metal::BatchHooks {
                 done: h.done,
                 committed: h.committed,
@@ -145,6 +148,7 @@ impl Default for GpuConfig {
             prewarm_screen: crate::ScreenHook::default(),
             batch_hooks: None,
             overlap: false,
+            temporal_upscale: None,
         }
     }
 }
@@ -199,6 +203,8 @@ pub struct Gpu {
     vis_pool: Arc<crate::queries::VisPool>,
     /// The learner and the per-slot copies of the storage ranges that the overlap renames (`rename`). The backend shares it.
     rename: Arc<crate::rename::Renamer>,
+    /// The temporal upscale of `game.json`, when it is on (`tupscale`).
+    tupscale: Option<crate::tupscale::Tupscale>,
 }
 
 impl Gpu {
@@ -257,6 +263,7 @@ impl Gpu {
             native: crate::native::Native::new(),
             vis_pool: Arc::default(),
             rename,
+            tupscale: crate::tupscale::Tupscale::new(ctx, config.temporal_upscale),
         })
     }
 

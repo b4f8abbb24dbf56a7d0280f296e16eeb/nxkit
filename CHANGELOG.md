@@ -13,6 +13,19 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- A title or its family can set console variables of the game (`BuildHooks::console_vars`, R73). The family writes
+  them into files of the game's own format and `nxb build` adds the files to the app's RomFS. The family `unreal`
+  writes an extra pak, `<Project>-<Platform>_<n+1>_P.pak`, with a copy of the project's `DefaultDeviceProfiles.ini`
+  whose base device profile sets the variables. A Shipping build ignores `-ExecCmds`, but it mounts the pak.
+  OCTOPATH TRAVELER sets `r.ScreenPercentage=50`, `r.DefaultFeature.AntiAliasing=2` and `r.TemporalAASamples=8` for
+  the temporal upscaler.
+- A title can replace a game's own temporal anti-aliasing and upscale pass by MetalFX temporal upscaling (R72).
+  `temporal_upscale` of `game.json` names the draws. The encoder leaves out the anti-aliasing draws and copies the
+  jittered scene into their target, writes a motion texture, runs MetalFX's temporal scaler and draws its output into
+  the back buffer before the game's UI. When an input is missing or does not fit, the game's draws run and the log
+  says why (`nxkit-gpu: temporal upscale: ...`). `NXKIT_TEMPORAL_UPSCALE=0` turns it off, `NXKIT_DIAG=tupscale` prints
+  the textures and the view values, and the knobs `tupjx`, `tupjy`, `tupmx` and `tupmy` flip the signs of the jitter
+  and the motion.
 - The engine family `unreal` (`nxfamily-unreal`) holds a fact of every Unreal Engine 4 and 5 game: the frame limit is
   the console variable `t.MaxFPS`. OCTOPATH TRAVELER names the family and runs at its `fps_target` of 60 again
   (the game's config sets 30). Its `NXKIT_FPS_TARGET` row offers 30 and 60.

@@ -172,6 +172,41 @@ impl TemporalUpscaler {
         f: &TemporalFrame<'_>,
         output: &Texture,
     ) -> Result<()> {
+        self.accepts(f, output)?;
+        let raw = &self.inner.raw;
+        // SAFETY: the textures are live and match the description. The command buffer keeps them and the scaler alive
+        // until the GPU is done, and the caller has no pass open on it.
+        unsafe {
+            raw.setColorTexture(Some(f.color.raw()));
+            raw.setDepthTexture(Some(f.depth.raw()));
+            raw.setMotionTexture(Some(f.motion.raw()));
+            raw.setReactiveMaskTexture(f.reactive.map(Texture::raw));
+            raw.setOutputTexture(Some(output.raw()));
+            raw.setInputContentWidth(f.content.0 as usize);
+            raw.setInputContentHeight(f.content.1 as usize);
+            raw.setJitterOffsetX(f.jitter.0);
+            raw.setJitterOffsetY(f.jitter.1);
+            raw.setMotionVectorScaleX(f.motion_scale.0);
+            raw.setMotionVectorScaleY(f.motion_scale.1);
+            raw.setDepthReversed(f.depth_reversed);
+            raw.setReset(f.reset);
+            raw.encodeToCommandBuffer(cmd.raw());
+        }
+        cmd.retain((
+            self.inner.clone(),
+            f.color.clone(),
+            f.depth.clone(),
+            f.motion.clone(),
+            f.reactive.cloned(),
+            output.clone(),
+        ));
+        Ok(())
+    }
+
+    /// Checks a frame without encoding it: the sizes and formats of the description and the usages that MetalFX asks
+    /// for. [`TemporalUpscaler::encode`] makes the same checks. A caller that must decide before it encodes anything
+    /// asks here.
+    pub fn accepts(&self, f: &TemporalFrame<'_>, output: &Texture) -> Result<()> {
         self.check(f, output)?;
         let raw = &self.inner.raw;
         // SAFETY: the scaler is live. These are plain getters.
@@ -209,32 +244,6 @@ impl TemporalUpscaler {
                 return Err(MetalError::Invalid(why));
             }
         }
-        // SAFETY: the textures are live and match the description. The command buffer keeps them and the scaler alive
-        // until the GPU is done, and the caller has no pass open on it.
-        unsafe {
-            raw.setColorTexture(Some(f.color.raw()));
-            raw.setDepthTexture(Some(f.depth.raw()));
-            raw.setMotionTexture(Some(f.motion.raw()));
-            raw.setReactiveMaskTexture(f.reactive.map(Texture::raw));
-            raw.setOutputTexture(Some(output.raw()));
-            raw.setInputContentWidth(f.content.0 as usize);
-            raw.setInputContentHeight(f.content.1 as usize);
-            raw.setJitterOffsetX(f.jitter.0);
-            raw.setJitterOffsetY(f.jitter.1);
-            raw.setMotionVectorScaleX(f.motion_scale.0);
-            raw.setMotionVectorScaleY(f.motion_scale.1);
-            raw.setDepthReversed(f.depth_reversed);
-            raw.setReset(f.reset);
-            raw.encodeToCommandBuffer(cmd.raw());
-        }
-        cmd.retain((
-            self.inner.clone(),
-            f.color.clone(),
-            f.depth.clone(),
-            f.motion.clone(),
-            f.reactive.cloned(),
-            output.clone(),
-        ));
         Ok(())
     }
 

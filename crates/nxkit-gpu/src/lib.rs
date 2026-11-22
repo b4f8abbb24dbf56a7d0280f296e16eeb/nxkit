@@ -76,6 +76,7 @@ pub mod snapshot;
 pub mod stats;
 mod textures;
 mod translate;
+mod tupscale;
 mod ubotex;
 mod upload;
 mod walk;
@@ -91,7 +92,8 @@ pub use pools::{
 pub use prewarm_screen::{PrewarmScreen, ScreenHook};
 pub use report::EncodeReport;
 pub use settings::{
-    GpuEnv, GpuSettings, NativeNet, install as install_env, pipeline_bases, pipeline_specialize,
+    DrawTexture, GpuEnv, GpuSettings, NativeNet, TemporalSource, TemporalUpscale, UboSlot,
+    VelocityCode, ViewLayout, install as install_env, pipeline_bases, pipeline_specialize,
 };
 pub use shown::when_shown;
 pub use skip::Skip;

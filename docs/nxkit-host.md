@@ -82,7 +82,28 @@ The title module and its family module answer the settings through their `nxtitl
 
 Required keys: `args` (the program arguments of the game, split at white space, after `game` in `argv`), `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target` (`NXKIT_FPS_TARGET` wins where the title offers the rate, see launcher.json), `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
-Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`), `spatial_audio` (a flag, false when absent: the default of `NXKIT_SPATIAL_AUDIO`, which wins, see launcher.json) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
+Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`), `spatial_audio` (a flag, false when absent: the default of `NXKIT_SPATIAL_AUDIO`, which wins, see launcher.json), `sf_services` (a list of service names that the system service answers with zeroed output) and `temporal_upscale` (below). Any other import that nothing provides stops the load.
+
+`temporal_upscale` names the draws that the encoder replaces by MetalFX temporal upscaling (R72, docs/nxkit-gpu.md, "Temporal upscale"). The host reads it in `tupscale.rs` and passes it in `GpuSettings::temporal_upscale`. `NXKIT_TEMPORAL_UPSCALE=0` turns it off. A program is named by the 16 hex digit key of its fragment shader, a texture by its fragment texture slot. A key that starts with `_` is a note. Every key is required except `passthrough`, which is an empty list when absent.
+
+```json
+"temporal_upscale": {
+  "upscale": { "fragment": "<key>", "color_slot": 0 },
+  "source": { "fragment": "<key>", "depth_slot": 3, "velocity_slot": 0,
+              "view": { "stage": "fragment", "slot": 0 } },
+  "passthrough": [ { "fragment": "<key>", "slot": 2 } ],
+  "view": { "clip_to_prev_clip": 1760, "jitter": 1824, "view_size": 1888 },
+  "velocity": { "scale": [4.008, 4.008], "bias": [-2.00397, -2.00397], "y_up": true, "zero_means_camera": true },
+  "depth_reversed": true
+}
+```
+
+- `upscale`: the game's upscale draw and the slot of the jittered picture it reads. The scaler's output replaces what the draw writes into colour attachment 0 of its pass.
+- `source`: the draw whose bindings give the depth, the velocity and the view uniform buffer (`stage` is `vertex` or `fragment`). The last such draw before the upscale draw is used.
+- `passthrough`: draws that are replaced by a copy of the texture at `slot` into colour attachment 0 of their pass.
+- `view`: the byte offsets in the view uniform buffer of the clip to previous clip matrix (16 floats by rows, for a row vector), the jitter of this frame in clip units (2 floats) and the view size in pixels (2 floats).
+- `velocity`: a texel `raw` of the velocity texture is the velocity `raw * scale + bias` in clip units, this position minus the previous one. `y_up` says that its y points up. With `zero_means_camera` a texel of 0 in both channels means that no velocity was written, and the camera motion from the depth and the matrix stands in.
+- `depth_reversed`: the depth is 1 at the near plane.
 
 Any other key goes unread, in order, to the service that the title module addressed. The core has no name for it. An engine setting is one example.
 

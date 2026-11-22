@@ -54,6 +54,87 @@ pub struct GpuSettings {
     pub screen: std::sync::Arc<nxkit_nvn::screen::Screen>,
     /// How the present scales a picture that is smaller than the drawable (R70).
     pub present_upscale: nxkit_metal::PresentUpscale,
+    /// The draws that the temporal upscale replaces (`temporal_upscale` of `game.json`, R72), or none.
+    /// `NXKIT_TEMPORAL_UPSCALE=0` turns it off.
+    pub temporal_upscale: Option<TemporalUpscale>,
+}
+
+/// The draws of a game that the temporal upscale replaces and how it reads their inputs (R72, `tupscale`). The
+/// fragment programs are named by their shader keys and the textures by their fragment texture slots.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TemporalUpscale {
+    /// The upscale draw: the first draw of its render pass. `slot` is the jittered picture of the input size. The
+    /// scaler's picture goes to colour attachment 0 of its pass instead.
+    pub upscale: DrawTexture,
+    /// The draw whose bindings give the depth, the velocity and the view uniform buffer: the last one before the
+    /// upscale draw.
+    pub source: TemporalSource,
+    /// The draws that are replaced by a copy of the texture at `slot` into colour attachment 0 of their pass. Each is
+    /// the first draw of its pass.
+    pub passthrough: Vec<DrawTexture>,
+    /// Where the view uniform buffer keeps its values.
+    pub view: ViewLayout,
+    /// How a texel of the velocity texture turns into a velocity.
+    pub velocity: VelocityCode,
+    /// True when the depth is 1 at the near plane.
+    pub depth_reversed: bool,
+}
+
+/// A draw by its fragment program and one of its fragment texture slots.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DrawTexture {
+    /// The shader key of the fragment program.
+    pub fragment: String,
+    /// The fragment texture slot.
+    pub slot: u32,
+}
+
+/// The draw that gives the inputs of the scaler besides the picture.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemporalSource {
+    /// The shader key of the fragment program.
+    pub fragment: String,
+    /// The fragment texture slot of the scene depth.
+    pub depth_slot: u32,
+    /// The fragment texture slot of the velocity.
+    pub velocity_slot: u32,
+    /// The uniform buffer that holds the view values.
+    pub view: UboSlot,
+}
+
+/// A uniform buffer slot of one stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UboSlot {
+    /// The stage.
+    pub stage: crate::detail::Stage,
+    /// The slot.
+    pub slot: u32,
+}
+
+/// The byte offsets of the view values in their uniform buffer. The floats are little-endian.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewLayout {
+    /// The matrix from this frame's clip space to the previous frame's, 16 floats by rows, for a row vector.
+    pub clip_to_prev_clip: u32,
+    /// The jitter of this frame in clip units (x, y), followed by the previous one.
+    pub jitter: u32,
+    /// The view size in pixels (x, y), followed by its inverse.
+    pub view_size: u32,
+}
+
+/// The velocity `V = raw * scale + bias` of a texel `raw` of the velocity texture, in clip units, current minus
+/// previous position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VelocityCode {
+    /// The factor per channel.
+    pub scale: [f32; 2],
+    /// The offset per channel.
+    pub bias: [f32; 2],
+    /// True when `V.y` points up, as clip space does.
+    pub y_up: bool,
+    /// True when a texel of exactly 0 in both channels has no velocity written, and the camera motion from the
+    /// depth and the matrix stands in.
+    pub zero_means_camera: bool,
 }
 
 /// [`GpuSettings::compile_bases`] from the settings of the host (`NXKIT_PIPELINE_BASES`).
@@ -89,6 +170,7 @@ impl Default for GpuSettings {
             timed_present: std::sync::Arc::default(),
             screen: std::sync::Arc::default(),
             present_upscale: nxkit_metal::PresentUpscale::Off,
+            temporal_upscale: None,
         }
     }
 }
@@ -214,6 +296,8 @@ pub struct GpuEnv {
     pub pipeline_record: bool,
     /// `NXKIT_ENC_THREAD=1`: the encoder thread, besides the `game.json` key.
     pub enc_thread: bool,
+    /// `NXKIT_TEMPORAL_UPSCALE` (on unless `0`): the temporal upscale of `game.json` replaces the game's draws (R72).
+    pub temporal_upscale: bool,
 }
 
 impl Default for GpuEnv {
@@ -315,6 +399,7 @@ impl GpuEnv {
             shard_trim: on("NXKIT_SHARD_TRIM"),
             pipeline_record: on("NXKIT_PIPELINE_RECORD"),
             enc_thread: one("NXKIT_ENC_THREAD"),
+            temporal_upscale: on("NXKIT_TEMPORAL_UPSCALE"),
         }
     }
 

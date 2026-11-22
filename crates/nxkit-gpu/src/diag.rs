@@ -160,6 +160,12 @@ const KNOBS: &[&str] = &[
     // The draws of the programs of `NXKIT_DIAG_FS` print nothing and use none of their lines: set it until the game
     // reaches the scene to look at, then clear it.
     "fsquiet",
+    // The temporal upscale (`tupscale`) flips the sign of the jitter in x (`tupjx`) or y (`tupjy`), or of the motion
+    // in x (`tupmx`) or y (`tupmy`), to find a wrong sign while the game runs.
+    "tupjx",
+    "tupjy",
+    "tupmx",
+    "tupmy",
 ];
 
 /// Whether `NXKIT_KNOB` (or the file of `NXKIT_KNOB_FILE`) names `name`.

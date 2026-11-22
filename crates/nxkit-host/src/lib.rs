@@ -72,6 +72,7 @@ pub mod sys;
 pub mod texreport;
 #[cfg(target_os = "macos")]
 pub mod thread;
+pub mod tupscale;
 #[cfg(target_os = "macos")]
 pub mod wire;
 

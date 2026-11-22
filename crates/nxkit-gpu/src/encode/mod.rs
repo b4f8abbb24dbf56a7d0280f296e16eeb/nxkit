@@ -17,6 +17,8 @@ pub(crate) struct EncodeCtx<'a> {
     pub(crate) icbs: &'a std::sync::Mutex<crate::icbs::Icbs>,
     /// The run of dispatches that a native plan replaces in this frame, when there is one.
     pub(crate) native: Option<&'a crate::native::Prepared>,
+    /// The draws that the temporal upscale replaces in this frame, when it runs (`tupscale`).
+    pub(crate) tupscale: Option<&'a crate::tupscale::Prepared>,
     /// The visibility offsets and counted draws of the GPU counters of the frame (`queries`).
     pub(crate) queries: Option<&'a crate::queries::FrameQueries>,
     /// The pass profile of this frame (`NXKIT_DIAG=passprof`).
@@ -236,7 +238,7 @@ pub(crate) fn render_pass(
             );
         }
     }
-    let s = match s {
+    let mut s = match s {
         Ok(s) => s,
         Err(why) => return lost(stats, why),
     };
@@ -250,6 +252,11 @@ pub(crate) fn render_pass(
     // The draws of a slot of the GPU counters count their samples (`queries`).
     let vis = sh.queries.and_then(|q| Some((q, q.pass(index)?)));
     let visibility = vis.as_ref().map(|(_, v)| v.buffer);
+    // The temporal upscale encodes its own passes in place of the first draw (`tupscale`). The pass then loads colour 0.
+    let replaced = !range.is_empty()
+        && sh
+            .tupscale
+            .is_some_and(|t| t.before_pass(sh.ctx, cb, scratch, range.start, &mut s.desc));
     let scan = (sh.probes.render)(sh, cb, index, pass, range.clone(), &s.desc);
     cb.layer_next_pass(s.layers);
     let Ok(mut rp) =
@@ -274,6 +281,13 @@ pub(crate) fn render_pass(
     }
     if let Some(dep) = sh.barriers.before.get(index).copied().flatten()
         && rp.encode(&RenderCommand::Depend(dep)).is_err()
+    {
+        stats.skipped[Skip::Encode as usize] += 1;
+    }
+    if replaced
+        && rp
+            .encode(&RenderCommand::Depend(crate::tupscale::LOAD_AFTER_COPY))
+            .is_err()
     {
         stats.skipped[Skip::Encode as usize] += 1;
     }
@@ -317,6 +331,10 @@ pub(crate) fn render_pass(
     let mut counting: Option<u64> = None;
     let mut n = range.start;
     while n < range.end {
+        if replaced && n == range.start {
+            n += 1;
+            continue;
+        }
         if is_off(n) {
             stats.render_cond_draws += 1;
             n += 1;
