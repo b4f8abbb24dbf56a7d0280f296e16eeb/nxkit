@@ -20,9 +20,6 @@ pub struct HostEnv {
     pub mem_reserve: Option<String>,
     /// `NXKIT_MEM_ALIAS` as given: the alias region in place of the title's.
     pub mem_alias: Option<String>,
-    /// `NXKIT_UE_HEAP` as given: the arena of the Unreal heap at the end of the alias region, in place of 40 % of it
-    /// (a size as `parse_size` reads it; only for a main that names Unreal's FMallocBinned3).
-    pub ue_heap: Option<String>,
     /// `NXKIT_STALL_DUMP` (seconds above 0): with no present on screen for that long, the report of every guest
     /// thread is printed, once per stall.
     pub stall_dump: Option<f64>,
@@ -144,7 +141,6 @@ impl HostEnv {
         HostEnv {
             mem_reserve: env.var("NXKIT_MEM_RESERVE").ok(),
             mem_alias: env.var("NXKIT_MEM_ALIAS").ok(),
-            ue_heap: env.var("NXKIT_UE_HEAP").ok(),
             stall_dump: env
                 .var("NXKIT_STALL_DUMP")
                 .ok()
@@ -333,6 +329,8 @@ pub struct RunSettings {
     pub input: nxkit_svc_input::settings::InputSettings,
     /// The pacing service.
     pub pacing: nxkit_svc_pacing::settings::PacingSettings,
+    /// The Unreal take-overs.
+    pub ue: nxkit_ue::settings::UeSettings,
     /// The encoder.
     #[cfg(target_os = "macos")]
     pub gpu: nxkit_gpu::GpuEnv,
@@ -355,6 +353,7 @@ impl RunSettings {
             video: nxkit_svc_video::settings::VideoSettings::from_env(env),
             input: nxkit_svc_input::settings::InputSettings::from_env(env),
             pacing: nxkit_svc_pacing::settings::PacingSettings::from_env(env),
+            ue: nxkit_ue::settings::UeSettings::from_env(env),
             #[cfg(target_os = "macos")]
             gpu: nxkit_gpu::GpuEnv::from_env(env),
             #[cfg(target_os = "macos")]

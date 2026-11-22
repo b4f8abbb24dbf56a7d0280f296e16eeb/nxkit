@@ -14,12 +14,18 @@
 //!   the heap. Its memory lies in the guest block, so it is GPU visible (NVN pools the engine allocates through it)
 //!   and the kernel's `MapMemory` takes a thread stack from it.
 //!
+//! - [`wire`] is what the host wires: the size of the arena ([`wire::arena_size`]) and the handlers of the
+//!   observation gates by id ([`wire::handlers`]). The host passes the fixups, the kernel's answers and
+//!   [`settings::UeSettings`].
+//!
 //! The functions of the vtable are called by guest code with no Rust context, so the heap is a process-wide value
 //! that [`install`] sets once.
 
 pub mod heap;
 mod layout;
+pub mod settings;
 mod vt;
+pub mod wire;
 
 pub use layout::{LAYOUTS, Layout, layout_for_name_slot};
 pub use vt::{Installed, install};

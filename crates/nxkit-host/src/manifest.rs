@@ -151,17 +151,7 @@ fn heap_of(reserve: u64, alias: u64, stack: u64) -> Result<u64> {
 
 /// A size in bytes: a number, a `0x` number, or a number with `M` (MiB) or `G` (GiB).
 pub(crate) fn parse_size(v: &str) -> Option<u64> {
-    let v = v.trim();
-    let (n, unit) = match v.char_indices().last()? {
-        (i, 'M' | 'm') => (&v[..i], 1 << 20),
-        (i, 'G' | 'g') => (&v[..i], 1 << 30),
-        _ => (v, 1),
-    };
-    let n = match n.strip_prefix("0x") {
-        Some(h) => u64::from_str_radix(h, 16).ok()?,
-        None => n.parse().ok()?,
-    };
-    n.checked_mul(unit)
+    nxkit_abi::env::parse_size(v)
 }
 
 impl Memory {
@@ -516,16 +506,6 @@ mod tests {
             Some((0xd800_0000, 0x800_0000))
         );
         assert!(g.memory.resized(Some(0x1000_0000), None).is_err());
-    }
-
-    #[test]
-    fn reads_sizes() {
-        assert_eq!(parse_size("4096"), Some(4096));
-        assert_eq!(parse_size("0x1000"), Some(4096));
-        assert_eq!(parse_size("512M"), Some(512 << 20));
-        assert_eq!(parse_size(" 6G "), Some(6 << 30));
-        assert_eq!(parse_size("6T"), None);
-        assert_eq!(parse_size(""), None);
     }
 
     #[test]

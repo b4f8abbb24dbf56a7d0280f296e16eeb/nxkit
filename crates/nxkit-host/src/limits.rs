@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn a_found_row_and_a_fixed_row_are_read() {
         let r = rules(
-            r#"[{"what": "Unreal t.MaxFPS", "site": {"found": "UE_CVAR:t.MaxFPS", "add": 16},
+            r#"[{"what": "a limit", "site": {"found": "NAME:limit", "add": 16},
                  "kind": {"id": "fps_f32"}, "copies": 2},
                 {"what": "w", "build": "ab", "site": {"ptr_off": 8, "field": 4},
                  "kind": {"id": "ticks_u32", "scale": 19200000}, "copies": 1}]"#,
@@ -177,10 +177,10 @@ mod tests {
         assert_eq!(
             r.rows[0],
             RowSpec {
-                what: "Unreal t.MaxFPS",
+                what: "a limit",
                 build: None,
                 site: Site::Found {
-                    key: "UE_CVAR:t.MaxFPS",
+                    key: "NAME:limit",
                     add: 16
                 },
                 kind: Kind::FpsF32,
@@ -189,7 +189,7 @@ mod tests {
         );
         assert_eq!(r.rows[1].build, Some("ab"));
         assert_eq!(r.rows[1].kind, Kind::TicksU32 { scale: 19_200_000 });
-        assert_eq!(r.found_keys().collect::<Vec<_>>(), ["UE_CVAR:t.MaxFPS"]);
+        assert_eq!(r.found_keys().collect::<Vec<_>>(), ["NAME:limit"]);
         assert!(r.reflected.is_none());
     }
 

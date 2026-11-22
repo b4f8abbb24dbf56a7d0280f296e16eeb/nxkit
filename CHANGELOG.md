@@ -4,6 +4,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Changed
+
+- The Unreal heap policy moved from `nxkit-host` to `nxkit-ue` (`wire`, `settings`): the 40 % share of the alias
+  region, the 32 MiB steps, the fixups keys `UE_MALLOC_VT` and `UE_MALLOC_SLOT` and `NXKIT_UE_HEAP`. The host wires the
+  observation gates by id and knows no Unreal name. The behaviour is the same. The heap line now starts with
+  `nxkit-ue:`.
+
 ### Added
 
 - The engine family `unreal` (`nxfamily-unreal`) holds a fact of every Unreal Engine 4 and 5 game: the frame limit is

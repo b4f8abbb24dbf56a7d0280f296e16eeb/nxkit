@@ -123,7 +123,7 @@ pub fn run(opts: &Options) -> Result<()> {
     crate::memreport::start(&ctx, &layout, env);
 
     nxkit_rt::nxkit_init(mask);
-    let arena = crate::obswire::arena_size(&placed.game, env, layout.alias.len)?;
+    let arena = crate::obswire::arena_size(&placed.game, &run.ue, layout.alias.len)?;
     sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game, arena)?;
     seams::register_kernel()?;
     seams::register_server(mask)?;
