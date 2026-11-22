@@ -51,6 +51,8 @@ pub struct HostEnv {
     pub mem_report: Option<f64>,
     /// `NXKIT_CRASH_REPORT=0`: no crash handler.
     pub crash_report_off: bool,
+    /// `NXKIT_CONTROL` (on unless `0`): the control socket of the run (`control.rs`, W35).
+    pub control: bool,
     /// `NXKIT_PAUSE_UNFOCUSED=1`: the game pauses when the window loses the focus.
     pub pause_unfocused: bool,
     /// `NXKIT_OP_MODE` (`docked` or `handheld`, a launch option): handheld (`true`) or docked over the mode of the
@@ -188,6 +190,7 @@ impl HostEnv {
                 .ok()
                 .and_then(|v| v.trim().parse().ok()),
             crash_report_off: env.var("NXKIT_CRASH_REPORT").is_ok_and(|v| v == "0"),
+            control: env.var("NXKIT_CONTROL").map_or(true, |v| v.trim() != "0"),
             pause_unfocused: env.var(launch::PAUSE_UNFOCUSED).is_ok_and(|v| v == "1"),
             rumble: env.var(launch::RUMBLE).map_or(true, |v| v.trim() != "0"),
             rumble_gain: in_range(env, launch::RUMBLE_GAIN, 0.0, 3.0).unwrap_or(1.0),
@@ -334,8 +337,6 @@ pub struct RunSettings {
     pub video: nxkit_svc_video::settings::VideoSettings,
     /// The input service.
     pub input: nxkit_svc_input::settings::InputSettings,
-    /// The pacing service.
-    pub pacing: nxkit_svc_pacing::settings::PacingSettings,
     /// The Unreal take-overs.
     pub ue: nxkit_ue::settings::UeSettings,
     /// The encoder.
@@ -359,7 +360,6 @@ impl RunSettings {
             audio: nxkit_svc_audio::settings::AudioSettings::from_env(env),
             video: nxkit_svc_video::settings::VideoSettings::from_env(env),
             input: nxkit_svc_input::settings::InputSettings::from_env(env),
-            pacing: nxkit_svc_pacing::settings::PacingSettings::from_env(env),
             ue: nxkit_ue::settings::UeSettings::from_env(env),
             #[cfg(target_os = "macos")]
             gpu: nxkit_gpu::GpuEnv::from_env(env),
@@ -378,11 +378,21 @@ impl RunSettings {
         nxkit_svc_audio::settings::install(self.audio.clone())?;
         nxkit_svc_video::settings::install(self.video.clone())?;
         nxkit_svc_input::settings::install(self.input.clone())?;
-        nxkit_svc_pacing::settings::install(self.pacing.clone())?;
         #[cfg(target_os = "macos")]
         nxkit_gpu::install_env(self.gpu.clone())?;
         Ok(())
     }
+}
+
+/// The live keys of every crate (W35), for the board of the run. A crate with live settings adds its section here.
+pub fn live_sections() -> Vec<nxkit_abi::live::Section> {
+    vec![
+        nxkit_nvn::settings::LIVE,
+        nxkit_svc_video::settings::LIVE,
+        nxkit_svc_pacing::settings::LIVE,
+        #[cfg(target_os = "macos")]
+        nxkit_gpu::LIVE,
+    ]
 }
 
 #[cfg(test)]

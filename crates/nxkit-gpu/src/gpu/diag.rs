@@ -48,7 +48,7 @@ pub(super) fn pass_shape_diag(
         e.1 += draws as u32;
     }
     eprintln!("DIAG passes by draws: {by_draws:?}");
-    if crate::settings::env().pass_list {
+    if crate::settings::live().pass_list {
         for (i, p) in plan.passes.iter().enumerate() {
             let cmds = &frame.cmds[p.cmds.start as usize..p.cmds.end as usize];
             let draws = cmds

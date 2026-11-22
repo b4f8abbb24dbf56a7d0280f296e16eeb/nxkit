@@ -1,7 +1,8 @@
 //! Opt-in diagnostics that the crates of the GPU path share, and the render health report.
 //!
-//! `NXKIT_DIAG` is a comma separated list of categories (`all` turns every one on). [`on`] reads it once. Every
-//! category, knob and `NXKIT_*` variable is listed in `docs/diagnostics.md`.
+//! `NXKIT_DIAG` is a comma separated list of categories (`all` turns every one on). It is live (W35): [`on`] reads the
+//! value now, and a change of any live setting gives every rate limit of [`first`] its budget again. Every category,
+//! knob and `NXKIT_*` variable is listed in `docs/diagnostics.md`.
 //!
 //! The health report (category `health`) answers "does everything render". Every place that drops, refuses or
 //! degrades work counts it under a [`Reason`] with [`note`] or [`note_n`], always, at the cost of one relaxed atomic
@@ -9,21 +10,48 @@
 //! every [`REPORT_EVERY`] frames, and one line the frame a reason shows up for the first time.
 
 use std::fmt::{self, Write as _};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
 
 /// Whether `NXKIT_DIAG` names `cat` or `all`.
 pub fn on(cat: &str) -> bool {
     // `None` for `all`, else the categories, parsed once by the settings (the call comes once per draw on some paths).
-    crate::settings::settings()
+    crate::settings::live()
         .diag
         .as_ref()
         .is_none_or(|list| list.iter().any(|c| c == cat))
 }
 
-/// True for the first `max` calls with `counter`: the rate limit of a print that can come once per draw or frame.
+/// True for the first `max` calls with `counter` (at most 65535): the rate limit of a print that can come once per
+/// draw or frame. The high 16 bits of the counter hold the live generation (W35), so a change of a live setting gives
+/// the limit its budget again.
 pub fn first(counter: &AtomicU32, max: u32) -> bool {
-    counter.load(Ordering::Relaxed) < max && counter.fetch_add(1, Ordering::Relaxed) < max
+    let tag = ((nxkit_abi::live::generation() & 0xffff) as u32) << 16;
+    let max = max.min(0xffff);
+    let mut v = counter.load(Ordering::Relaxed);
+    loop {
+        let n = if v & 0xffff_0000 == tag {
+            v & 0xffff
+        } else {
+            0
+        };
+        if n >= max {
+            return false;
+        }
+        match counter.compare_exchange_weak(v, tag | (n + 1), Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => return true,
+            Err(now) => v = now,
+        }
+    }
+}
+
+/// True when [`first`] with `counter` and `max` would still give true, without a use of the budget. Code reads the
+/// counter of a rate limit only through these two functions, because its high bits hold the generation.
+pub fn left(counter: &AtomicU32, max: u32) -> bool {
+    let tag = ((nxkit_abi::live::generation() & 0xffff) as u32) << 16;
+    let v = counter.load(Ordering::Relaxed);
+    v & 0xffff_0000 != tag || v & 0xffff < max.min(0xffff)
 }
 
 /// True every `every`th call with `counter`, starting with the first.
@@ -35,8 +63,8 @@ pub fn every(counter: &AtomicU32, every: u32) -> bool {
 
 /// Whether the health report is on (`NXKIT_DIAG=health`).
 pub fn health_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| on("health"))
+    static ON: nxkit_abi::live::Memo = nxkit_abi::live::Memo::new();
+    ON.flag(|| on("health"))
 }
 
 /// The frames between two health reports.

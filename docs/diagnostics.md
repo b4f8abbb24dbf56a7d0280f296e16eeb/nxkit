@@ -6,6 +6,27 @@ The code is in `nxkit_nvn::diag` (the shared `NXKIT_DIAG` parser and the health 
 
 ## Switches
 
+The keys `NXKIT_DIAG`, `NXKIT_DIAG_TEX`, `NXKIT_DIAG_FS`, `NXKIT_DIAG_WATCH`, `NXKIT_WATCH_TEX`, `NXKIT_WATCH_ADDR`,
+`NXKIT_KNOB`, `NXKIT_PAINT_FS`, `NXKIT_SKIP_PROGRAMS`, `NXKIT_GPU_LABELS`, `NXKIT_PASS_LIST` and `NXKIT_PACE_DIAG` are
+live (W35). You can change them while the game runs, through the control socket:
+
+```bash
+tools/nxkit-ctl keys
+```
+
+```bash
+tools/nxkit-ctl set NXKIT_WATCH_TEX=123,456
+```
+
+```bash
+tools/nxkit-ctl log 200
+```
+
+`keys` lists every live key with its value now. `set KEY=VALUE` and `unset KEY` change a key, and the next frame uses
+the new value. A change gives every rate limit its budget again. `log` reads the last lines of the log of the game, and
+`log +CURSOR` reads the lines after an earlier read. `help` lists every verb. Every other key is read at the start
+only, and `set` refuses it. `NXKIT_CONTROL=0` turns the socket off.
+
 | variable | effect |
 |---|---|
 | `NXKIT_DIAG` | Comma separated list of categories (see below). `all` turns on every category. |

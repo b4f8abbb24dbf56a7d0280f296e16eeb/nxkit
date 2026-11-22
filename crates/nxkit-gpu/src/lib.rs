@@ -92,8 +92,8 @@ pub use pools::{
 pub use prewarm_screen::{PrewarmScreen, ScreenHook};
 pub use report::EncodeReport;
 pub use settings::{
-    DrawTexture, GpuEnv, GpuSettings, NativeNet, TemporalSource, TemporalUpscale, UboSlot,
-    VelocityCode, ViewLayout, install as install_env, pipeline_bases, pipeline_specialize,
+    DrawTexture, GpuEnv, GpuLive, GpuSettings, LIVE, NativeNet, TemporalSource, TemporalUpscale,
+    UboSlot, VelocityCode, ViewLayout, install as install_env, pipeline_bases, pipeline_specialize,
 };
 pub use shown::when_shown;
 pub use skip::Skip;

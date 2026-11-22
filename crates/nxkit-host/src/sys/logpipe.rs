@@ -10,7 +10,8 @@
 //! memory at once, another writes the memory to the original file. A game thread then only waits for a copy into the
 //! pipe. The memory holds at most `MAX_QUEUED` bytes. What comes beyond is dropped and counted. At the exit of the
 //! process [`flush`] puts the original file back and writes what is left. A crash report writes to the original file
-//! directly ([`direct_fd`]), because the writer thread does not run after a fatal signal.
+//! directly ([`direct_fd`]), because the writer thread does not run after a fatal signal. The writer also keeps the
+//! last part of the log in memory ([`tail`]) for the `log` command of the control socket.
 
 use std::collections::VecDeque;
 use std::ffi::{c_int, c_void};
@@ -52,6 +53,8 @@ struct Log {
     queued: AtomicU64,
     /// The bytes dropped because the memory was full.
     dropped: AtomicU64,
+    /// The last part of the log, for the control socket.
+    tail: Mutex<crate::logtail::Tail>,
 }
 
 #[derive(Default)]
@@ -166,6 +169,10 @@ fn writer(fd: c_int, log: &'static Log) {
         q.bytes -= chunk.len();
         drop(q);
         write_all(fd, &chunk);
+        log.tail
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(&chunk);
         log.queued.fetch_sub(chunk.len() as u64, Ordering::Relaxed);
     }
 }
@@ -196,6 +203,7 @@ pub fn install() {
             original: AtomicI32::new(-1),
             queued: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
+            tail: Mutex::new(crate::logtail::Tail::default()),
         });
         let (r, w) = (fds[0], fds[1]);
         let started = std::thread::Builder::new()
@@ -219,6 +227,12 @@ pub fn install() {
         close(w);
         atexit(at_exit);
     }
+}
+
+/// Reads the last part of the log with `read`. None when the log does not go through the pipe.
+pub fn tail<R>(read: impl FnOnce(&crate::logtail::Tail) -> R) -> Option<R> {
+    let log = LOG.get()?;
+    Some(read(&log.tail.lock().unwrap_or_else(|e| e.into_inner())))
 }
 
 extern "C" fn at_exit() {

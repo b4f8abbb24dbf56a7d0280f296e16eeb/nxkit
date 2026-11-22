@@ -288,7 +288,7 @@ pub struct Ctx<'a, M: GuestMem> {
 /// The GPU address of `NXKIT_WATCH_ADDR` (hex, `0x` optional): the decoder prints the texture that each record word at
 /// that address resolves to. Diagnostics only.
 fn watch_addr() -> Option<u64> {
-    crate::settings::settings().watch_addr
+    crate::settings::live().watch_addr
 }
 
 /// The bit where a record word keeps the texture id above the GPU address. Texture storage ends below 2^40.

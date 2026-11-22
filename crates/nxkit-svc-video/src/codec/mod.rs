@@ -99,7 +99,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// `NXKIT_DIAG=codec` (or `all`): one line per decoder call, at most 600, to see where a player stops.
 fn diag_codec() -> bool {
-    crate::settings::settings().diag_codec
+    crate::settings::live().diag_codec
 }
 
 pub(crate) fn trace(what: std::fmt::Arguments<'_>) {
@@ -107,7 +107,7 @@ pub(crate) fn trace(what: std::fmt::Arguments<'_>) {
     use std::sync::atomic::{AtomicU32, Ordering};
     static N: AtomicU32 = AtomicU32::new(0);
     // `codec`: the first 600 calls. `codecall`: every call, with the time in ms, to see where a stream sticks late.
-    let s = crate::settings::settings();
+    let s = crate::settings::live();
     let (on, cap) = (s.trace_codec, if s.trace_all { u32::MAX } else { 600 });
     if on && N.fetch_add(1, Ordering::Relaxed) < cap {
         static T0: OnceLock<std::time::Instant> = OnceLock::new();

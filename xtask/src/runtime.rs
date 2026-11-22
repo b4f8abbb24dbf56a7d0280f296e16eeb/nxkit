@@ -7,7 +7,7 @@
 //!   a name or with a name that is not a literal fails everywhere, settings modules included. Variables of the system
 //!   (`HOME`, `TZ`) are read where they are used. The places in [`SETTINGS_EXEMPT`] are allowed.
 //! - `statics` (W26): the process-wide statics (a `static` whose type names `OnceLock`, `OnceCell`, `LazyLock`,
-//!   `Mutex`, `RwLock`, `Condvar`, `Slot` or an `Atomic*`) of each runtime crate are counted and compared with
+//!   `Mutex`, `RwLock`, `Condvar`, `Slot`, `Live`, `Memo` or an `Atomic*`) of each runtime crate are counted and compared with
 //!   `xtask/statics.txt`. More fails. Fewer fails until the file is lowered, so the number only goes down.
 //!
 //! Test code is left out, as in `modules`.
@@ -61,7 +61,7 @@ fn key_reads(toks: &[(Tok, usize)]) -> Vec<(usize, String)> {
 
 /// The types that make a static process-wide state.
 const STATE_TYPES: &[&str] = &[
-    "OnceLock", "OnceCell", "LazyLock", "Mutex", "RwLock", "Condvar", "Slot",
+    "OnceLock", "OnceCell", "LazyLock", "Mutex", "RwLock", "Condvar", "Slot", "Live", "Memo",
 ];
 
 fn ident(t: Option<&(Tok, usize)>) -> Option<&str> {

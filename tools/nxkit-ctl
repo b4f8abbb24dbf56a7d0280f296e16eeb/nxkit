@@ -1,0 +1,62 @@
+#!/bin/sh
+# The client of the control socket of a running game (W35, crates/nxkit-host/src/control.rs).
+#
+# Usage: tools/nxkit-ctl [-p PID] VERB [ARGS...]
+#        tools/nxkit-ctl list
+#
+# Without -p the client talks to the newest running game. `list` prints the running games, one pid and socket per
+# line. Examples:
+#   tools/nxkit-ctl keys
+#   tools/nxkit-ctl set NXKIT_WATCH_TEX=123,456
+#   tools/nxkit-ctl set NXKIT_DIAG=hitch,health
+#   tools/nxkit-ctl log 200
+#
+# The answer goes to stdout without the status line. The exit status is 0 for `.ok` and 1 for `.err`.
+set -eu
+
+dir="${TMPDIR:-/tmp}"
+dir="${dir%/}/nxkit"
+pid=""
+
+if [ "${1:-}" = "-p" ]; then
+  pid="${2:?-p needs a pid}"
+  shift 2
+fi
+
+alive() {
+  kill -0 "$1" 2>/dev/null
+}
+
+sockets() {
+  # Newest first. A socket of a process that ended is stale and is removed.
+  ls -t "$dir"/*.sock 2>/dev/null | while read -r s; do
+    p=$(basename "$s" .sock)
+    if alive "$p"; then
+      echo "$p $s"
+    else
+      rm -f "$s"
+    fi
+  done
+}
+
+if [ "${1:-}" = "list" ]; then
+  sockets
+  exit 0
+fi
+
+[ $# -gt 0 ] || { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+if [ -n "$pid" ]; then
+  sock="$dir/$pid.sock"
+else
+  sock=$(sockets | head -n 1 | cut -d' ' -f2)
+fi
+[ -n "$sock" ] && [ -S "$sock" ] || { echo "nxkit-ctl: no running game with a control socket in $dir" >&2; exit 3; }
+
+printf '%s\n' "$*" | nc -U "$sock" | awk '
+  /^\.ok$/      { exit 0 }
+  /^\.err /     { sub(/^\.err /, ""); print "nxkit-ctl: " $0 > "/dev/stderr"; failed = 1; exit 1 }
+  /^\.\./       { print substr($0, 2); next }
+                { print }
+  END           { if (failed) exit 1 }
+'

@@ -71,6 +71,28 @@ impl AppEvents for Events {
     }
 }
 
+/// Starts the control socket of the run (W35). A failure leaves the game running without it.
+fn start_control(board: nxkit_abi::live::Board, game: &crate::manifest::Game, run: &RunSettings) {
+    let mut info = vec![
+        ("pid".to_string(), std::process::id().to_string()),
+        ("game".to_string(), game.name.clone()),
+        ("title_id".to_string(), game.title_id.clone()),
+        ("version".to_string(), game.version.clone()),
+    ];
+    #[cfg(target_os = "macos")]
+    info.push((
+        "diag_dir".to_string(),
+        run.gpu.diag_dir.display().to_string(),
+    ));
+    #[cfg(not(target_os = "macos"))]
+    let _ = run;
+    let control = crate::control::Control::new(board, info);
+    match crate::control::start(control) {
+        Ok(path) => eprintln!("nxkit-host: control socket {}", path.display()),
+        Err(e) => eprintln!("nxkit-host: no control socket: {e}"),
+    }
+}
+
 fn check_kernel_service(mask: u64) -> Result<()> {
     if mask & nxkit_rt::Service::Kernel.bit() == 0 {
         return Err(HostError::Manifest(
@@ -92,6 +114,9 @@ pub fn run(opts: &Options) -> Result<()> {
     let run = RunSettings::from_env(&snapshot);
     run.install()
         .map_err(|e| HostError::Settings(e.to_string()))?;
+    // The live keys (W35) get their values of the start now too. The board changes them later, on a command of the
+    // control socket.
+    let board = nxkit_abi::live::Board::new(snapshot.clone(), crate::hostenv::live_sections());
     let env = &run.host;
     sys::hud::enable(env.metal_hud);
     sys::crashsig::install(env);
@@ -186,6 +211,9 @@ pub fn run(opts: &Options) -> Result<()> {
         ),
         probed,
     };
+    if env.control {
+        start_control(board, &loaded.game, &run);
+    }
     // The Home button reaches the app only on a controller that GameController gives it to.
     nxkit_svc_input::claim_home(window.home.is_some());
     let stack_top = layout.main_stack.end();

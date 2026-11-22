@@ -309,7 +309,7 @@ impl TextureStore {
             }
         } else {
             static CONTAIN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            if crate::diag("contain") && CONTAIN.load(std::sync::atomic::Ordering::Relaxed) < 300 {
+            if crate::diag("contain") && nxkit_nvn::diag::left(&CONTAIN, 300) {
                 let (a0, a1) = (rec.address.get(), rec.address.get() + rec.layout.size);
                 let mut spans = self.spans.lock().unwrap_or_else(PoisonError::into_inner);
                 for &(b0, b1, other, od) in spans.iter() {

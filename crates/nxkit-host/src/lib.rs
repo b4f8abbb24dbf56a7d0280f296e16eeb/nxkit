@@ -7,6 +7,7 @@
 //! environment (`nxkit_abi::env`, W27), builds the kernel, the services, the NVN front end, the GPU backend and the
 //! window, and passes each part what it needs.
 
+pub mod control;
 pub mod error;
 mod fields;
 #[cfg(target_os = "macos")]
@@ -19,6 +20,7 @@ pub mod input_file;
 pub mod json;
 pub mod layout;
 pub mod limits;
+pub mod logtail;
 pub mod macho;
 pub mod manifest;
 pub mod module;

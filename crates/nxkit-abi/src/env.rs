@@ -7,8 +7,11 @@
 //! settings module, and `cargo run -p xtask -- settings` checks that. Variables of the system (`HOME`, `TZ`) are not
 //! settings and are read where they are used.
 //!
-//! Nothing sets an `NXKIT_*` variable while the host runs, so a value of the snapshot is the value that a read of the
-//! process gives, or a saved choice of the player for a variable that the process does not set ([`Env::fill`]). [`Env::var`] and [`Env::var_os`] answer like `std::env::var` and `std::env::var_os`.
+//! Nothing sets an `NXKIT_*` variable of the process while the host runs, so a value of the snapshot is the value
+//! that a read of the process gives, or a saved choice of the player for a variable that the process does not set
+//! ([`Env::fill`]). The live keys are the one exception (W35). The live board ([`crate::live::Board`]) keeps a copy of
+//! the snapshot and changes the live keys in that copy only. [`Env::var`] and [`Env::var_os`] answer like
+//! `std::env::var` and `std::env::var_os`.
 
 use std::collections::BTreeMap;
 use std::env::VarError;
@@ -65,6 +68,18 @@ impl Env {
         }
         self.vars.insert(name.to_owned(), value.into());
         true
+    }
+
+    /// Sets `name` to `value`, or removes it for `None`. Only the live board ([`crate::live::Board`]) changes a
+    /// snapshot after the start, and only its live keys. A name without [`PREFIX`] is left out.
+    pub(crate) fn put(&mut self, name: &str, value: Option<OsString>) {
+        if !name.starts_with(PREFIX) {
+            return;
+        }
+        match value {
+            Some(v) => self.vars.insert(name.to_owned(), v),
+            None => self.vars.remove(name),
+        };
     }
 
     /// The names that are set, in order.

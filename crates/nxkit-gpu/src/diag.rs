@@ -5,8 +5,9 @@
 //!
 //! - [`diag`]: `NXKIT_DIAG`, a comma separated list of categories (`all` for every one), shared with `nxkit-nvn` and
 //!   `nxkit-rt` through [`nxkit_nvn::diag::on`].
-//! - [`knob`]: `NXKIT_KNOB`, experiments that change what the encoder does. `NXKIT_KNOB_FILE` names a file with the
-//!   same list that is read again every frame, so a knob can be flipped while the game runs.
+//! - [`knob`]: `NXKIT_KNOB`, experiments that change what the encoder does. The key is live (W35), and the encoder
+//!   reads it again on the next frame after a change. `NXKIT_KNOB_FILE` names a file with the same list that is read
+//!   again every frame. While the file can be read, it wins over the key.
 //! - [`nobar`]: the file `nobar` in the diagnostics directory holds a pass range ("lo hi") that gets full barriers,
 //!   for bisecting a barrier problem. It is read every frame too.
 //! - [`tex_match`]: `NXKIT_DIAG_TEX` narrows the texture and pass categories to the textures of one format or size.
@@ -192,13 +193,16 @@ pub(crate) fn knobs_on() -> Vec<&'static str> {
 struct Knobs {
     flags: AtomicU64,
     file: Option<PathBuf>,
+    /// The live generation of the last read of `NXKIT_KNOB`.
+    seen: AtomicU64,
 }
 
 fn knobs() -> &'static Knobs {
     static K: OnceLock<Knobs> = OnceLock::new();
     K.get_or_init(|| Knobs {
-        flags: AtomicU64::new(set_pass_options(parse_knobs(&crate::settings::env().knob))),
+        flags: AtomicU64::new(set_pass_options(parse_knobs(&crate::settings::live().knob))),
         file: crate::settings::env().knob_file.clone(),
+        seen: AtomicU64::new(nxkit_abi::live::generation()),
     })
 }
 
@@ -244,8 +248,8 @@ pub(crate) fn nobar(index: usize) -> bool {
     nobar_range().is_some_and(|(lo, hi)| (lo..hi).contains(&index))
 }
 
-/// Reads the `nobar` file and the knob file again. The encoder calls it once per frame. Without `NXKIT_KNOB_FILE`
-/// and without the `nobar` file it costs one failed open.
+/// Reads the `nobar` file and the knob file again, or `NXKIT_KNOB` after a change of a live setting. The encoder
+/// calls it once per frame. Without `NXKIT_KNOB_FILE` and without the `nobar` file it costs one failed open.
 pub(crate) fn refresh_knobs() {
     if let Ok(mut r) = NOBAR.lock() {
         *r = std::fs::read_to_string(diag_dir().join("nobar"))
@@ -263,49 +267,29 @@ pub(crate) fn refresh_knobs() {
     {
         k.flags
             .store(set_pass_options(parse_knobs(&value)), Ordering::Relaxed);
+        return;
+    }
+    let now = nxkit_abi::live::generation();
+    if k.seen.swap(now, Ordering::Relaxed) != now {
+        let flags = set_pass_options(parse_knobs(&crate::settings::live().knob));
+        k.flags.store(flags, Ordering::Relaxed);
     }
 }
 
 /// The fragment program keys of `NXKIT_PAINT_FS` (comma separated) that the `paint` knobs paint. Empty paints every
 /// draw into one colour target.
 pub(crate) fn paint_programs() -> &'static [String] {
-    &crate::settings::env().paint_fs
+    &crate::settings::live().paint_fs
 }
 
 /// The fragment program keys of `NXKIT_DIAG_FS` (comma separated). With keys, the `draw` line prints every draw of
 /// these programs and `nanscan` looks at the passes that hold one. Empty without the variable.
 pub(crate) fn fs_programs() -> &'static [String] {
-    &crate::settings::env().diag_fs
+    &crate::settings::live().diag_fs
 }
 
-/// The texture filter of `NXKIT_DIAG_TEX`: a format name (as `Debug` prints it), a size `WxH` or `WxHxL` (layers),
-/// or both, separated by `/` (`R16Unorm/256x256`). Every part that is given has to match.
-#[derive(Debug, Default)]
-struct TexFilter {
-    format: Option<String>,
-    size: Option<[u32; 2]>,
-    layers: Option<u32>,
-}
-
-fn tex_filter() -> Option<&'static TexFilter> {
-    static F: OnceLock<Option<TexFilter>> = OnceLock::new();
-    F.get_or_init(|| {
-        let v = crate::settings::env().diag_tex.as_deref()?;
-        let mut f = TexFilter::default();
-        for part in v.split('/').map(str::trim).filter(|p| !p.is_empty()) {
-            let nums: Vec<u32> = part.split('x').filter_map(|n| n.parse().ok()).collect();
-            match nums.as_slice() {
-                [w, h] => f.size = Some([*w, *h]),
-                [w, h, l] => {
-                    f.size = Some([*w, *h]);
-                    f.layers = Some(*l);
-                }
-                _ => f.format = Some(part.to_owned()),
-            }
-        }
-        Some(f)
-    })
-    .as_ref()
+fn tex_filter() -> Option<&'static crate::settings::TexFilter> {
+    crate::settings::live().diag_tex.as_ref()
 }
 
 /// Whether `NXKIT_DIAG_TEX` is set.
@@ -362,24 +346,26 @@ pub(crate) fn first(counter: &AtomicU32, max: u32) -> bool {
 
 /// Whether `NXKIT_WATCH_TEX` (a comma separated list of texture ids) names `id`.
 pub(crate) fn watched(id: TexId) -> bool {
-    crate::settings::env().watch_tex.contains(&id.0)
+    crate::settings::live().watch_tex.contains(&id.0)
 }
 
 /// `NXKIT_GPU_LABELS=1`: the encoders of the passes get names (pass index, first attachment, draws) for Instruments.
 pub(crate) fn gpu_labels() -> bool {
-    crate::settings::env().gpu_labels
+    crate::settings::live().gpu_labels
 }
 
 /// Whether `NXKIT_SKIP_PROGRAMS` names a key or `NXKIT_SKIP_FILE` is set. One load of a cached value, so the check
 /// of every draw costs nothing without a list.
 pub(crate) fn skip_list_on() -> bool {
-    let e = crate::settings::env();
-    skip_list_set(e.skip_programs.as_deref(), e.skip_file.is_some())
+    skip_list_set(
+        &crate::settings::live().skip_programs,
+        crate::settings::env().skip_file.is_some(),
+    )
 }
 
-/// True when the value of `NXKIT_SKIP_PROGRAMS` holds a key or `NXKIT_SKIP_FILE` is set.
-fn skip_list_set(programs: Option<&str>, file: bool) -> bool {
-    file || programs.is_some_and(|v| !v.trim().is_empty())
+/// True when `NXKIT_SKIP_PROGRAMS` holds a key or `NXKIT_SKIP_FILE` is set.
+fn skip_list_set(programs: &[String], file: bool) -> bool {
+    file || !programs.is_empty()
 }
 
 /// `NXKIT_SKIP_PROGRAMS=<key>,<key>`: dispatches whose compute shader has one of these keys are not run, and draws whose vertex, task, mesh or fragment
@@ -392,22 +378,10 @@ pub(crate) fn skipped_program(key: &str) -> bool {
     if !skip_list_on() {
         return false;
     }
-    use std::sync::{Mutex, OnceLock, PoisonError};
+    use crate::settings::skip_keys as parse;
+    use std::sync::{Mutex, PoisonError};
     use std::time::{Duration, Instant};
-    fn parse(v: &str) -> Vec<String> {
-        v.split([',', '\n'])
-            .map(|k| k.trim().to_string())
-            .filter(|k| !k.is_empty())
-            .collect()
-    }
-    static KEYS: OnceLock<Vec<String>> = OnceLock::new();
-    let keys = KEYS.get_or_init(|| {
-        crate::settings::env()
-            .skip_programs
-            .as_deref()
-            .map(parse)
-            .unwrap_or_default()
-    });
+    let keys = &crate::settings::live().skip_programs;
     if keys.iter().any(|k| k == key) {
         return true;
     }
@@ -456,24 +430,7 @@ pub(crate) fn tiny_words(bytes: &[u8]) -> String {
 
 /// The ranges `(address, len)` of `NXKIT_DIAG_WATCH=0xADDR:LEN,..` (len at most 512).
 pub(crate) fn watch_ranges() -> &'static [(u64, usize)] {
-    static R: OnceLock<Vec<(u64, usize)>> = OnceLock::new();
-    R.get_or_init(|| {
-        let Some(v) = crate::settings::env().diag_watch.as_deref() else {
-            return Vec::new();
-        };
-        v.split(',')
-            .filter_map(|s| {
-                let (a, l) = s.trim().split_once(':')?;
-                let a = u64::from_str_radix(a.trim().trim_start_matches("0x"), 16).ok()?;
-                let l = l.trim();
-                let l = match l.strip_prefix("0x") {
-                    Some(h) => usize::from_str_radix(h, 16).ok()?,
-                    None => l.parse().ok()?,
-                };
-                Some((a, l.min(512)))
-            })
-            .collect()
-    })
+    &crate::settings::live().diag_watch
 }
 
 /// The texture each handle resolved to, kept for `NXKIT_DIAG=barr` and `nanscan`: they compare the textures that the
@@ -499,10 +456,10 @@ mod tests {
 
     #[test]
     fn no_skip_list_means_the_fast_path() {
-        assert!(!skip_list_set(None, false));
-        assert!(!skip_list_set(Some(""), false));
-        assert!(skip_list_set(Some("abc"), false));
-        assert!(skip_list_set(None, true));
+        assert!(!skip_list_set(&[], false));
+        assert!(!skip_list_set(&crate::settings::skip_keys(" , "), false));
+        assert!(skip_list_set(&crate::settings::skip_keys("abc"), false));
+        assert!(skip_list_set(&[], true));
         // Without a list, no key is skipped, whatever the process environment.
         if !skip_list_on() {
             assert!(!skipped_program("abc"));

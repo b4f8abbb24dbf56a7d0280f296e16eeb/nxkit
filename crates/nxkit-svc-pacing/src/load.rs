@@ -389,7 +389,7 @@ fn kmax_diag(cfg: &LoadConfig, hz: i32, cap: u32) -> String {
 
 fn cost_diag(shown: f64, wait: f64, gpu: f64, fs: &FrameStep, cfg: String) {
     let k = fs.k;
-    if crate::settings::settings().pace_diag && shown > f64::from(k.max(1)) + 0.25 {
+    if crate::settings::live().pace_diag && shown > f64::from(k.max(1)) + 0.25 {
         let ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() % 1_000_000);
@@ -400,7 +400,7 @@ fn cost_diag(shown: f64, wait: f64, gpu: f64, fs: &FrameStep, cfg: String) {
     }
     use std::sync::Mutex;
     static SUM: Mutex<[f64; 5]> = Mutex::new([0.0; 5]);
-    if !crate::settings::settings().pace_diag {
+    if !crate::settings::live().pace_diag {
         return;
     }
     let Ok(mut a) = SUM.lock() else { return };

@@ -105,7 +105,7 @@ impl Screen {
     }
 
     fn pace_note(&self, secs: f64) {
-        if secs <= 0.0 || !crate::settings::settings().pace_diag {
+        if secs <= 0.0 || !crate::settings::live().pace_diag {
             return;
         }
         let line = self
