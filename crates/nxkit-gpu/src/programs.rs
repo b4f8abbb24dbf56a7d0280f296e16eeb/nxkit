@@ -27,7 +27,7 @@ pub(crate) const SUPPORT_SCALES: u32 = 73;
 pub(crate) enum BindKind {
     /// `cbuf`: the GPU address of uniform buffer `reg`.
     Cbuf,
-    /// `tex`: the resource ID of the texture in slot `reg`.
+    /// `tex` and `tbuf`: the resource ID of the texture in slot `reg` (a `tbuf` is a texture buffer).
     Tex,
     /// `samp`: the resource ID of the sampler of the handle in slot `reg`.
     Samp,
@@ -346,7 +346,9 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             "tex_ubo" if ubo.is_some() => BindKind::Tex,
             "samp_ubo" if ubo.is_some() => BindKind::SampTex,
             "cbuf" => BindKind::Cbuf,
-            "tex" => BindKind::Tex,
+            // `tbuf` is a texture buffer in a texture slot, which the translator declares as a `texture_buffer`: the
+            // `tex` path below binds it as a sampled texture buffer.
+            "tex" | "tbuf" => BindKind::Tex,
             "samp" => BindKind::Samp,
             "samp_tex" => BindKind::SampTex,
             "tex_pool" => BindKind::TexPool,
