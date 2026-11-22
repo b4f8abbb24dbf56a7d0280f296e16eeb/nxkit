@@ -13,6 +13,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use nxkit_metal::{Context, ShaderLibrary, VertexFormat};
 
 mod decl;
+mod swap;
 use decl::{declared_dim, declared_img};
 
 use crate::json::{Json, parse};
@@ -164,6 +165,9 @@ pub(crate) struct StageProgram {
     pub(crate) c1: Vec<u8>,
     /// The mesh stage of a task or mesh shader. `None` for the other stages.
     pub(crate) mesh: Option<MeshInfo>,
+    /// 0 for the shipped library. Else the number of the swap that put a library of source in its place (W37,
+    /// `crate::hotswap`). Its pipelines have other keys and are never kept.
+    pub(crate) swap: u32,
 }
 
 type ProgramMap = crate::fastmap::FastMap<String, Result<Arc<StageProgram>, Skip>>;
@@ -175,6 +179,8 @@ pub(crate) struct Programs {
     /// One map per reading of the vertex inputs (index 1 for vertex), so that a lookup by `&str` allocates nothing. A
     /// read-write lock: every draw of every encode thread reads it, and a `Mutex` made them wait for each other.
     cache: RwLock<[ProgramMap; 2]>,
+    /// The libraries that a person swapped in (W37). Read on a cache miss only.
+    swaps: swap::Swaps,
 }
 
 impl Programs {
@@ -183,6 +189,7 @@ impl Programs {
             ctx: ctx.clone(),
             dir,
             cache: RwLock::new([ProgramMap::default(), ProgramMap::default()]),
+            swaps: swap::Swaps::default(),
         }
     }
 
@@ -257,6 +264,7 @@ impl Programs {
             p.entry_z = [None, None];
             p.pull = true;
         }
+        self.swaps.apply(key, &mut p);
         Ok(p)
     }
 
@@ -445,6 +453,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         threadgroup,
         c1,
         mesh: facts.mesh,
+        swap: 0,
     })
 }
 

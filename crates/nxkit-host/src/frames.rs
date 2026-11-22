@@ -76,6 +76,8 @@ pub fn gpu_settings(
         // `temporal_upscale` of the title: MetalFX temporal upscaling in place of the game's upscale pass (R72).
         // `NXKIT_TEMPORAL_UPSCALE=0` turns it off in the encoder.
         temporal_upscale: settings.temporal_upscale.as_ref().map(temporal_upscale),
+        // The control socket swaps shaders through it (W37).
+        shader_hub: Some(run.shader_hub.clone()),
         compile_bases: run.gpu_bases,
         specialize: run.gpu_specialize,
         // The encoder makes the pipelines of the recorded list before it returns. A long wait shows a loading screen.

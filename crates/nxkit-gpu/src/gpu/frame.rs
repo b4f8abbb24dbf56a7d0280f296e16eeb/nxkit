@@ -43,6 +43,16 @@ impl Gpu {
         scale: f32,
     ) -> Result<EncodeReport> {
         crate::refresh_knobs();
+        // A swapped shader (W37): the programs read again and the ICBs of the old pipelines go.
+        if let Some(f) = &mut self.swaps
+            && let Some(swaps) = f.tick(detail)
+        {
+            self.programs.set_swaps(swaps);
+            self.icbs
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clear();
+        }
         // The handles that shaders read from uniform buffers become texture binds of their draws and dispatches
         // (`ubotex`), so that everything after this resolves them as bound textures. The words are read as the frame
         // sees guest memory, as `Shared::read_guest` does.

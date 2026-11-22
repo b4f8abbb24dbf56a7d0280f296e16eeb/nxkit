@@ -15,10 +15,11 @@ impl Pipelines {
         icb: bool,
     ) -> Result<(RenderPipeline, u64), Skip> {
         let zero_to_one = self.depth_zero_to_one();
+        let swaps = (vs.swap, fs.map_or(0, |f| f.swap));
         let hit = LAST_PIPELINE.with(|l| {
             l.borrow()
                 .as_ref()
-                .filter(|m| m.matches(self.id, d, targets, icb, zero_to_one))
+                .filter(|m| m.matches(self.id, d, targets, icb, zero_to_one, swaps))
                 .map(|m| (m.pipeline.clone(), m.key))
         });
         if let Some(hit) = hit {
@@ -37,6 +38,7 @@ impl Pipelines {
                 blend: d.blend,
                 write_masks: d.write_masks,
                 pull: vs.pull,
+                swaps,
                 // A pulling pipeline has no vertex layout: the memo does not keep it.
                 attributes: if vs.pull {
                     Vec::new()
@@ -199,6 +201,10 @@ impl Pipelines {
             paint_dir,
         });
         let vertex = point_size_key(&d.program.vertex, desc.vertex.1);
+        if vs.swap != 0 || fs.is_some_and(|f| f.swap != 0) {
+            let key = swapped_key(key, vs.swap, fs.map_or(0, |f| f.swap));
+            return self.render_swapped(key, d, vs, fs, &mut desc);
+        }
         if async_on() && !icb {
             let fallback =
                 class != TopologyClass::Point && falls_back(&self.topology_fallbacks, key, vertex);
@@ -250,6 +256,31 @@ impl Pipelines {
         .map_err(|e| pipe_failed(format_args!("{}: {e}", what())))?;
         crate::pipelines::coverage::record(&self.cache, source, Some(&desc), &what());
         Ok((p, key))
+    }
+
+    /// The pipeline of a draw with a swapped library (W37). It compiles at once on a compiler without a serializer, so
+    /// the next frame draws with the new code, and no archive and no list of recorded states gets it.
+    fn render_swapped(
+        &self,
+        key: u64,
+        d: &DrawDetail,
+        vs: &StageProgram,
+        fs: Option<&StageProgram>,
+        desc: &mut RenderPipelineDesc<'_>,
+    ) -> Result<(RenderPipeline, u64), Skip> {
+        if let Some(p) = self.cache.cached_render(key) {
+            return Ok((p, key));
+        }
+        let made = self.cache.render_scratch(key, desc).or_else(|e| {
+            // The point size rule of `build_render`.
+            if desc.topology == TopologyClass::Point || !e.to_string().contains("point size") {
+                return Err(e);
+            }
+            desc.topology = TopologyClass::Unspecified;
+            self.cache.render_scratch(key, desc)
+        });
+        made.map(|(p, _)| (p, key))
+            .map_err(|e| pipe_failed(format_args!("{} (swapped): {e}", render_what(d, vs, fs))))
     }
 
     /// The mesh pipeline of a task and mesh draw. `ts` is the task shader, when the program has one, and `fs` the pixel

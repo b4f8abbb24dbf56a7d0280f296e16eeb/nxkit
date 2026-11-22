@@ -38,6 +38,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         threadgroup: [1; 3],
         c1: vec![],
         mesh: None,
+        swap: 0,
     };
     let vs = stage("vs");
     let mut fs = stage("fs");
@@ -146,6 +147,7 @@ fn a_draw_with_a_layer_picking_geometry_shader_runs_the_layer_entry() {
         threadgroup: [1; 3],
         c1: vec![],
         mesh: None,
+        swap: 0,
     };
     let mut d = crate::walk::empty_draw();
     assert!(!layered(&d, &vs));
@@ -186,6 +188,7 @@ fn the_depth_mode_zero_to_one_takes_the_entries_that_keep_the_depth() {
         threadgroup: [1; 3],
         c1: vec![],
         mesh: None,
+        swap: 0,
     };
     let mut d = crate::walk::empty_draw();
     // A library without the entries keeps converting the depth.
@@ -198,4 +201,112 @@ fn the_depth_mode_zero_to_one_takes_the_entries_that_keep_the_depth() {
         render::vertex_entry(&d, &vs, true),
         ("main0_lz", ":layer:z")
     );
+}
+
+#[test]
+fn a_swapped_library_gets_pipelines_of_its_own_that_are_never_captured() {
+    let Ok(ctx) = Context::system_default() else {
+        return;
+    };
+    let src = |c: &str| {
+        format!(
+            "#include <metal_stdlib>\nusing namespace metal;\n\
+             vertex float4 vs() {{ return float4(0, 0, 0, 1); }}\n\
+             fragment float4 fs() {{ return float4({c}); }}\n"
+        )
+    };
+    let lib = |c: &str| ShaderLibrary::from_source(&ctx, "swap", &src(c)).unwrap();
+    let stage = |entry: &str, lib: ShaderLibrary, swap: u32| StageProgram {
+        lib,
+        entry: entry.into(),
+        entry_uint: None,
+        entry_mixed: None,
+        entry_layer: None,
+        entry_z: [None, None],
+        binds: vec![],
+        arg_bytes: 0,
+        inputs: vec![],
+        pull: false,
+        colors: Some(vec![0]),
+        threadgroup: [1; 3],
+        c1: vec![],
+        mesh: None,
+        swap,
+    };
+    let draw = DrawDetail {
+        program: ProgramRef {
+            vertex: "swap-vs".into(),
+            fragment: Some("swap-fs".into()),
+            task: None,
+            mesh: None,
+            geometry: None,
+        },
+        push: None,
+        blend: Default::default(),
+        write_masks: [15; 8],
+        depth_stencil: Default::default(),
+        raster: Default::default(),
+        topology: 4,
+        attributes: vec![],
+        streams: vec![],
+        args: DrawArgs::Arrays {
+            first: 0,
+            count: 3,
+            instances: 1,
+            base_instance: 0,
+        },
+        ubos: vec![],
+        sbufs: vec![],
+        textures: vec![],
+        samplers: Vec::new(),
+        images: vec![],
+        dynamic: Default::default(),
+    };
+    let targets = Targets {
+        colors: vec![Some(Format::Rgba8Unorm)],
+        samples: 1,
+    };
+    let archive = ArchiveConfig {
+        collect: true,
+        ..ArchiveConfig::default()
+    };
+    let pipelines = Pipelines::new(&ctx, &archive).unwrap();
+    let vs = stage("vs", lib("1"), 0);
+    let shipped = stage("fs", lib("1"), 0);
+    let key_of = |fs: &StageProgram| {
+        pipelines
+            .render(&draw, &vs, Some(fs), &targets, false)
+            .unwrap()
+            .1
+    };
+    let k0 = key_of(&shipped);
+    assert_eq!(
+        pipelines.cache().captured(),
+        1,
+        "a shipped pipeline is captured"
+    );
+    let one = stage("fs", lib("0"), 1);
+    let k1 = key_of(&one);
+    assert_ne!(k0, k1, "the swap has a key of its own");
+    assert_eq!(key_of(&one), k1);
+    let two = stage("fs", lib("0.5"), 2);
+    let k2 = key_of(&two);
+    assert!(k2 != k1 && k2 != k0, "a new swap builds again");
+    assert_eq!(pipelines.cache().captured(), 1, "a swapped pipeline is not");
+    assert_eq!(key_of(&shipped), k0, "a reset finds the shipped pipeline");
+    assert_eq!(
+        pipelines.counts().0,
+        3,
+        "the shipped one was not built again"
+    );
+    // a swapped compute program has a pipeline of its own too
+    let cs = ShaderLibrary::from_source(
+        &ctx,
+        "swap-cs",
+        "#include <metal_stdlib>\nusing namespace metal;\nkernel void cs() {}\n",
+    )
+    .unwrap();
+    let kernel = stage("cs", cs, 1);
+    assert!(pipelines.compute("swap-cs", &kernel).is_ok());
+    assert_eq!(pipelines.cache().captured(), 1);
 }

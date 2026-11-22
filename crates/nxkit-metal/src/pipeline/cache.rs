@@ -31,6 +31,7 @@ use specialize::Bases;
 mod archive;
 mod mesh;
 mod miss;
+mod scratch;
 mod specialize;
 mod stats;
 
@@ -187,6 +188,8 @@ pub struct PipelineCache {
     bases: Bases,
     /// The library of [`NOP_FRAGMENT`], compiled at the first depth-only mesh pipeline.
     nop: OnceLock<std::result::Result<ShaderLibrary, String>>,
+    /// The compiler of the pipelines that are never kept (`cache::scratch`).
+    scratch: scratch::Scratch,
 }
 
 // SAFETY: `MTL4Compiler` accepts calls from several threads, the entry map has a lock and the counters are atomic.
@@ -243,6 +246,7 @@ impl PipelineCache {
             builds: AtomicU64::new(0),
             bases: Bases::default(),
             nop: OnceLock::new(),
+            scratch: OnceLock::new(),
         })
     }
 

@@ -348,12 +348,19 @@ pub struct RunSettings {
     /// `NXKIT_PIPELINE_SPECIALIZE` (read by `nxkit-gpu`), for `GpuSettings`.
     #[cfg(target_os = "macos")]
     pub gpu_specialize: bool,
+    /// The meeting point of the control socket and the encoder for the shader hot swap (W37).
+    #[cfg(target_os = "macos")]
+    pub shader_hub: nxkit_gpu::ShaderHub,
 }
 
 impl RunSettings {
     /// Every crate's settings from the one snapshot.
     pub fn from_env(env: &Env) -> Self {
+        #[cfg(target_os = "macos")]
+        let gpu = nxkit_gpu::GpuEnv::from_env(env);
         RunSettings {
+            #[cfg(target_os = "macos")]
+            shader_hub: nxkit_gpu::ShaderHub::new(gpu.diag_dir.join("shaders")),
             host: HostEnv::from_env(env),
             nvn: nxkit_nvn::settings::NvnSettings::from_env(env),
             rt: nxkit_rt::settings::RtSettings::from_env(env),
@@ -362,7 +369,7 @@ impl RunSettings {
             input: nxkit_svc_input::settings::InputSettings::from_env(env),
             ue: nxkit_ue::settings::UeSettings::from_env(env),
             #[cfg(target_os = "macos")]
-            gpu: nxkit_gpu::GpuEnv::from_env(env),
+            gpu,
             #[cfg(target_os = "macos")]
             gpu_bases: nxkit_gpu::pipeline_bases(env),
             #[cfg(target_os = "macos")]

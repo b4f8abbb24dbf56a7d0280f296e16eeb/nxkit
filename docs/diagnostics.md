@@ -503,6 +503,56 @@ release
 5. Change the host code. Build it. Start every new build with `NXKIT_INPUT_FILE=/abs/path/scene.txt`. The game then comes to the scene without a person. You can also start the replay later with `tools/nxkit-ctl replay /abs/path/scene.txt`.
 6. At the scene, use the other verbs (`keys`, `log`). Move on with `press` and `stick`.
 7. If the replay is off, record again from the point where it went wrong. Or put a `wait` before that point.
+## Shader hot swap
+
+You can change the MSL of a program while the game runs. The next frame draws the scene again with the new code. Use it to find a drawing bug and to test a fix. A fix that works goes into the translator (`nxb-xlate`) afterward. The verbs are on the control socket (W35, W37):
+
+```bash
+tools/nxkit-ctl shader list
+```
+
+```bash
+tools/nxkit-ctl shader dump 0123456789abcdef
+```
+
+The override folder is `<diag_dir>/shaders` (`NXKIT_DIAG_DIR`, default `/tmp/fmap`). `shader status` prints it.
+
+| verb | effect |
+|---|---|
+| `shader list [FILTER]` | Counts the next 3 frames. It prints a line `KEY STAGE DRAWS` for each program: the draws and dispatches for each frame. The stage is `vs`, `fs`, `ts`, `ms`, `gs` or `cs`. A program with a swap has a `*` at the end. `FILTER` keeps the keys that contain it. It fails when the game draws no frame in 5 s. |
+| `shader dump KEY` | Writes the MSL of the program to `<override>/KEY.metal`. It does not replace a file that exists, so your edits stay. |
+| `shader load KEY` | Compiles `<override>/KEY.metal` and puts it in place of the library of the program. It fails when the file does not compile or lacks a function that the host calls. The answer has the first error lines. The whole text of Metal is in `<override>/KEY.errors.txt`. A failed load changes nothing. |
+| `shader reset KEY` or `shader reset all` | Goes back to the shipped function. The file stays in the override folder. |
+| `shader status` | Prints the override folder and the programs that have a swap. |
+
+To skip a program, use `tools/nxkit-ctl set NXKIT_SKIP_PROGRAMS=KEY`. That key is live too.
+
+### Where the MSL comes from
+
+The app has the compiled libraries only. The host cannot translate a shader again, because it does not contain the translator. So `dump` reads the source from `<run>/shader-src/<key>_b.metal`. A normal build does not write that folder. Build the game with `NXB_KEEP_MSL=1` to get it:
+
+```bash
+NXB_KEEP_MSL=1 nxb build ...
+```
+
+The sources about double the size of `<run>/shaders`. Without them, `dump` says so and names the tool `xlate-msl` of `nxb-xlatedev`. That tool translates a shader of a split package and writes its MSL. You can write `<override>/KEY.metal` by hand from its output.
+
+With `NXKIT_PULL=1`, a vertex shader that has a `pull` field is drawn through its `_bp` library. `dump` and `load` then use the `_bp` source. The host uses one library for each program, so the source that you load replaces the library that the host uses now.
+
+### Rules for the source
+
+- Keep the names of the functions. The host calls `main0` and its variants (`main0_u`, `main0_m`, `main0_l`, `main0_z` and `main0_lz`) by name. `load` refuses a source that lacks one.
+- Keep the bindings. The argument buffer, the buffer slots and the stage inputs are the contract with the encoder. Change the code inside the functions.
+- Task and mesh shaders cannot be swapped yet. `load` refuses them.
+- Metal compiles the source with its default options at run time. The build compiles it with its own flags. So `dump` followed by `load` without an edit can give a slightly different result. Compare an edit with that baseline.
+
+### What happens in the host
+
+A swapped program has its own pipelines. The host builds them when a draw needs them, on the encode thread, before it encodes the draw. The first frame after `load` can take longer, because one compile takes some milliseconds for each state of the program. The pipelines of the shipped library stay in the cache, so `reset` is fast.
+
+A swapped pipeline is never saved. It does not go into the runtime pipeline cache, into the list of recorded states or into an archive. The next start of the game uses the shipped shaders again. Your files in the override folder stay, and you must `load` them again.
+
+Without a swap, the cost is one atomic load for each frame and two integer compares for each draw. The picture of the game does not change.
 
 ## Archive coverage
 

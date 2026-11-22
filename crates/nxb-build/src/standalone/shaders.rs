@@ -124,6 +124,13 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
         ));
     }
     let mut summary = format!("{n} shader files ({})", o.shaders);
+    if std::env::var_os(nxkit_abi::shader_src::KEEP_ENV).is_some_and(|v| v != "0") {
+        let n = keep_sources(&o.lib, run)?;
+        summary.push_str(&format!(
+            ", {n} MSL sources in {}",
+            nxkit_abi::shader_src::DIR
+        ));
+    }
     match (b.gpus.first(), &o.archive_error) {
         (Some(arch), None) => {
             p.set(Update {
@@ -161,9 +168,40 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
     Ok(Done { summary })
 }
 
+/// Copies the MSL sources of the shader step (`<key><suffix>.metal`) to `<run>/shader-src`, for the shader hot swap of
+/// the host (W37). Only `NXB_KEEP_MSL=1` does it: the sources about double the size of the shader folder.
+fn keep_sources(lib: &Path, run: &Path) -> Result<usize, String> {
+    let dst = run.join(nxkit_abi::shader_src::DIR);
+    let _ = std::fs::remove_dir_all(&dst);
+    std::fs::create_dir_all(&dst).map_err(|e| io(&dst, e))?;
+    let mut n = 0;
+    for e in std::fs::read_dir(lib).map_err(|e| io(lib, e))?.flatten() {
+        let path = e.path();
+        if path.extension().is_some_and(|x| x == "metal") && path.is_file() {
+            std::fs::copy(&path, dst.join(e.file_name())).map_err(|x| io(&path, x))?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sources_are_copied_to_the_source_folder() {
+        let d = std::env::temp_dir().join(format!("nxb-keep-msl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (lib, run) = (d.join("lib"), d.join("run"));
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(lib.join("00ab_b.metal"), "a").unwrap();
+        std::fs::write(lib.join("00ab_b.metallib"), "b").unwrap();
+        assert_eq!(keep_sources(&lib, &run).unwrap(), 1);
+        let kept = run.join(nxkit_abi::shader_src::DIR).join("00ab_b.metal");
+        assert_eq!(std::fs::read_to_string(kept).unwrap(), "a");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn the_profile_has_the_keys_the_split_reads() {
