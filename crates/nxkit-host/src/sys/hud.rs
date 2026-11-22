@@ -15,6 +15,15 @@ pub(crate) fn enable(on: bool) {
     }
 }
 
+/// Lets Metal make GPU trace captures when `on`: Metal checks `MTL_CAPTURE_ENABLED` when its first device starts. The
+/// same rules as [`enable`] hold.
+pub(crate) fn enable_capture(on: bool) {
+    if on {
+        // SAFETY: called on the main thread before the host starts any thread.
+        unsafe { std::env::set_var("MTL_CAPTURE_ENABLED", "1") };
+    }
+}
+
 /// Shows Metal's HUD on `layer` when `on`, through `developerHUDProperties` (`mode` = `default`).
 pub(super) fn show(layer: &CAMetalLayer, on: bool) {
     if !on {

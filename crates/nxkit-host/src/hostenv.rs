@@ -68,6 +68,8 @@ pub struct HostEnv {
     pub hd_rumble: bool,
     /// `NXKIT_METAL_HUD=1` (a launch option): the Metal performance HUD over the game.
     pub metal_hud: bool,
+    /// `NXKIT_GPU_CAPTURE` (on unless `0`): the host sets `MTL_CAPTURE_ENABLED=1`, so a live GPU trace works.
+    pub gpu_capture: bool,
     /// `NXKIT_PRESENT_UPSCALE` (`metalfx` or `1` for MetalFX, off otherwise, a launch option): how the present scales a
     /// picture that is smaller than the window.
     pub present_upscale: nxkit_metal::PresentUpscale,
@@ -197,6 +199,9 @@ impl HostEnv {
             rumble_min: in_range(env, launch::RUMBLE_MIN, 0.0, 0.9).unwrap_or(0.0),
             hd_rumble: env.var(launch::HD_RUMBLE).map_or(true, |v| v.trim() != "0"),
             metal_hud: env.var(launch::METAL_HUD).is_ok_and(|v| v.trim() == "1"),
+            gpu_capture: env
+                .var(launch::GPU_CAPTURE)
+                .map_or(true, |v| v.trim() != "0"),
             present_upscale: match env.var(launch::PRESENT_UPSCALE).as_deref().map(str::trim) {
                 Ok("metalfx" | "1") => nxkit_metal::PresentUpscale::MetalFx,
                 _ => nxkit_metal::PresentUpscale::Off,

@@ -168,6 +168,95 @@ Every print that can repeat once per draw, pass or frame has a limit. There are 
 
 A "frame" in this section is one encoded batch (`Gpu::encode_frame`). A game frame can flush more than once.
 
+## Live frame capture
+
+You can look at one frame of a running game without a restart. Ask the control socket for a capture. You get files to look at. A person opens the pictures. An agent lays the layers over each other to find the pass that breaks the picture.
+
+```
+tools/nxkit-ctl capture
+tools/nxkit-ctl capture passes
+tools/nxkit-ctl capture passes /tmp/shots
+tools/nxkit-ctl texture 412
+tools/nxkit-ctl passes
+tools/nxkit-ctl stats
+tools/nxkit-ctl sample
+tools/nxkit-ctl gputrace 1
+```
+
+Each verb that needs a frame waits for the next frame. It gives up after 15 s, for example when the game is paused. Only one capture runs at a time. When no capture waits, the encoder pays one atomic load for each frame and for each render pass. The output of the game does not change.
+
+### capture
+
+`capture [frame|passes] [DIR]` writes the folder `<DIR>/capture-<n>/`. Without `DIR` the folder is in the diagnostics folder (`diag_dir` of `info`). The answer has the folder path and a short summary.
+
+```
+/Users/me/nxkit-diag/capture-1
+frame 4812: 61 passes (47 render), 3120 draws
+83 pictures written, 2 skipped, mode passes
+skipped pass-12-depth: format with a stencil aspect: the copy of its depth plane is not made
+final final.png
+```
+
+- `final.png` is the picture that the frame presented. It comes from the last present command of the frame.
+- With `passes`, the encoder copies each attachment of each render pass on the GPU right after the pass. It reads the copies after the frame has completed. The names are `pass-<index>-c<slot>.png` and `pass-<index>-depth.png`. A later pass cannot overwrite a copy.
+- `manifest.json` lists the frame, every pass and every file.
+
+The capture does not copy an attachment in these cases. The manifest gives the reason in `skipped`.
+
+- The pass does not store the attachment, so its pixels are gone after the pass.
+- The attachment is memoryless.
+- No draw or clear of the pass wrote the attachment. It holds what the pass before left.
+- The texture is multisample or compressed, or the format has a stencil aspect.
+- The copies of the capture reached 2 GiB.
+
+The capture reads level 0 and layer 0 of a texture. For a cube or an array it reads the first face or layer.
+
+### Formats and pictures
+
+The picture is 8-bit RGBA with an opaque alpha. The manifest keeps the range of the alpha.
+
+| format | picture | `.raw` file |
+|---|---|---|
+| `Rgba8Unorm`, `Rgba8UnormSrgb`, `Bgra8Unorm`, `Bgra8UnormSrgb` | the bytes, with red and blue swapped for BGRA | no |
+| `R8Unorm`, `Rg8Unorm`, `R16Unorm`, `Rg16Unorm`, `Rgba16Unorm`, `Rgb10A2Unorm` | the values | no |
+| `R16Float`, `Rg16Float`, `Rgba16Float`, `R32Float`, `Rg32Float`, `Rgba32Float`, `Rg11B10Float` | the values clamped to 0..1, no gamma | yes |
+| `Depth32Float`, `Depth16Unorm` | grey, stretched from the minimum to the maximum of the picture | yes |
+
+Other formats get a `skipped` entry with the reason. These are the integer, snorm, packed 16-bit, `Rgb9E5Float`, compressed and stencil formats.
+
+A clamped picture hides overexposure. So the manifest has `stats` for each picture: `min` and `max` of each channel before the clamp, `nan`, `inf` and `over1` (the number of colour values above 1). The `.raw` file holds the bytes as the GPU had them. The entry `raw_layout` gives `bytes_per_pixel`, `row_bytes`, `encoding` (for example `rgba16f`) and the order. The rows go from the top with no padding. The bytes are little endian.
+
+### manifest.json
+
+The schema is 1.
+
+- `frame`: the frame number of the encoder. It is the number in the `frame` of `NXKIT_DIAG` lines.
+- `mode`: `frame`, `passes` or `texture`.
+- `encode`: `encode_ns`, `gpu_ns` (null when not measured), `draws`, `render_passes`, `compute_passes`, `command_buffers`, `pipeline_builds` and `textures_created`.
+- `final`: an image entry, or null.
+- `passes`: one entry for each pass of the plan. It has `index`, `kind` (`Render`, `Compute`, `Copy`, `Sync`, `Present` or `CpuRead`), `cmds` (first and end command), `draws`, `programs` (the keys `vertex`, `fragment`, `task` and `mesh` of its draws), `blend`, `gpu_ns` and `attachments`. The GPU time of a pass is always null at this time.
+- `blend`: for each colour slot, the distinct blend states of the draws of the pass. A state has `enable`, the factors and operations as Metal names, and `write_mask`.
+- `attachments`: `slot` (`c0` and so on, or `depth`), `tex` (the `TexId`), `format`, `width`, `height`, `load`, `store`, `clear` (the clear colour, or the clear depth, or null) and the fields of an image entry.
+- An image entry has `file`, `note` (how the picture was made), `stats`, `raw` and `raw_layout`. Or it has `skipped` with the reason.
+- `files`: every file of the folder.
+
+### texture, passes, stats and sample
+
+- `texture ID [DIR]` writes the texture `ID` (a `TexId`, as in `NXKIT_WATCH_TEX`) at the end of the next frame. The folder has `texture-<id>.png`, a `.raw` file for float formats and `manifest.json` with the description (`format`, `width`, `height`).
+- `passes` prints the passes of the next frame as lines and writes no file. A line has the index, the kind, the attachments (`slot:tex:format:size:load>store`), the draws and the program keys.
+- `stats` prints the numbers of the last 120 frames: frame time, encode time, GPU time, draws, pipeline builds and textures made. The GPU time is the sum of the times of the command buffers that completed, divided by the frames. It is about one frame behind.
+- `sample` makes the next frame a sampled frame. The per-draw categories of `NXKIT_DIAG` print for it now, not after up to 300 frames. Set the categories first, for example `tools/nxkit-ctl set NXKIT_DIAG=draw,lum`.
+
+### GPU trace for Xcode
+
+`gputrace [N] [PATH]` captures the next `N` frames (1 by default) with Metal's capture manager into a GPU trace document. Without `PATH` the file is `<diag_dir>/frame-<n>-<time>.gputrace`. The answer is the path. Open it in Xcode to use Pixel History and the other GPU tools.
+
+The capture covers the whole device. It holds every command buffer of every encoder thread. It starts before the first command buffer of the first frame. It stops after the submit of the last frame and the wait for the GPU. The frames stay slow while the capture runs.
+
+While the capture runs, each render pass gets a label `r<index> <size> <format> d<draws> fs <keys>`. The keys are the fragment program keys of its draws, as in the `NXKIT_DIAG` output. So you find a pass of the trace in the log. The labels are on for the captured frames only. `NXKIT_GPU_LABELS=1` turns them on for all frames.
+
+Metal makes a capture only when the process starts with `MTL_CAPTURE_ENABLED=1` in its environment. The host sets it before it makes the first Metal device, as it does for `MTL_HUD_ENABLED`. `NXKIT_GPU_CAPTURE=0` turns it off. Then `gputrace` fails with the message that capture is not supported. The cost of the setting for the frame rate is not measured yet. Compare `NXKIT_GPU_CAPTURE=0` with the default in the same scene before you rely on it.
+
 ## Categories (`NXKIT_DIAG`)
 
 The cost column shows the cost when the category is on: low, medium (extra work per draw or texture), or high (reads guest memory or the GPU every frame).

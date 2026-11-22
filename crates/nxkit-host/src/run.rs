@@ -86,7 +86,9 @@ fn start_control(board: nxkit_abi::live::Board, game: &crate::manifest::Game, ru
     ));
     #[cfg(not(target_os = "macos"))]
     let _ = run;
-    let control = crate::control::Control::new(board, info);
+    let mut control = crate::control::Control::new(board, info);
+    #[cfg(target_os = "macos")]
+    crate::capture::add_verbs(&mut control);
     match crate::control::start(control) {
         Ok(path) => eprintln!("nxkit-host: control socket {}", path.display()),
         Err(e) => eprintln!("nxkit-host: no control socket: {e}"),
@@ -119,6 +121,7 @@ pub fn run(opts: &Options) -> Result<()> {
     let board = nxkit_abi::live::Board::new(snapshot.clone(), crate::hostenv::live_sections());
     let env = &run.host;
     sys::hud::enable(env.metal_hud);
+    sys::hud::enable_capture(env.gpu_capture);
     sys::crashsig::install(env);
     // From here the log goes through a pipe, so a slow disk under stderr never holds a game thread (`logpipe`).
     sys::logpipe::install();
