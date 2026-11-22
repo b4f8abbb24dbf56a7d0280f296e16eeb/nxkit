@@ -26,6 +26,20 @@ pub struct SystemButtons {
     pub left: bool,
     /// The d-pad or the left stick right.
     pub right: bool,
+    /// The button labelled X.
+    pub x: bool,
+    /// The button labelled Y.
+    pub y: bool,
+    /// `+` (Menu).
+    pub plus: bool,
+    /// `-` (Options).
+    pub minus: bool,
+    /// The left shoulder button.
+    pub l: bool,
+    /// The right shoulder button.
+    pub r: bool,
+    /// At least one controller is connected.
+    pub connected: bool,
 }
 
 impl SystemButtons {

@@ -395,6 +395,12 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
         self.frame.cmds.push(Cmd::Present(texture));
     }
 
+    /// Puts a CPU read of `texture` into the frame (`nvnTextureReadTexels` of a texture that the GPU wrote last): the
+    /// backend copies the texture back into guest memory after the work that the frame holds before it.
+    pub fn cpu_read(&mut self, texture: TexId) {
+        self.frame.cmds.push(Cmd::CpuRead(texture));
+    }
+
     /// True when no command was submitted since the frame began.
     pub fn frame_is_empty(&self) -> bool {
         self.frame.cmds.is_empty()

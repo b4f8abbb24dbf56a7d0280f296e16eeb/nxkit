@@ -384,6 +384,38 @@ pub fn as_read(format: VertexFormat, read: VertexFormat) -> VertexFormat {
     row[width - 1]
 }
 
+/// The kind of value a vertex format hands the shader: floats (also normalized integers), signed or unsigned integers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReadKind {
+    Float,
+    Int,
+    UInt,
+}
+
+fn read_kind(f: VertexFormat) -> ReadKind {
+    use VertexFormat as V;
+    match f {
+        V::UInt | V::UInt2 | V::UInt3 | V::UInt4 => ReadKind::UInt,
+        V::UChar | V::UChar2 | V::UChar3 | V::UChar4 => ReadKind::UInt,
+        V::UShort | V::UShort2 | V::UShort3 | V::UShort4 => ReadKind::UInt,
+        V::Int | V::Int2 | V::Int3 | V::Int4 => ReadKind::Int,
+        V::Char | V::Char2 | V::Char3 | V::Char4 => ReadKind::Int,
+        V::Short | V::Short2 | V::Short3 | V::Short4 => ReadKind::Int,
+        _ => ReadKind::Float,
+    }
+}
+
+/// Whether the stage_in vertex layout can feed an attribute of `NVNformat` `nvn` to a shader input that reads `read`
+/// (`Float4`, `UInt4` or `Int4`) as the console does. Metal refuses a pipeline whose attribute format and shader type
+/// differ in kind, and only a 32-bit format can change its kind without changing the bits (`as_read`). An 8- or 16-bit
+/// integer read with the other signedness, or read as floats, has no stage_in equivalent: zero extension instead of
+/// sign extension moves vertices (Pokémon Pokopia reads `SINT16` positions as `uint4`). Such a draw takes the pulling
+/// `_bp` variant of its vertex shader, which decodes the format as the console does. A format without a Metal vertex
+/// format fits nowhere and is left to the layout, which reports it.
+pub fn stage_in_fits(nvn: u32, read: VertexFormat) -> bool {
+    vertex_format(nvn).is_none_or(|f| read_kind(as_read(f, read)) == read_kind(read))
+}
+
 /// Why a vertex layout could not be translated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayoutError {
@@ -586,5 +618,26 @@ mod tests {
         assert_eq!(vertex_format(0x25), Some(VertexFormat::UChar4Norm));
         assert_eq!(vertex_format(0x9A), Some(VertexFormat::UChar4NormBgra));
         assert_eq!(vertex_format(0x31), None);
+    }
+
+    #[test]
+    fn small_integers_read_with_the_other_kind_do_not_fit_stage_in() {
+        use VertexFormat as V;
+        // 0x2D SINT16x4, 0x2C UINT16x4, 0x27 UINT8x4, 0x25 UNORM8x4, 0x2E FLOAT32x4, 0x30 SINT32x4.
+        assert_eq!(vertex_format(0x2D), Some(V::Short4));
+        assert!(
+            !stage_in_fits(0x2D, V::UInt4),
+            "Pokopia: SINT16 read as uint4"
+        );
+        assert!(stage_in_fits(0x2D, V::Int4));
+        assert!(!stage_in_fits(0x2C, V::Int4));
+        assert!(!stage_in_fits(0x27, V::Float4));
+        assert!(stage_in_fits(0x25, V::Float4));
+        assert!(!stage_in_fits(0x25, V::UInt4));
+        // A 32-bit format changes its kind without changing the bits.
+        assert!(stage_in_fits(0x2E, V::UInt4));
+        assert!(stage_in_fits(0x30, V::Float4));
+        // A format without a Metal vertex format is left to the layout.
+        assert!(stage_in_fits(0x31, V::Float4));
     }
 }

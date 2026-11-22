@@ -228,10 +228,12 @@ fn connected_npad() -> u32 {
     }
 }
 
-fn text_input(_: &TextRequest) -> Option<String> {
-    stop::fatal(
-        "system seam text_input is not wired (the software keyboard has no host window yet)",
-    )
+/// The software keyboard: the host's text input screen (`textinput.rs`), which the game thread waits for.
+fn text_input(req: &TextRequest) -> Option<String> {
+    match crate::textinput::ask(req) {
+        Ok(answer) => answer,
+        Err(why) => stop::fatal(&format!("the software keyboard cannot show: {why}")),
+    }
 }
 
 fn nro_load(_: u64, _: u32) -> Option<u64> {

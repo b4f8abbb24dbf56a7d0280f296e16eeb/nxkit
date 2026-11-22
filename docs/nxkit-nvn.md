@@ -239,7 +239,7 @@ Refer to R59. The module `gfx` of `nxkit-rt` has the SDK functions around NVN th
 - A recording that overwrites the memory of another recording while it is still being written is found at its end, not before.
 - A sparse virtual pool serves textures only. A buffer, an event or command memory in it has no storage, and the CPU cannot map it. A texture of such a pool is read through the page table on the CPU at each upload; a GPU write to it stays in Metal and is never copied back.
 - A stencil view or a stencil texture is registered as its depth view, because `TextureView` has no depth-stencil mode. The first one is logged.
-- `nvnTextureReadTexels` of a texture that the GPU wrote last stops the game, because `Backend` has no readback.
+- `nvnTextureReadTexels` of a texture that the GPU wrote last puts `Cmd::CpuRead` into the frame, flushes it (`FlushReason::CpuWait`) and waits for its fence. The backend copies the texture back into guest memory. A texture it cannot copy back (scaled, widened, block compressed) stops the game.
 - `nvnMultisampleStateSetSampleLocations` ignores the positions and logs the first call. The host does not use custom sample locations.
 - A pool range that is initialised again with another size or address keeps its old ids reserved. The ids of a pool are never given back.
 - The analysis counts a texture as one unit. It does not track mip levels or layers separately.

@@ -297,6 +297,39 @@ impl Pipelines {
             .map_err(|e| pipe_failed(format_args!("host kernel {name}: {e}")))
     }
 
+    /// A render pipeline of the host's own shaders: `vertex` and `fragment` of the MSL `source`, compiled once under
+    /// `name`, for the colour targets `colors` and `samples` samples. `key` tells the pipelines of one library apart.
+    pub(crate) fn host_render(
+        &self,
+        name: &'static str,
+        source: &str,
+        (vertex, fragment): (&str, Option<&str>),
+        colors: Vec<Option<nxkit_metal::ColorTarget>>,
+        samples: u32,
+        key: u64,
+    ) -> Result<RenderPipeline, Skip> {
+        let lib = {
+            let mut libs = self.host.lock().unwrap_or_else(PoisonError::into_inner);
+            match libs.get(name) {
+                Some(l) => l.clone(),
+                None => {
+                    let l = ShaderLibrary::from_source(&self.ctx, name, source)
+                        .map_err(|e| pipe_failed(format_args!("host shaders {name}: {e}")))?;
+                    libs.insert(name, l.clone());
+                    l
+                }
+            }
+        };
+        let mut desc = RenderPipelineDesc::new((&lib, vertex), fragment.map(|f| (&lib, f)), &[]);
+        desc.colors = colors;
+        desc.sample_count = samples;
+        let mut h = DefaultHasher::new();
+        ("host render", name, key).hash(&mut h);
+        self.cache
+            .render(h.finish(), &desc)
+            .map_err(|e| pipe_failed(format_args!("host render {name}: {e}")))
+    }
+
     /// The compute pipeline of a program.
     pub(crate) fn compute(&self, key: &str, p: &StageProgram) -> Result<ComputePipeline, Skip> {
         let key = compute_key(key);

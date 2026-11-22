@@ -46,7 +46,12 @@ impl Tracker {
         self.cull = cull;
     }
 
-    fn scissor(&self, s: Option<[u32; 4]>, scale: f32) -> Scissor {
+    /// Forgets everything that was set: a partial clear (`partial`) set its own pipeline and state.
+    pub(super) fn forget(&mut self) {
+        *self = Self::new(self.size);
+    }
+
+    pub(super) fn scissor(&self, s: Option<[u32; 4]>, scale: f32) -> Scissor {
         let [w, h] = self.size;
         let Some([x, y, sw, sh]) = s else {
             return Scissor {

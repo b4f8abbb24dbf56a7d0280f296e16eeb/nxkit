@@ -7,13 +7,15 @@
 use std::cell::OnceCell;
 use std::ffi::c_void;
 
+use objc2::Message;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_app_kit::{
-    NSFont, NSFontDescriptor, NSFontVariationAttribute, NSFontWeight, NSFontWeightBold,
-    NSFontWeightRegular, NSFontWeightSemibold,
+    NSFont, NSFontDescriptor, NSFontFeatureSelectorIdentifierKey, NSFontFeatureSettingsAttribute,
+    NSFontFeatureTypeIdentifierKey, NSFontVariationAttribute, NSFontWeight, NSFontWeightBold,
+    NSFontWeightMedium, NSFontWeightRegular, NSFontWeightSemibold,
 };
-use objc2_foundation::{NSData, NSDictionary, NSNumber, NSString};
+use objc2_foundation::{NSArray, NSData, NSDictionary, NSNumber, NSString};
 
 static MANROPE: &[u8] = include_bytes!("../../assets/Manrope.ttf");
 
@@ -31,6 +33,8 @@ unsafe extern "C" {
 pub(super) enum Weight {
     /// 400.
     Regular,
+    /// 500: the body of the console mode (`console.typography.body`).
+    Medium,
     /// 600.
     Semibold,
     /// 700.
@@ -41,6 +45,7 @@ impl Weight {
     fn axis(self) -> f64 {
         match self {
             Weight::Regular => 400.0,
+            Weight::Medium => 500.0,
             Weight::Semibold => 600.0,
             Weight::Bold => 700.0,
         }
@@ -51,6 +56,7 @@ impl Weight {
         unsafe {
             match self {
                 Weight::Regular => NSFontWeightRegular,
+                Weight::Medium => NSFontWeightMedium,
                 Weight::Semibold => NSFontWeightSemibold,
                 Weight::Bold => NSFontWeightBold,
             }
@@ -97,6 +103,35 @@ pub(super) fn manrope(size: f64, weight: Weight) -> Retained<NSFont> {
         }
     });
     made.unwrap_or_else(|| NSFont::systemFontOfSize_weight(size, weight.system()))
+}
+
+/// `font` with digits of one width (the number spacing feature 6, monospaced numbers 0), for counts that change while
+/// they are read.
+pub(super) fn tabular(font: &NSFont) -> Retained<NSFont> {
+    let setting: Retained<NSDictionary<NSString, NSNumber>> = {
+        // SAFETY: the keys are constants of AppKit.
+        let (kind, selector) = unsafe {
+            (
+                NSFontFeatureTypeIdentifierKey,
+                NSFontFeatureSelectorIdentifierKey,
+            )
+        };
+        NSDictionary::from_slices(
+            &[kind, selector],
+            &[&*NSNumber::new_u32(6), &*NSNumber::new_u32(0)],
+        )
+    };
+    let settings = NSArray::from_slice(&[&*setting]);
+    // SAFETY: `NSFontFeatureSettingsAttribute` is a constant of AppKit. Its value is an array of dictionaries of the
+    // feature type and selector, as the attribute documents.
+    let desc = unsafe {
+        let key: &NSString = NSFontFeatureSettingsAttribute;
+        let value: &AnyObject = &settings;
+        let attrs = NSDictionary::from_slices(&[key], &[value]);
+        font.fontDescriptor()
+            .fontDescriptorByAddingAttributes(&attrs)
+    };
+    NSFont::fontWithDescriptor_size(&desc, font.pointSize()).unwrap_or_else(|| font.retain())
 }
 
 #[cfg(test)]

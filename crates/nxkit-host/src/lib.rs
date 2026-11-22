@@ -37,6 +37,7 @@ pub mod settings;
 #[cfg(target_os = "macos")]
 mod shaderctl;
 pub mod stop;
+pub mod textinput;
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]

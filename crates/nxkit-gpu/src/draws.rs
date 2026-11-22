@@ -31,7 +31,11 @@ pub(crate) fn prepare(
     }
     let cull = cull_of(d)?;
     let (primitive, _) = translate::primitive(d.topology).ok_or(Skip::Primitive)?;
-    let vs = sh.programs.stage(&d.program.vertex, true)?;
+    let mut vs = sh.programs.stage(&d.program.vertex, true)?;
+    // An attribute that stage_in cannot feed as the console does goes through the pulling variant.
+    if !vs.pull && !stage_in_fits(d, &vs) {
+        vs = sh.programs.pulled(&d.program.vertex)?;
+    }
     let fs = match &d.program.fragment {
         Some(k) => Some(sh.programs.stage(k, false)?),
         None => None,
@@ -117,6 +121,38 @@ pub(crate) fn prepare(
         clip: f.clip,
         geom,
     })
+}
+
+/// Whether the stage_in layout feeds every attribute that the vertex shader `vs` reads as the console does: its format
+/// fits the shader type (`nxkit_pipestate::nvn::stage_in_fits`), and its offset, its stream's stride and its stream's
+/// address are multiples of 4, as Metal's vertex layouts and vertex buffers require. The pulling variant takes the
+/// low bits of an address into the offsets and reads any alignment.
+fn stage_in_fits(d: &DrawDetail, vs: &crate::programs::StageProgram) -> bool {
+    let fits = d.attributes.iter().all(|a| {
+        let Some((_, read)) = vs.inputs.iter().find(|(l, _)| *l == a.location) else {
+            return true;
+        };
+        let stream = d.streams.iter().find(|s| s.index == a.stream);
+        nxkit_pipestate::nvn::stage_in_fits(a.format, *read)
+            && a.offset % 4 == 0
+            && stream.is_none_or(|s| s.address % 4 == 0 && s.stride % 4 == 0)
+    });
+    if !fits && crate::diag("pull") {
+        static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        if SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40 {
+            eprintln!(
+                "DIAG pull stage_in cannot feed vs {}: attributes {:?} streams {:?} inputs {:?}",
+                d.program.vertex,
+                d.attributes,
+                d.streams
+                    .iter()
+                    .map(|s| (s.index, s.address, s.stride))
+                    .collect::<Vec<_>>(),
+                vs.inputs
+            );
+        }
+    }
+    fits
 }
 
 /// The address of the layout block of a pulled draw. The draws of a pass that keep their vertex state share one copy

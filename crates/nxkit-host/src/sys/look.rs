@@ -30,6 +30,14 @@ pub(super) mod tokens {
     pub(in crate::sys) const TEXT_PRIMARY: f64 = 0.90;
     /// `color.text.secondary`.
     pub(in crate::sys) const TEXT_SECONDARY: f64 = 0.60;
+    /// `color.text.tertiary`: the label of a disabled action.
+    pub(in crate::sys) const TEXT_DISABLED: f64 = 0.40;
+    /// `color.surfaceRaised`: a text field on a card.
+    pub(in crate::sys) const SURFACE_RAISED: u32 = 0x202023;
+    /// `color.separator`: the edge of a text field without the focus.
+    pub(in crate::sys) const SEPARATOR: f64 = 0.10;
+    /// The text selection in a field: the cream, faint enough to read the text through.
+    pub(in crate::sys) const SELECTION: f64 = 0.28;
     /// The fill of a quiet capsule.
     pub(in crate::sys) const QUIET_FILL: f64 = 0.09;
     /// The label of a quiet capsule.

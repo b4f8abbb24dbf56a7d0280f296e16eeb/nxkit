@@ -315,8 +315,10 @@ pub struct DrawDetail {
     pub dynamic: DynamicDetail,
 }
 
-/// A clear value. A colour clear uses `color`. A depth and stencil clear uses `depth` and `stencil`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// A clear value. A colour clear uses `color` and `color_mask`. A depth and stencil clear uses `depth`,
+/// `depth_write`, `stencil` and `stencil_mask`. The scissor and the masks matter for a partial clear only
+/// (`encode::partial`): a full clear is the load action of its pass.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClearDetail {
     /// The colour.
     pub color: [f32; 4],
@@ -324,6 +326,29 @@ pub struct ClearDetail {
     pub depth: f32,
     /// The stencil value.
     pub stencil: u32,
+    /// The scissor at the clear as x, y, width and height in unscaled pixels, or none for the whole target.
+    pub scissor: Option<[u32; 4]>,
+    /// The colour channels that the clear writes: bit 0 red to bit 3 alpha.
+    pub color_mask: u8,
+    /// Whether the clear writes the depth.
+    pub depth_write: bool,
+    /// The stencil bits that the clear writes.
+    pub stencil_mask: u32,
+}
+
+impl Default for ClearDetail {
+    /// A clear of everything to zero, without a scissor.
+    fn default() -> Self {
+        Self {
+            color: [0.0; 4],
+            depth: 0.0,
+            stencil: 0,
+            scissor: None,
+            color_mask: 0xf,
+            depth_write: true,
+            stencil_mask: 0xff,
+        }
+    }
 }
 
 /// What a `Cmd::Copy` or `Cmd::Downsample` does, as far as the walker could read it.

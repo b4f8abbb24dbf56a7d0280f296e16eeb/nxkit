@@ -7,9 +7,11 @@
 //! layout, so one unspecialized base per shader pair serves every layout the game draws with, and the build's archive
 //! holds it.
 //!
-//! Pulling is off by default until it is verified in a game (Ocarina of Time's title stalled the GPU for up to 2 s with
-//! it, see docs/diagnostics.md): `NXKIT_PULL=1` turns it on, otherwise every vertex shader draws with `_b` and the
-//! stage_in vertex layout. `NXKIT_DIAG=pull` checks the reads of pulled draws against guest memory ([`model`]).
+//! Pulling every draw is off by default until it is verified in a game (Ocarina of Time's title stalled the GPU for up
+//! to 2 s with it, see docs/diagnostics.md): `NXKIT_PULL=1` turns it on. Without it a vertex shader draws with `_b` and
+//! the stage_in vertex layout, except a draw whose attributes stage_in cannot feed as the console does (`draws.rs`,
+//! `nxkit_pipestate::nvn::stage_in_fits`), which takes `_bp`. `NXKIT_DIAG=pull` checks the reads of pulled draws
+//! against guest memory ([`model`]).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

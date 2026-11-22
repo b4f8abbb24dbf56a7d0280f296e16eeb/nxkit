@@ -138,6 +138,8 @@ pub struct EncodeStats {
     pub icb_builds: u32,
     /// Times a render pass set another pipeline than the one before.
     pub pipeline_switches: u32,
+    /// Partial clears (a scissor or a channel mask) encoded as draws (`encode::partial`).
+    pub partial_clears: u32,
     /// Pipelines compiled this frame.
     pub pipeline_builds: u32,
     /// Barriers between passes that were emitted.
@@ -161,8 +163,6 @@ pub struct EncodeStats {
     pub copybacks: u32,
     /// Texel bytes that the copy-backs wrote into guest memory.
     pub copyback_bytes: u64,
-    /// Texture views whose channel swizzle is not the identity. Metal views here carry no swizzle, so it is ignored.
-    pub swizzle_ignored: u32,
     /// Textures that are scaled and had guest data that is not copied into them.
     pub scaled_upload_lost: u32,
     /// Scaled textures that got guest data through a native-size staging texture and a GPU scale.
@@ -219,6 +219,7 @@ impl EncodeStats {
         self.icb_draws += o.icb_draws;
         self.kinds.add(&o.kinds);
         self.icb_executions += o.icb_executions;
+        self.partial_clears += o.partial_clears;
         self.icb_builds += o.icb_builds;
         self.pipeline_switches += o.pipeline_switches;
         self.pipeline_builds += o.pipeline_builds;
@@ -232,7 +233,6 @@ impl EncodeStats {
         self.uploads += o.uploads;
         self.copybacks += o.copybacks;
         self.copyback_bytes += o.copyback_bytes;
-        self.swizzle_ignored += o.swizzle_ignored;
         self.scaled_upload_lost += o.scaled_upload_lost;
         self.scaled_uploads += o.scaled_uploads;
         self.textures_kept_native += o.textures_kept_native;
