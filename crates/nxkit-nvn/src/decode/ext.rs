@@ -5,7 +5,7 @@
 //! patches the draw state, and a scissor tells whether it covers the whole target.
 
 use super::{Builder, Ctx};
-use crate::ext::{Ext, ExtCode, Setting, StateKind};
+use crate::ext::{Ext, ExtCode, SEPARATE_SLOTS, Setting, StateKind};
 use crate::frame::{ClearKeeps, Cmd, MAX_COLOR, TargetView};
 use crate::marks::{Mark, MarkOp};
 use crate::mem::GuestMem;
@@ -119,14 +119,19 @@ impl Builder {
                 });
             }
             // The pass analysis needs the textures a draw samples, not the table they come from. A separate texture
-            // takes the combined slot of the same number here.
-            ExtCode::SeparateTexture if x.arg < 128 => self.apply(
-                cx,
-                Record::BindTexture {
-                    slot: x.arg as u8,
-                    handle: x.word64(0),
-                },
-            ),
+            // below 32 takes the combined slot of the same bank and number here. The analysis has 32 slots per bank,
+            // so a separate texture from 32 on is not in it.
+            ExtCode::SeparateTexture
+                if x.arg % SEPARATE_SLOTS < 32 && x.arg / SEPARATE_SLOTS < 4 =>
+            {
+                self.apply(
+                    cx,
+                    Record::BindTexture {
+                        slot: (x.arg / SEPARATE_SLOTS * 32 + x.arg % SEPARATE_SLOTS) as u8,
+                        handle: x.word64(0),
+                    },
+                )
+            }
             ExtCode::State => self.patch_state(x),
             ExtCode::Scissor if x.arg == FIRST_SCISSOR => self.scissor(cx, x),
             _ => {}

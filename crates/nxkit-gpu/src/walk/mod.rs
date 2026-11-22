@@ -52,6 +52,8 @@ const MAX_CALL_DEPTH: u32 = 8;
 const MAX_RECORDS: u32 = 1 << 20;
 const MAX_COLOR: u8 = 8;
 const TEXTURE_SLOTS: usize = 128;
+/// The separate texture and sampler slots of the four banks.
+const SEPARATE_SLOTS: usize = 4 * nxkit_nvn::ext::SEPARATE_SLOTS as usize;
 const STREAMS: usize = 16;
 const ATTRIBUTES: usize = 32;
 const UBOS: usize = 16;
@@ -89,10 +91,10 @@ pub(super) struct State {
     scissor: Option<[u32; 4]>,
     blend_color: [f32; 4],
     texture: [u64; TEXTURE_SLOTS],
-    /// The separate texture handles by slot, in the bank layout of `texture`.
-    separate_texture: [u64; TEXTURE_SLOTS],
-    /// The separate sampler ids by slot, in the bank layout of `texture`. 0 is none.
-    separate_sampler: [u32; TEXTURE_SLOTS],
+    /// The separate texture handles by slot, `bank * 128 + index` (`nxkit_nvn::ext::SEPARATE_SLOTS`).
+    separate_texture: [u64; SEPARATE_SLOTS],
+    /// The separate sampler ids by slot, in the layout of `separate_texture`. 0 is none.
+    separate_sampler: [u32; SEPARATE_SLOTS],
     /// The image handles by slot, in the bank layout of `texture`.
     image: [u64; TEXTURE_SLOTS],
     /// `SetCopyRowStride` and `SetCopyImageStride` of the command buffer. 0 is tightly packed.
@@ -122,8 +124,8 @@ impl Default for State {
             scissor: None,
             blend_color: [0.0; 4],
             texture: [NO_HANDLE; TEXTURE_SLOTS],
-            separate_texture: [NO_HANDLE; TEXTURE_SLOTS],
-            separate_sampler: [0; TEXTURE_SLOTS],
+            separate_texture: [NO_HANDLE; SEPARATE_SLOTS],
+            separate_sampler: [0; SEPARATE_SLOTS],
             image: [NO_HANDLE; TEXTURE_SLOTS],
             copy_strides: [0; 2],
             push: [None, None],

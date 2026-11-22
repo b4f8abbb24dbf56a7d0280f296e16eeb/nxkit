@@ -322,7 +322,8 @@ fn separate_textures_and_samplers_keep_their_own_slots() {
     let mut w = Walker::new(Default::default(), map);
     let mut mem = VecMem::new(0x1000, 0x100);
     let mut st = State::default();
-    // Slot 33 is index 1 of the fragment bank, in the combined and in the separate table.
+    // Combined slot 33 is index 1 of the fragment bank. In the separate tables the fragment bank starts at 128, and
+    // a stage has 128 separate textures, so index 40 has a slot too (Octopath Traveler II binds index 32).
     w.apply(
         &mut mem,
         &mut st,
@@ -334,28 +335,49 @@ fn separate_textures_and_samplers_keep_their_own_slots() {
     w.ext(
         &mut mem,
         &mut st,
-        &copy_ext(ExtCode::SeparateTexture, 33, &[0x55, 0]),
+        &copy_ext(ExtCode::SeparateTexture, 129, &[0x55, 0]),
     );
     w.ext(
         &mut mem,
         &mut st,
-        &copy_ext(ExtCode::SeparateSampler, 32, &[3]),
+        &copy_ext(ExtCode::SeparateTexture, 168, &[0x66, 0]),
+    );
+    w.ext(
+        &mut mem,
+        &mut st,
+        &copy_ext(ExtCode::SeparateSampler, 128, &[3]),
+    );
+    w.ext(
+        &mut mem,
+        &mut st,
+        &copy_ext(ExtCode::SeparateSampler, 168, &[4]),
     );
     let mut textures = Vec::new();
     textures_into(&st, 1, Stage::Fragment, &mut textures);
     let slots: Vec<(u32, u64)> = textures.iter().map(|t| (t.slot, t.handle)).collect();
     assert_eq!(
         slots,
-        vec![(1, 0x40), (crate::detail::SEPARATE_TEXTURE_SLOT0 + 1, 0x55)]
+        vec![
+            (1, 0x40),
+            (crate::detail::SEPARATE_TEXTURE_SLOT0 + 1, 0x55),
+            (crate::detail::SEPARATE_TEXTURE_SLOT0 + 40, 0x66)
+        ]
     );
     let mut samplers = Vec::new();
     samplers_into(&st, 1, Stage::Fragment, &mut samplers);
     assert_eq!(
         samplers,
-        vec![crate::detail::SamplerBind {
-            stage: Stage::Fragment,
-            slot: 0,
-            id: 3,
-        }]
+        vec![
+            crate::detail::SamplerBind {
+                stage: Stage::Fragment,
+                slot: 0,
+                id: 3,
+            },
+            crate::detail::SamplerBind {
+                stage: Stage::Fragment,
+                slot: 40,
+                id: 4,
+            }
+        ]
     );
 }

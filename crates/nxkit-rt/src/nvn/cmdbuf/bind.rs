@@ -4,7 +4,7 @@
 use nxkit_nvn::ext::{ExtCode, StateKind};
 use nxkit_nvn::record::Record;
 
-use super::args::{hi, lo, load_bytes, range, slot, span, stage};
+use super::args::{SEPARATE_SLOTS, hi, lo, load_bytes, range, separate_slot, slot, span, stage};
 use super::rec::{O_SAMP_BASE, O_TEX_BASE, emit, emit_rec};
 use super::seam::{channel_mask_patch, color_patch, depth_stencil_patch, seam};
 use crate::nvn::abi::{AbiResult, Obj, guard, log_once, other, table};
@@ -106,7 +106,7 @@ extern "C" fn bind_storage_buffers(c: u64, st: i32, first: i32, n: i32, ranges: 
 }
 
 /// Which slots a handle bind writes.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     /// A combined texture and sampler handle.
     Texture,
@@ -137,14 +137,13 @@ pub(super) fn adjust(h: u64, b: Bases, tex: bool, samp: bool) -> u64 {
 }
 
 fn bind_handle(c: u64, kind: Kind, st: u16, index: i32, h: u64, b: Bases) -> AbiResult<()> {
-    let slot = slot(st, index)?;
     let name = "nvnCommandBufferBindTexture";
     match kind {
         Kind::Texture => emit_rec(
             name,
             c,
             Record::BindTexture {
-                slot,
+                slot: slot(st, index)?,
                 handle: adjust(h, b, true, true),
             },
         ),
@@ -154,7 +153,7 @@ fn bind_handle(c: u64, kind: Kind, st: u16, index: i32, h: u64, b: Bases) -> Abi
                 "nvnCommandBufferBindSeparateTexture",
                 c,
                 ExtCode::SeparateTexture,
-                u16::from(slot),
+                separate_slot(st, index)?,
                 &[lo(handle), hi(handle)],
             );
         }
@@ -162,7 +161,7 @@ fn bind_handle(c: u64, kind: Kind, st: u16, index: i32, h: u64, b: Bases) -> Abi
             name,
             c,
             Record::BindImage {
-                slot,
+                slot: slot(st, index)?,
                 handle: adjust(h, b, true, false),
             },
         ),
@@ -176,7 +175,12 @@ fn bind_one(c: u64, kind: Kind, st: i32, index: i32, h: u64) -> AbiResult<()> {
 
 fn bind_many(c: u64, kind: Kind, st: i32, first: i32, n: i32, handles: u64) -> AbiResult<()> {
     let s = stage(st)?;
-    let (first, n) = span(first, n, HANDLES)?;
+    let max = if kind == Kind::Separate {
+        SEPARATE_SLOTS
+    } else {
+        HANDLES
+    };
+    let (first, n) = span(first, n, max)?;
     let b = bases(c)?;
     for k in 0..n {
         let h = Obj(handles + u64::from(k) * 8).u64(0)?;
@@ -254,7 +258,7 @@ fn bind_sampler(name: &'static str, c: u64, s: u16, index: u32, h: u64, b: Bases
         name,
         c,
         ExtCode::SeparateSampler,
-        u16::from(slot(s, index as i32)?),
+        separate_slot(s, index as i32)?,
         &[id],
     );
     Ok(())
@@ -263,7 +267,7 @@ fn bind_sampler(name: &'static str, c: u64, s: u16, index: u32, h: u64, b: Bases
 extern "C" fn bind_separate_sampler(c: u64, st: i32, i: i32, h: u64) {
     let name = "nvnCommandBufferBindSeparateSampler";
     guard(name, || {
-        let (i, _) = span(i, 1, HANDLES)?;
+        let (i, _) = span(i, 1, SEPARATE_SLOTS)?;
         bind_sampler(name, c, stage(st)?, i, h, bases(c)?)
     });
 }
@@ -272,7 +276,7 @@ extern "C" fn bind_separate_samplers(c: u64, st: i32, first: i32, n: i32, handle
     let name = "nvnCommandBufferBindSeparateSamplers";
     guard(name, || {
         let s = stage(st)?;
-        let (first, n) = span(first, n, HANDLES)?;
+        let (first, n) = span(first, n, SEPARATE_SLOTS)?;
         let b = bases(c)?;
         for k in 0..n {
             let h = Obj(handles + u64::from(k) * 8).u64(0)?;

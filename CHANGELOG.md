@@ -6,6 +6,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- A stage has 128 separate textures and 128 separate samplers, as the shaders' tables hold (#51). The runtime took
+  32 of each and ended the game at `nvnCommandBufferBindSeparateTexture` with index 32. OCTOPATH TRAVELER II
+  stopped there about a minute after the start.
 - `nxb build` replaces an app of the old engine that has only its host `Contents/MacOS/dmhost` and no launcher
   `nxnative` (#48). Such an app at `-o` stopped the build with exit code 2.
 - `nxb build` of a title module made for v0 stops with exit code 4 and names the versions the input has when the

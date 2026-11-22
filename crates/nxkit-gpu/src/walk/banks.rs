@@ -37,11 +37,17 @@ fn bank<T>(table: &[T; TEXTURE_SLOTS], bank: usize) -> &[T] {
     table.get(bank * 32..bank * 32 + 32).unwrap_or(&[])
 }
 
+/// The 128 separate slots of the bank in a separate table.
+fn separate_bank<T>(table: &[T; SEPARATE_SLOTS], bank: usize) -> &[T] {
+    let n = SEPARATE_SLOTS / 4;
+    table.get(bank * n..bank * n + n).unwrap_or(&[])
+}
+
 /// The number of texture handles of the bank that are bound, separate textures included.
 pub(super) fn texture_count(st: &State, bank_index: usize) -> usize {
     bank(&st.texture, bank_index)
         .iter()
-        .chain(bank(&st.separate_texture, bank_index))
+        .chain(separate_bank(&st.separate_texture, bank_index))
         .filter(|h| **h != NO_HANDLE)
         .count()
 }
@@ -54,19 +60,24 @@ pub(super) fn textures_into(
     stage: Stage,
     out: &mut Vec<TextureBind>,
 ) {
-    let bound = |table, first: u32| {
-        bank(table, bank_index)
-            .iter()
-            .enumerate()
-            .filter(|(_, h)| **h != NO_HANDLE)
-            .map(move |(i, handle)| TextureBind {
-                stage,
-                slot: first + i as u32,
-                handle: *handle,
-            })
+    let mut bound = |slots: &[u64], first: u32| {
+        out.extend(
+            slots
+                .iter()
+                .enumerate()
+                .filter(|(_, h)| **h != NO_HANDLE)
+                .map(|(i, handle)| TextureBind {
+                    stage,
+                    slot: first + i as u32,
+                    handle: *handle,
+                }),
+        );
     };
-    out.extend(bound(&st.texture, 0));
-    out.extend(bound(&st.separate_texture, SEPARATE_TEXTURE_SLOT0));
+    bound(bank(&st.texture, bank_index), 0);
+    bound(
+        separate_bank(&st.separate_texture, bank_index),
+        SEPARATE_TEXTURE_SLOT0,
+    );
 }
 
 /// Adds the separate samplers of the bank that are bound to `out`.
@@ -77,7 +88,7 @@ pub(super) fn samplers_into(
     out: &mut Vec<SamplerBind>,
 ) {
     out.extend(
-        bank(&st.separate_sampler, bank_index)
+        separate_bank(&st.separate_sampler, bank_index)
             .iter()
             .enumerate()
             .filter(|(_, id)| **id != 0)

@@ -47,8 +47,9 @@ pub enum ExtCode {
     /// A chunk of vertex attribute (argument 0) or vertex stream (argument 1) states. Words: first entry, entry
     /// count of the chunk, the bytes of the entries.
     VertexState,
-    /// `BindSeparateSampler`. The argument is the slot, `bank * 32 + index` as for
-    /// [`Record::BindTexture`](crate::record::Record::BindTexture). Words: the sampler id.
+    /// `BindSeparateSampler`. The argument is the slot, `bank * 128 + index` with the banks of
+    /// [`Record::BindTexture`](crate::record::Record::BindTexture): a stage has 128 separate samplers
+    /// ([`SEPARATE_SLOTS`]). Words: the sampler id.
     SeparateSampler,
     /// The view of a render target. The argument is the slot, 8 means depth and stencil. Words: the 16 bytes of the view.
     TargetView,
@@ -113,6 +114,10 @@ pub enum ExtCode {
     /// textures of [`Record::BindTexture`](crate::record::Record::BindTexture).
     SeparateTexture,
 }
+
+/// The separate textures and the separate samplers of one bank (stage): the argument of [`ExtCode::SeparateTexture`]
+/// and [`ExtCode::SeparateSampler`] is `bank * SEPARATE_SLOTS + index`.
+pub const SEPARATE_SLOTS: u16 = 128;
 
 const CODES: [ExtCode; 38] = [
     ExtCode::Setting,

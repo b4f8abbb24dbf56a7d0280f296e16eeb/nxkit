@@ -47,6 +47,20 @@ pub(super) fn slot(stage: u16, index: i32) -> AbiResult<u8> {
     }
 }
 
+/// The separate textures and the separate samplers of a stage: 128 of each, as the c2 tables of the shaders hold
+/// (`nxb-xlate`, `C2_SEP_SLOTS`).
+pub(super) const SEPARATE_SLOTS: u32 = nxkit_nvn::ext::SEPARATE_SLOTS as u32;
+
+/// The slot of a separate texture or separate sampler index: `bank * 128 + index`. The index must be below 128.
+pub(super) fn separate_slot(stage: u16, index: i32) -> AbiResult<u16> {
+    match u32::try_from(index) {
+        Ok(i) if i < SEPARATE_SLOTS => Ok((bank(stage) * SEPARATE_SLOTS + i) as u16),
+        _ => Err(other(format!(
+            "separate texture or sampler index {index} is not valid"
+        ))),
+    }
+}
+
 /// Checks `first >= 0`, `n >= 0` and `first + n <= max`.
 pub(super) fn span(first: i32, n: i32, max: u32) -> AbiResult<(u32, u32)> {
     match (u32::try_from(first), u32::try_from(n)) {
@@ -123,5 +137,19 @@ impl Words {
     /// The words so far.
     pub(super) fn as_slice(&self) -> &[u32] {
         &self.w[..self.n]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{separate_slot, slot};
+
+    #[test]
+    fn a_stage_has_128_separate_slots_and_32_combined() {
+        // Octopath Traveler II binds separate texture 32 of the fragment stage
+        assert_eq!(separate_slot(1, 32).unwrap(), 160);
+        assert_eq!(separate_slot(1, 127).unwrap(), 255);
+        assert!(separate_slot(1, 128).is_err());
+        assert!(slot(1, 32).is_err());
     }
 }
