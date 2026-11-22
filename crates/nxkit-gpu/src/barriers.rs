@@ -138,7 +138,14 @@ mod tests {
             .collect();
         assert_eq!(computes.len(), 3, "the barriers keep the dispatches apart");
         let mut state = BarrierState::default();
-        let barriers = state.plan(&frame, &plan, &FastMap::default(), &[], &[], &FastSet::default());
+        let barriers = state.plan(
+            &frame,
+            &plan,
+            &FastMap::default(),
+            &[],
+            &[],
+            &FastSet::default(),
+        );
         assert!(barriers.before[computes[0]].is_none());
         for &reader in &computes[1..] {
             let dep = barriers.before[reader].expect("each reader waits for the write");
@@ -473,10 +480,10 @@ impl BarrierState {
                 None => {}
             }
             first = false;
-            if let Some(d) = &dep {
-                if self.buffer_write.is_some_and(|w| (d.after | w) == d.after) {
-                    self.buffer_write = None;
-                }
+            if let Some(d) = &dep
+                && self.buffer_write.is_some_and(|w| (d.after | w) == d.after)
+            {
+                self.buffer_write = None;
             }
             if p.cmds
                 .clone()
@@ -511,7 +518,6 @@ impl BarrierState {
         }
         out
     }
-            // A barrier holds back the pass it stands in, not the passes after it (a consumer barrier), so it covers
-            // no hazard for them: every later pass that touches the texture waits for its writer itself.
-
+    // A barrier holds back the pass it stands in, not the passes after it (a consumer barrier), so it covers
+    // no hazard for them: every later pass that touches the texture waits for its writer itself.
 }

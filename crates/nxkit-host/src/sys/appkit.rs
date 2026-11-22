@@ -7,9 +7,9 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
-use nxkit_metal::{Context, DisplayLink, DisplayTick, FrameHooks, Presenter};
+use nxkit_metal::{Context, DisplayLink, FrameHooks, Presenter};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{Ivars, MainThreadMarker, MainThreadOnly, define_class, msg_send};
@@ -29,6 +29,7 @@ use super::homeui;
 use super::mouse;
 use super::present;
 use super::screen::{content_size, screen_interval, target_screen};
+use super::stophooks::StopHooks;
 use crate::error::{HostError, Result};
 use crate::refresh::Refresh;
 
@@ -386,51 +387,6 @@ impl AppDelegate {
         if link.rate_range() != rate.range() {
             link.set_rate(rate);
         }
-    }
-}
-
-/// Passes every hook to the host and ends the application on the next tick after a stop request. The tick is the
-/// only code that runs on the main thread by itself, so the stop request waits for it.
-struct StopHooks {
-    inner: Arc<dyn FrameHooks>,
-    stop: Arc<AtomicBool>,
-    /// The GPU reports the first picture that shows something, so a finished frame does not count.
-    probed: bool,
-}
-
-impl FrameHooks for StopHooks {
-    fn frame_begin(&self, frame: u64) {
-        self.inner.frame_begin(frame);
-    }
-
-    fn before_present(&self, frame: u64) {
-        self.inner.before_present(frame);
-    }
-
-    fn frame_complete(&self, stats: &nxkit_metal::CommandBufferStats) {
-        if !self.probed {
-            present::picture_done();
-        }
-        self.inner.frame_complete(stats);
-    }
-
-    fn display_tick(&self, tick: DisplayTick) {
-        let Some(mtm) = MainThreadMarker::new() else {
-            return;
-        };
-        if self.stop.load(Ordering::Acquire) {
-            // An overlay fades out first and ends a fade later (`present.rs`).
-            if present::may_end() {
-                NSApplication::sharedApplication(mtm).terminate(None);
-            }
-            return;
-        }
-        present::tick(mtm);
-        mouse::tick();
-        super::pointer::tick();
-        homeui::tick();
-        super::textinputui::tick();
-        self.inner.display_tick(tick);
     }
 }
 

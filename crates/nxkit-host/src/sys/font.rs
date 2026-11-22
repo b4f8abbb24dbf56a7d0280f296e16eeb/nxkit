@@ -110,8 +110,16 @@ pub(super) fn manrope(size: f64, weight: Weight) -> Retained<NSFont> {
 pub(super) fn tabular(font: &NSFont) -> Retained<NSFont> {
     let setting: Retained<NSDictionary<NSString, NSNumber>> = {
         // SAFETY: the keys are constants of AppKit.
-        let (kind, selector) = unsafe { (NSFontFeatureTypeIdentifierKey, NSFontFeatureSelectorIdentifierKey) };
-        NSDictionary::from_slices(&[kind, selector], &[&*NSNumber::new_u32(6), &*NSNumber::new_u32(0)])
+        let (kind, selector) = unsafe {
+            (
+                NSFontFeatureTypeIdentifierKey,
+                NSFontFeatureSelectorIdentifierKey,
+            )
+        };
+        NSDictionary::from_slices(
+            &[kind, selector],
+            &[&*NSNumber::new_u32(6), &*NSNumber::new_u32(0)],
+        )
     };
     let settings = NSArray::from_slice(&[&*setting]);
     // SAFETY: `NSFontFeatureSettingsAttribute` is a constant of AppKit. Its value is an array of dictionaries of the
@@ -120,7 +128,8 @@ pub(super) fn tabular(font: &NSFont) -> Retained<NSFont> {
         let key: &NSString = NSFontFeatureSettingsAttribute;
         let value: &AnyObject = &settings;
         let attrs = NSDictionary::from_slices(&[key], &[value]);
-        font.fontDescriptor().fontDescriptorByAddingAttributes(&attrs)
+        font.fontDescriptor()
+            .fontDescriptorByAddingAttributes(&attrs)
     };
     NSFont::fontWithDescriptor_size(&desc, font.pointSize()).unwrap_or_else(|| font.retain())
 }

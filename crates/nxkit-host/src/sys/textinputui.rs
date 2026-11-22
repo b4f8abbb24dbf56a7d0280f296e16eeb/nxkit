@@ -48,10 +48,13 @@ struct Shown {
     /// Without the on-screen keyboard: the controller's focus on Cancel or OK, none before the first move.
     focus: Option<usize>,
     /// What the keys and capsules show now, so they are built again only when it changed.
-    drawn: Option<(Option<(usize, usize)>, Option<usize>, bool, bool)>,
+    drawn: Option<Drawn>,
     /// The buttons of the last tick, so a press counts once.
     last: Buttons,
 }
+
+/// What the keys and capsules show: the focused key, the focused capsule, the shift and whether OK is allowed.
+type Drawn = (Option<(usize, usize)>, Option<usize>, bool, bool);
 
 struct Ui {
     window: Retained<NSWindow>,
@@ -225,7 +228,10 @@ fn show(
             message: Some(&req.sub),
             guide: &req.guide,
             initial: text,
-            pad: rows.as_deref().map(|rows| PadKeys { rows, hints: &hints }),
+            pad: rows.as_deref().map(|rows| PadKeys {
+                rows,
+                hints: &hints,
+            }),
         },
     );
     // SAFETY: the delegate implements the `NSTextFieldDelegate` methods it answers to, and lives as long as the UI.
@@ -264,14 +270,14 @@ fn text(shown: &Shown) -> String {
     let now = shown.card.field.stringValue().to_string();
     let cut = textinput::clamp(&now, shown.req.max_len);
     if cut.len() != now.len() {
-        set_text(shown, cut);
+        set_text(&shown.card, cut);
     }
     cut.to_owned()
 }
 
 /// Puts `t` into the field with the caret at its end.
-fn set_text(shown: &Shown, t: &str) {
-    let field = &shown.card.field;
+fn set_text(card: &KeyboardCard, t: &str) {
+    let field = &card.field;
     field.setStringValue(&NSString::from_str(t));
     if let Some(editor) = field.currentEditor() {
         let end = objc2_foundation::NSRange::new(t.encode_utf16().count(), 0);
@@ -282,7 +288,9 @@ fn set_text(shown: &Shown, t: &str) {
 /// The count, and the keys and capsules when their state changed.
 fn refresh(shown: &mut Shown, texts: &Texts, mtm: MainThreadMarker) {
     let t = text(shown);
-    shown.card.set_count(textinput::units(&t), shown.req.max_len);
+    shown
+        .card
+        .set_count(textinput::units(&t), shown.req.max_len);
     let ok = textinput::acceptable(&t, shown.req.min_len, shown.req.max_len);
     let (key_focus, action_focus, shift) = match &shown.pad {
         Some(p) => {
@@ -333,7 +341,14 @@ fn step(ui: &mut Ui, mtm: MainThreadMarker) {
         let t = old.card.field.stringValue().to_string();
         let keep = old.pad.as_ref().map(|p| p.shift);
         old.card.view.removeFromSuperview();
-        show(ui, mtm, old.req, old.title, &t, Some(keep.unwrap_or(t.is_empty())));
+        show(
+            ui,
+            mtm,
+            old.req,
+            old.title,
+            &t,
+            Some(keep.unwrap_or(t.is_empty())),
+        );
         return;
     }
     let keys = KEYS.with(|k| std::mem::take(&mut *k.borrow_mut()));
@@ -359,11 +374,10 @@ fn step(ui: &mut Ui, mtm: MainThreadMarker) {
                 if let Some(n) = textinput::typed(&t, *c, p.shift, shown.req.max_len) {
                     t = n;
                     p.shift = false;
-                    set_text(shown, &t);
+                    set_text(&shown.card, &t);
                 }
             }
         }
-        let p = shown.pad.as_mut().expect("the pad above");
         // The directions, with a repeat while one is held.
         let held = [
             (buttons.up, Dir::Up),
@@ -396,15 +410,13 @@ fn step(ui: &mut Ui, mtm: MainThreadMarker) {
             && let Some(n) = textinput::typed(&t, ' ', false, shown.req.max_len)
         {
             t = n;
-            set_text(shown, &t);
+            set_text(&shown.card, &t);
         }
-        let p = shown.pad.as_mut().expect("the pad above");
         if pressed(buttons.b, last.b) && !t.is_empty() {
             t = textinput::deleted(&t);
             p.shift = t.is_empty();
-            set_text(shown, &t);
+            set_text(&shown.card, &t);
         }
-        let p = shown.pad.as_mut().expect("the pad above");
         if pressed(buttons.minus, last.minus) {
             choice = Some(Choice::Cancel);
         }
@@ -417,7 +429,6 @@ fn step(ui: &mut Ui, mtm: MainThreadMarker) {
                 p.focus = at;
             }
         }
-        let p = shown.pad.as_mut().expect("the pad above");
         if pressed(buttons.a, last.a) {
             let key = p.rows[p.focus.0][p.focus.1].0;
             match key {
@@ -425,20 +436,20 @@ fn step(ui: &mut Ui, mtm: MainThreadMarker) {
                     if let Some(n) = textinput::typed(&t, c, p.shift, shown.req.max_len) {
                         t = n;
                         p.shift = false;
-                        set_text(shown, &t);
+                        set_text(&shown.card, &t);
                     }
                 }
                 Key::Shift => p.shift = !p.shift,
                 Key::Space => {
                     if let Some(n) = textinput::typed(&t, ' ', false, shown.req.max_len) {
                         t = n;
-                        set_text(shown, &t);
+                        set_text(&shown.card, &t);
                     }
                 }
                 Key::Back => {
                     t = textinput::deleted(&t);
                     p.shift = t.is_empty();
-                    set_text(shown, &t);
+                    set_text(&shown.card, &t);
                 }
                 Key::Cancel => choice = Some(Choice::Cancel),
                 Key::Ok => {

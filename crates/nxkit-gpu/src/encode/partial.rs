@@ -16,8 +16,10 @@
 //! without these draws the stencil of a frame kept the marks of the frames before, its background left them out, and
 //! every moving thing left a trail.
 
+use nxkit_metal::{
+    BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, StencilFace, StencilOp,
+};
 use nxkit_nvn::frame::Frame;
-use nxkit_metal::{BlendFactor, BlendOp, BlendState, ColorTarget, CompareFn, StencilFace, StencilOp};
 
 use super::*;
 
@@ -182,7 +184,10 @@ pub(super) fn encode(
     let Some(c) = sh.frame.cmds.get(cmd as usize) else {
         return;
     };
-    let at = sh.ordinals.get(cmd as usize).map_or(0, |o| o.clear as usize);
+    let at = sh
+        .ordinals
+        .get(cmd as usize)
+        .map_or(0, |o| o.clear as usize);
     let detail = sh.detail.clears.get(at).copied().unwrap_or_default();
     let Some(clear) = Clear::of(c, &detail) else {
         return;

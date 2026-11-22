@@ -15,6 +15,7 @@ mod homeui;
 mod homeviews;
 pub(crate) mod hud;
 mod kernel;
+mod keyboardviews;
 pub mod loading;
 pub mod logpipe;
 mod look;
@@ -26,6 +27,7 @@ mod pointer;
 mod prefs;
 mod present;
 mod screen;
+mod stophooks;
 mod textinputui;
 pub mod vm;
 
