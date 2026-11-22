@@ -139,5 +139,7 @@ pub(crate) fn frames() -> std::sync::MutexGuard<'static, Frames> {
 /// The game presents a frame at the guest time `now`: it is the next frame of the layer. Called by
 /// `nvnQueuePresentTexture`.
 pub(crate) fn frame_queued(now: u64) {
+    // The input timeline (waits and recordings in frames) counts the presents.
+    nxkit_svc_input::live::frame_presented();
     frames().queue(now);
 }

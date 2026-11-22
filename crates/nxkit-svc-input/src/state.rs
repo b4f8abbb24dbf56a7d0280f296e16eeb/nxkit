@@ -214,12 +214,21 @@ impl Input {
             return NpadState::default();
         };
         let pad = self.raw_pad(player, layout.one_player());
-        let keys = if player == 0 && !crate::system::blocked() {
-            self.player_one_keys()
-        } else {
+        let keys = if crate::system::blocked() {
             None
+        } else {
+            let own = if player == 0 {
+                self.player_one_keys()
+            } else {
+                None
+            };
+            crate::live::add(player, own)
         };
-        build_state(style, &pad, keys.as_ref())
+        let state = build_state(style, &pad, keys.as_ref());
+        if player == 0 {
+            crate::live::observe(&state);
+        }
+        state
     }
 
     /// What the keyboard, the mouse and the scripted input (`NXKIT_INPUT_FILE`) give player 1. `None` when the
