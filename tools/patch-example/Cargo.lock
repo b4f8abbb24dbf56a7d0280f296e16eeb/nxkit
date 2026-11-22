@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "nxkit-patch-abi"
-version = "0.15.2"
+version = "0.16.0"
 
 [[package]]
 name = "patch-example"

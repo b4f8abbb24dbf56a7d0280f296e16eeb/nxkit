@@ -261,6 +261,8 @@ While the capture runs, each render pass gets a label `r<index> <size> <format> 
 
 Metal makes a capture only when the process starts with `MTL_CAPTURE_ENABLED=1` in its environment. Start the game with `NXKIT_GPU_CAPTURE=1`. Then the host sets it before it makes the first Metal device, as it does for `MTL_HUD_ENABLED`. Without it, `gputrace` fails with the message that capture is not supported. The setting is off by default. With Metal's capture layer, a pipeline compile whose task options name lookup archives crashed in the capture wrapper of the compiler (Pokémon Pokopia, a new pipeline of the `paint` knob). Thus, while the capture layer is on, the pipeline cache gives the compiles no lookup archives. It still asks the archives directly, so the start can compile more pipelines than without the layer.
 
+In the host of Pokémon Pokopia on macOS 26, Metal refuses the capture of the queue too, with "Capturing Metal 4 Device is not supported". A test process captures the same queue (`crates/nxkit-metal/tests/gputrace_probe.rs`, checked on 2026-11-22). The cause is open. A capture scope of the Metal 4 queue throws `-[MTLCaptureScope traceStream]: unrecognized selector` as a capture object, so it is no alternative.
+
 ## Categories (`NXKIT_DIAG`)
 
 The column "takes effect" says when a change of `NXKIT_DIAG` works. `live` means that the next frame uses it (W35). `start` means that the host decides at the start of the game, so you must start the game with the category. The categories `frame` and `gateseq` are the only ones that are start only. Both need the hooks for the batches of the GPU, which the host builds once. Every other category reads `NXKIT_DIAG` where it prints, or keeps the answer in a `Memo` that the next change of a live setting resets.

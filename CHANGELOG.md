@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.16.0 - 2026-11-22
+
 ### Changed
 
 - The title layer has engine families and graphics families (R75). Every title module names its engine family
@@ -41,6 +43,26 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   (family, markers, candidates), and the host prints a line at its start.
   `launcher.json` has the optional object `build` (`profile` title or generic, `engine`, `graphics`, `nxkit_version`, `evidence`) for a
   launcher, and the generic path writes the file too.
+- Live diagnostics (W35 to W38). Each running game listens on the control socket `$TMPDIR/nxkit/<pid>.sock`, and
+  `tools/nxkit-ctl` is the client. `NXKIT_CONTROL=0` turns the socket off. The verbs `keys`, `set` and `unset` change
+  the diagnostic keys (`NXKIT_DIAG`, the watches, the traces, `NXKIT_KNOB`) while the game runs, and `log` reads their
+  output. The diagnostics read their keys live, from the next frame on.
+- The verbs `capture`, `texture`, `passes`, `stats`, `sample` and `gputrace` (W36). `capture passes` writes the final
+  picture and every render pass attachment after its pass, with a manifest. `gputrace` captures the next frames of the
+  Metal 4 queue into a GPU trace document for Xcode. It needs a start with `NXKIT_GPU_CAPTURE=1`.
+- The verbs `press`, `hold`, `release`, `stick`, `input`, `record` and `replay` (W36). An input script is a timeline that
+  the input service joins with the controllers, so a recording leads back to a scene after a new build.
+- The verb `shader` (`list`, `dump`, `load`, `reset`, `status`) swaps the MSL of a program while the game runs.
+  `NXB_KEEP_MSL=1` keeps the MSL sources of the shader step for it.
+- Patch modules (W38). The verb `patch` (`load`, `unload`, `list`, `reload`) loads a library that hooks the frame, the
+  render passes and the draws of the encoder. `crates/nxkit-patch-abi` holds the contract, `tools/patch-example` an
+  example.
+- `docs/live-debugging.md`, the guide of live debugging, and the agent skill `nxkit-live-debug`.
+
+### Known issues
+
+- `gputrace` fails in the host of Pokémon Pokopia on macOS 26 with "Capturing Metal 4 Device is not supported". A test
+  process captures the same queue. The cause is open.
 
 ## 0.15.2 - 2026-11-22
 

@@ -11,7 +11,7 @@ Use nxkit only with games that you own. No game data, keys or shaders are in thi
 
 ## Status
 
-The current release is [0.15.2](https://github.com/v0lumehi/nxkit/releases/tag/v0.15.2) (2026-11-22). It is early
+The current release is [0.16.0](https://github.com/v0lumehi/nxkit/releases/tag/v0.16.0) (2026-11-22). It is early
 software. The apps run on Macs with Apple silicon. The libraries are built for the Mac's own macOS version, so on
 macOS 26 build the app on macOS 26. The release ZIP holds `nxb` and `nxkit-host` for macOS 26 and newer (see "Install a release"). `nxb` also builds on Windows (x86-64), where `nxb extract` runs.
 

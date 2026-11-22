@@ -59,7 +59,7 @@ Use the form `game_report.yml` to report a game. Do not open a blank issue and d
 You can prefill the form with a link. Use the field ids as query names:
 
 ```
-https://github.com/v0lumehi/nxkit/issues/new?template=game_report.yml&title_id=0100F2C0115B6000&game_version=1.0.0&result=Works&nxkit_version=0.15.2&mac_model=Mac15%2C8&macos_version=26.1
+https://github.com/v0lumehi/nxkit/issues/new?template=game_report.yml&title_id=0100F2C0115B6000&game_version=1.0.0&result=Works&nxkit_version=0.16.0&mac_model=Mac15%2C8&macos_version=26.1
 ```
 
 ## Architecture
