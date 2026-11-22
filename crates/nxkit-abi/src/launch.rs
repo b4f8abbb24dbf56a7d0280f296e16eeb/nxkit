@@ -70,6 +70,10 @@ pub const HD_RUMBLE: &str = "NXKIT_HD_RUMBLE";
 /// `1`: the Metal performance HUD is shown over the game.
 pub const METAL_HUD: &str = "NXKIT_METAL_HUD";
 
+/// `0`: the host does not set `MTL_CAPTURE_ENABLED=1`, so Metal makes no GPU trace capture (the `gputrace` verb of the
+/// control socket then fails). Not a launcher option.
+pub const GPU_CAPTURE: &str = "NXKIT_GPU_CAPTURE";
+
 /// `off` or `metalfx`: how the present scales a picture that is smaller than the window, as `DM_PRESENT_UPSCALE` of
 /// the old engine. `metalfx` scales it through MetalFX's spatial scaler, `off` by nearest pixel.
 pub const PRESENT_UPSCALE: &str = "NXKIT_PRESENT_UPSCALE";

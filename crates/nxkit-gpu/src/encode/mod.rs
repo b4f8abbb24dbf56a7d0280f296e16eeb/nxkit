@@ -288,7 +288,28 @@ pub(crate) fn render_pass(
         let what = first.map_or_else(String::new, |d| {
             format!("{}x{} {:?}", d.width, d.height, d.format)
         });
-        rp.set_label(&format!("r{index} {what} d{}", range.len()));
+        // The fragment program keys of the draws are the keys of the NXKIT_DIAG output, so a pass of a GPU trace maps back.
+        let mut keys: Vec<&str> = Vec::new();
+        for d in range
+            .clone()
+            .filter_map(|n| sh.detail.draws.get(n as usize))
+        {
+            if let Some(k) = d.program.fragment.as_deref()
+                && !keys.contains(&k)
+                && keys.len() < 4
+            {
+                keys.push(k);
+            }
+        }
+        rp.set_label(&format!(
+            "r{index} {what} d{} fs {}",
+            range.len(),
+            if keys.is_empty() {
+                "-".to_owned()
+            } else {
+                keys.join(",")
+            }
+        ));
     }
     if let Some(dep) = sh.barriers.before.get(index).copied().flatten()
         && rp.encode(&RenderCommand::Depend(dep)).is_err()

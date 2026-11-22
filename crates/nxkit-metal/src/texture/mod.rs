@@ -258,37 +258,62 @@ impl Texture {
     /// Debugging only: all texels of level 0 and slice 0 of a texture of 4 bytes per texel, row by row, read back with a
     /// blit and a wait. None for another format.
     pub fn debug_read_all(&self, ctx: &Context) -> Option<Vec<u8>> {
+        if self.inner.desc.format.bytes_per_pixel() != 4 {
+            return None;
+        }
+        self.debug_read_image(ctx, 0, 0)
+    }
+
+    /// Debugging only: all texels of mip `level` and of `slice` (the array layer, cube face or depth plane) of a
+    /// texture, row by row with no padding, read back with a blit and a wait. The format may have 1 to 16 bytes per
+    /// texel. None for a compressed format, a format with a stencil aspect, a multisample texture, a memoryless texture
+    /// and a level or slice that the texture does not have. It sees what the GPU wrote before the call only when the
+    /// caller waited for that work.
+    pub fn debug_read_image(&self, ctx: &Context, level: u32, slice: u32) -> Option<Vec<u8>> {
         use objc2_metal::{
             MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
             MTLResourceOptions,
         };
         let d = self.inner.desc;
-        if d.format.bytes_per_pixel() != 4
-            || d.format.is_compressed()
+        let bpp = d.format.bytes_per_pixel() as usize;
+        let volume = d.kind == TextureKind::D3;
+        let slices = match d.kind {
+            TextureKind::D3 => d.depth,
+            TextureKind::Cube => 6,
+            TextureKind::CubeArray => 6 * d.array_layers,
+            _ => d.array_layers,
+        };
+        if d.format.is_compressed()
+            || d.format.has_stencil()
+            || bpp == 0
+            || bpp > 16
+            || self.inner.samples > 1
+            || d.storage == Storage::Memoryless
             || d.width == 0
             || d.height == 0
+            || level >= d.mip_levels
+            || slice >= slices.max(1)
         {
             return None;
         }
-        let row = 4 * d.width as usize;
-        let len = row * d.height as usize;
+        let width = (d.width >> level).max(1) as usize;
+        let height = (d.height >> level).max(1) as usize;
+        let row = bpp * width;
+        let len = row * height;
         let dev = ctx.device();
         let queue = dev.newCommandQueue()?;
         let buf = dev.newBufferWithLength_options(len, MTLResourceOptions::StorageModeShared)?;
         let cb = queue.commandBuffer()?;
         let enc = cb.blitCommandEncoder()?;
-        // SAFETY: the source box is level 0 of slice 0 and the destination holds `row * height` bytes.
+        // SAFETY: the source box is inside the level (its size is the size of the level, and the slice was checked above)
+        // and the destination holds `row * height` bytes.
         unsafe {
             enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
                 &self.inner.raw,
-                0,
-                0,
-                MTLOrigin { x: 0, y: 0, z: 0 },
-                MTLSize {
-                    width: d.width as usize,
-                    height: d.height as usize,
-                    depth: 1,
-                },
+                if volume { 0 } else { slice as usize },
+                level as usize,
+                MTLOrigin { x: 0, y: 0, z: if volume { slice as usize } else { 0 } },
+                MTLSize { width, height, depth: 1 },
                 &buf,
                 0,
                 row,

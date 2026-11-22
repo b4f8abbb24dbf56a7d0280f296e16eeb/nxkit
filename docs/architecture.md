@@ -190,11 +190,11 @@ pipeline that calls them.
 | 2 resources | `snapshot`, `textures`, `upload`, `scaled`, `copyback`, `clear`, `programs`, `pipelines` (with `pipelines::coverage`), `pull`, `bindless`, `gmem`, `images`, `rename`, `private` | the Metal objects of the resource table |
 | 3 planning | `drawctx`, `probe`, `geometry`, `draws`, `mesh`, `indirect`, `barriers`, `native` (with the NDSR and NDVE replacements), `tupscale`, `queries`, `icbs` | what the planning of a draw reads (`drawctx::Shared`), and one draw or dispatch in Metal terms. Also the native replacements, the temporal upscale, the GPU counters, the indirect command buffers and the observer interface of the analyses (`probe`) |
 | 4 encode | `encode` (with `EncodeCtx`), `passes`, `encthread`, `blit` | the Metal 4 command buffers of a frame |
-| 5 analyses | `gatediag`, `health`, `meshvis`, `nanscan`, `lum`, `passprof`, `overlap` | the opt-in analyses. The encode path reaches them only through `probe` |
+| 5 analyses | `gatediag`, `health`, `meshvis`, `nanscan`, `lum`, `passprof`, `overlap`, `inspect` | the opt-in analyses. The encode path reaches them only through `probe` |
 | 6 frame driver | `report`, `gpu`, `backend`, `walk` | the public entry: a held frame in, a shown frame and an `EncodeReport` out |
 
 The core path (layers 1 to 4) knows the switches of `diag` and the interface of `probe`, and no analysis module.
-`gpu::PROBES` installs `nanscan` and `lum` as hooks, `passprof` is a `probe::PassClock` and `meshvis` a
+`gpu::PROBES` installs `nanscan`, `inspect` and `lum` as hooks, `passprof` is a `probe::PassClock` and `meshvis` a
 `probe::MeshCounts` in the GPU counters. Each analysis keeps its own `NXKIT_DIAG` switch, so a hook that is off
 returns at once, as the direct calls did. Before W29, 38 of the 54 modules were one cycle group. Now the crate has
 none. No module went into a sub-crate. After the moves, no group of modules is cohesive and free of edges into the

@@ -47,6 +47,7 @@ mod hotswap;
 mod icbs;
 mod images;
 mod indirect;
+pub mod inspect;
 mod jobs;
 mod json;
 mod lru;

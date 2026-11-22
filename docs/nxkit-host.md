@@ -169,6 +169,7 @@ A launcher can show its own text for the keys `launch.set.<env>`, `launch.set.<e
 | `NXKIT_HOME_MENU` | toggle | `1`, `0` | `1` |
 | `NXKIT_HOME_QUIT` | toggle | `1`, `0` | `1` |
 | `NXKIT_METAL_HUD` | toggle | `1`, `0` | `0` |
+| `NXKIT_GPU_CAPTURE` | not a launcher option | `0` (no `MTL_CAPTURE_ENABLED=1`, so no `gputrace`) | on |
 | `NXKIT_SPATIAL_AUDIO` | toggle | `1` (the game gets 5.1, played as spatial audio), `0` (stereo) | the `spatial_audio` of the title module, else `0` |
 | `NXKIT_HEAD_TRACKING` | toggle, needs `NXKIT_SPATIAL_AUDIO=1` | `1`, `0` | `0` |
 
