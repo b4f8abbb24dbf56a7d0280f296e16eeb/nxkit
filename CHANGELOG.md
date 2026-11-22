@@ -4,6 +4,17 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.16.2 - 2026-11-22
+
+### Fixed
+
+- At `NXKIT_SCALE=2` Pokémon Pokopia fills the window. The game gives `nvnWindowSetCrop` in its own pixels, and the
+  present took that crop from the scaled window texture, so only the top left quarter showed. The present scales the
+  crop with the window texture now.
+- At a render scale, render targets with a side under 32 pixels keep their size, and a scaled texture that a CPU read
+  pins keeps its contents. Pokopia renders its exposure into 2x1 targets and its fog colour curves into 256x3 ones.
+  At scale 2 its title screen was overexposed and its sky was black.
+
 ## 0.16.1 - 2026-11-22
 
 ### Fixed

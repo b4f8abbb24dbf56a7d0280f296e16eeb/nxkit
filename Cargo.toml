@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "titles/nxtitle", "titles/nxtitles", "titles/engines/*", "titles/graphics/*", "titles/games/*", "xtask"]
 
 [workspace.package]
-version = "0.16.1"
+version = "0.16.2"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
