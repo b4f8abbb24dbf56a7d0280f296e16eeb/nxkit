@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use msl_sema::hir::Module;
-use msl_sema::types::{Scalar, Type, Types};
+use msl_sema::types::{is_float, Scalar, Type, Types};
 use msl_sema::Error;
 
 use func::{Addr, FnGen, RetKind, V};
@@ -152,6 +152,9 @@ impl Attrs {
 /// Attribute group of call sites of user functions.
 const USER_CALL_GROUP: u32 = 11;
 
+// Offset from ordinary definition groups when late contraction is disabled.
+const NO_LATE_CONTRACT_GROUP: u32 = 20;
+
 const FN_ATTRS: &str = "\"approx-func-fp-math\"=\"true\" \"frame-pointer\"=\"all\" \"invariance-late-contract\" \"invariance-late-reassoc\" \"invariance-late-unsafe-fp-math\" \"min-legal-vector-width\"=\"0\" \"no-builtins\" \"no-infs-fp-math\"=\"true\" \"no-nans-fp-math\"=\"true\" \"no-signed-zeros-fp-math\"=\"true\" \"no-trapping-math\"=\"true\" \"stack-protector-buffer-size\"=\"8\"";
 
 /// Something clang emits after the top-level declarations (EmitDeferred).
@@ -202,6 +205,7 @@ pub struct ModCx {
     pub vec_tbaa_char: bool,
     /// [`Target::read_sampler`].
     pub read_sampler: bool,
+    metal41: bool,
     tbaa: tbaa::Cache,
 }
 
@@ -367,10 +371,11 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         kernel: Vec::new(),
         vec_tbaa_char: t.vec_tbaa_char,
         read_sampler: t.read_sampler,
+        metal41: t.air_version == (2, 9, 0) && t.language == (4, 1, 0),
         tbaa: tbaa::Cache::default(),
     };
     // constant arrays, as clang emits them: a long run of trailing zeros becomes a packed struct
-    // { [nonzero x T], [rest x T] zeroinitializer } that accesses reach through a bitcast
+    // with a scalar/vector or an array prefix. Accesses reach it through a bitcast.
     let mut const_globals = String::new();
     for (k, c) in m.consts.iter().enumerate() {
         let Type::Array(el, n) = &c.ty else {
@@ -380,7 +385,7 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         let mut vals = Vec::with_capacity(c.init.len());
         for e in &c.init {
             vals.push(
-                FnGen::fold(e)
+                FnGen::fold_array_initializer(e)
                     .ok_or_else(|| Error::unsupported("const-array:non-constant-init"))?,
             );
         }
@@ -401,23 +406,48 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         let at = llty(&cx.types, &c.ty, true);
         let al = cx.types.layout(&c.ty).align;
         let name = cx.const_names[k].clone();
-        let trailing = *n as usize - nonzero;
+        let extent = *n as usize;
+        let trailing = extent
+            .checked_sub(nonzero)
+            .ok_or_else(|| Error::invalid("const-array:excess-init"))?;
         if nonzero == 0 {
             let _ = writeln!(
                 const_globals,
                 "{name} = internal addrspace(2) constant {at} zeroinitializer, align {al}"
             );
         } else if trailing >= 8 {
-            let st = format!("<{{ [{nonzero} x {et}], [{trailing} x {et}] }}>");
-            let items: Vec<String> = vals[..nonzero].iter().map(item).collect();
+            let (prefix_ty, prefix) = if let [v] = &vals[..nonzero] {
+                (et.clone(), item(v))
+            } else {
+                let prefix_ty = format!("[{nonzero} x {et}]");
+                let items: Vec<String> = vals[..nonzero].iter().map(item).collect();
+                let prefix = format!("{prefix_ty} [{}]", items.join(", "));
+                (prefix_ty, prefix)
+            };
+            let st = format!("<{{ {prefix_ty}, [{trailing} x {et}] }}>");
             let _ = writeln!(
                 const_globals,
-                "{name} = internal addrspace(2) constant {st} <{{ [{nonzero} x {et}] [{}], [{trailing} x {et}] zeroinitializer }}>, align {al}",
-                items.join(", ")
+                "{name} = internal addrspace(2) constant {st} <{{ {prefix}, [{trailing} x {et}] zeroinitializer }}>, align {al}"
             );
             cx.const_names[k] =
                 format!("bitcast ({st} addrspace(2)* {name} to {at} addrspace(2)*)");
         } else {
+            // Larger zero tails use the packed form above. Only pad a short tail here.
+            if vals.len() < extent {
+                let zero = match el.as_ref() {
+                    Type::Vector(scalar, lanes) => {
+                        // Use the same lane spelling as an explicit zero vector.
+                        let lane = if msl_sema::types::is_float(*scalar) {
+                            ir::CVal::Float(0.0)
+                        } else {
+                            ir::CVal::Int(0)
+                        };
+                        ir::CVal::Vec(vec![lane; usize::from(*lanes)])
+                    }
+                    _ => ir::CVal::Zero,
+                };
+                vals.resize(extent, zero);
+            }
             let items: Vec<String> = vals.iter().map(item).collect();
             let _ = writeln!(
                 const_globals,
@@ -804,7 +834,13 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
     out.push_str(&decls);
     out.push('\n');
     for (base, w) in &fn_groups {
-        let head = match base {
+        let no_late_contract = *base >= NO_LATE_CONTRACT_GROUP;
+        let kind = if no_late_contract {
+            base - NO_LATE_CONTRACT_GROUP
+        } else {
+            *base
+        };
+        let head = match kind {
             0 => "convergent mustprogress nounwind",
             1 => "alwaysinline convergent mustprogress nounwind",
             2 => "convergent nounwind",
@@ -814,6 +850,9 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
             "\"min-legal-vector-width\"=\"0\"",
             &format!("\"min-legal-vector-width\"=\"{}\"", w & 0xffff),
         );
+        if no_late_contract {
+            attrs = attrs.replace(" \"invariance-late-contract\"", "");
+        }
         let head = if w & 0x20000 != 0 {
             head.replace(" mustprogress", "")
         } else {
@@ -972,6 +1011,18 @@ fn emit_function(cx: &mut ModCx, f: &msl_sema::hir::Func, fid: usize) -> Result<
             msl_sema::hir::Inline::Hint => 10,
             msl_sema::hir::Inline::None => 0,
         };
+        // A by-value floating-point parameter uses the pragma's late-contract mode.
+        // Aggregate and reference parameters keep the ordinary definition attributes.
+        let group = if cx.metal41
+            && !f.contract
+            && f.params.iter().any(|p| {
+                p.by_ref.is_none()
+                    && matches!(p.ty, Type::Scalar(s) | Type::Vector(s, _) if is_float(s))
+            }) {
+            group + NO_LATE_CONTRACT_GROUP
+        } else {
+            group
+        };
         let rattr = if f.ret == Type::BOOL { "zeroext " } else { "" };
         let _ = writeln!(
             defs,
@@ -1019,12 +1070,11 @@ fn emit_function(cx: &mut ModCx, f: &msl_sema::hir::Func, fid: usize) -> Result<
     Ok(defs)
 }
 
-/// Rewrites each definition's attribute group `#N` to `#N*1000+W`, W = the widest vector (bits) in its
-/// signature and call sites, returns the text and the (N, W) pairs used.
+/// Rewrites each definition's attribute group `#N` to `#N*1000+W`, W = the widest vector value (bits)
+/// in its signature and call sites. Returns the text and the (N, W) pairs used.
 fn vector_widths(defs: &str) -> (String, BTreeSet<(u32, u32)>) {
     fn width(line: &str) -> u32 {
         let mut best = 0;
-        let b = line.as_bytes();
         let mut k = 0;
         while let Some(p) = line[k..].find('<') {
             let st = k + p + 1;
@@ -1037,6 +1087,16 @@ fn vector_widths(defs: &str) -> (String, BTreeSet<(u32, u32)>) {
                 continue;
             }
             let rest = &line[st + digits.len() + 3..];
+            // A typed pointer does not pass its vector by value.
+            if let Some((_, suffix)) = rest.split_once('>') {
+                let suffix = suffix
+                    .strip_prefix(" addrspace(")
+                    .and_then(|space| space.split_once(')').map(|(_, tail)| tail))
+                    .unwrap_or(suffix);
+                if suffix.starts_with('*') {
+                    continue;
+                }
+            }
             let bits = if rest.starts_with("float") {
                 32
             } else if rest.starts_with("half") {
@@ -1050,7 +1110,6 @@ fn vector_widths(defs: &str) -> (String, BTreeSet<(u32, u32)>) {
             } else {
                 0
             };
-            let _ = b;
             best = best.max(digits.parse::<u32>().unwrap_or(0) * bits);
         }
         best

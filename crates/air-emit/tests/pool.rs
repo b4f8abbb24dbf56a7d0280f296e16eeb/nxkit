@@ -127,3 +127,37 @@ fn a_metal_array_outside_a_struct_is_unsupported() {
     .expect_err("rejects");
     assert!(e.key().contains("metal-array"), "{}", e.key());
 }
+
+#[test]
+fn relaxed_device_uint_or_uses_the_pool_intrinsic() {
+    // The producer first hoists reinterpret_cast(&word), then uses the pointer local.
+    let ir = emit(
+        "kernel void k(device uint* words [[buffer(0)]], device uint* saved [[buffer(1)]]) {
+            device atomic_uint* p = reinterpret_cast<device atomic_uint*>(&words[1]);
+            *saved = atomic_fetch_or_explicit(p, 1u, memory_order_relaxed);
+        }",
+    );
+    assert!(ir.contains("call i32 @air.atomic.global.or.u.i32(i32 addrspace(1)* nocapture %"));
+    assert!(ir.contains(", i32 1, i32 0, i32 2, i32 0, i1 false)"));
+    assert!(!ir.contains("air.atomic.local.or"), "{ir}");
+}
+
+#[test]
+fn device_atomic_or_does_not_expand_other_forms() {
+    let head = "kernel void k(device uint* words [[buffer(0)]]) {";
+    for body in [
+        "atomic_fetch_or_explicit(words, 1u, memory_order_relaxed);",
+        "device atomic_uint* p = reinterpret_cast<device atomic_uint*>(&words[1]);
+         atomic_fetch_or_explicit(p, 1u, memory_order_acquire);",
+        "device atomic_uint* p = reinterpret_cast<device atomic_uint*>(&words[1]);
+         atomic_fetch_add_explicit(p, 1u, memory_order_relaxed);",
+        "device atomic_uint* p = reinterpret_cast<device atomic_uint*>(&words[1]);
+         atomic_fetch_or_explicit(p, -1, memory_order_relaxed);",
+    ] {
+        let source = format!("{PRE}{head}{body}}}");
+        assert!(
+            compile_source(&source, &Target::macos(), "t.metal").is_err(),
+            "{body}"
+        );
+    }
+}
