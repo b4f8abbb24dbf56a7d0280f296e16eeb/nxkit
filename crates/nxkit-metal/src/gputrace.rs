@@ -51,8 +51,19 @@ pub fn gpu_trace_start(ctx: &Context, path: &Path) -> Result<(), String> {
     unsafe { desc.setCaptureObject(Some(object)) };
     desc.setDestination(MTLCaptureDestination::GPUTraceDocument);
     desc.setOutputURL(Some(&url));
-    m.startCaptureWithDescriptor_error(&desc)
-        .map_err(|e| format!("the capture did not start: {}", e.localizedDescription()))
+    let thread = std::thread::current();
+    eprintln!(
+        "nxkit-metal: GPU trace of the Metal 4 queue {:p} (thread {}) to {}",
+        object,
+        thread.name().unwrap_or("unnamed"),
+        path.display()
+    );
+    m.startCaptureWithDescriptor_error(&desc).map_err(|e| {
+        format!(
+            "the capture of the Metal 4 queue did not start: {}",
+            e.localizedDescription()
+        )
+    })
 }
 
 /// Ends the capture. The caller waited for the GPU work of the frames before.
