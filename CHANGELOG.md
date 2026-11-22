@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.15.0 - 2026-11-22
+
 ### Added
 
 - A title module can turn spatial audio on by default (`spatial_audio` of its run settings, written to `game.json`
