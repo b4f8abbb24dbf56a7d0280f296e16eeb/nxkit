@@ -1,0 +1,59 @@
+#!/bin/sh
+# Makes and builds patch modules of the nxkit host (W38, "Patch modules" in docs/diagnostics.md).
+#
+# Usage: tools/nxkit-patch new NAME [DIR]   copies tools/patch-example to DIR (default tools/patches/NAME)
+#        tools/nxkit-patch build [DIR]      cargo build --release in DIR (default: this folder), prints the dylib path
+#
+# A patch module is a small cdylib crate outside the workspace. Load it into a running game with
+#   tools/nxkit-ctl patch load /path/to/libNAME.dylib
+# After a rebuild, `tools/nxkit-ctl patch reload` loads the same file again while the game runs.
+set -eu
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+example="$root/tools/patch-example"
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+new() {
+  name="${1:?new needs a NAME}"
+  case "$name" in
+    [a-z]*) ;;
+    *) echo "nxkit-patch: NAME starts with a lowercase letter" >&2; exit 2 ;;
+  esac
+  case "$name" in
+    *[!a-z0-9_-]*) echo "nxkit-patch: NAME has only a-z, 0-9, - and _" >&2; exit 2 ;;
+  esac
+  dest="${2:-$root/tools/patches/$name}"
+  if [ -e "$dest" ]; then
+    echo "nxkit-patch: $dest exists" >&2
+    exit 1
+  fi
+  mkdir -p "$dest/src"
+  # The copy is outside tools/patch-example, so the path of the contract crate is absolute.
+  sed -e "s|patch-example|$name|g" \
+      -e "s|\"../../crates/nxkit-patch-abi\"|\"$root/crates/nxkit-patch-abi\"|" \
+      "$example/Cargo.toml" > "$dest/Cargo.toml"
+  sed -e "s|patch-example|$name|g" "$example/src/lib.rs" > "$dest/src/lib.rs"
+  cp "$example/.gitignore" "$dest/.gitignore"
+  lib="$(printf '%s' "$name" | tr '-' '_')"
+  echo "made $dest"
+  echo "build: tools/nxkit-patch build $dest"
+  echo "load:  tools/nxkit-ctl patch load $dest/target/release/lib$lib.dylib"
+}
+
+build() {
+  dir="${1:-$example}"
+  (cd "$dir" && cargo build --release --offline)
+  # The name of the library is the package name with _ for -.
+  pkg="$(sed -n 's/^name = "\(.*\)"/\1/p' "$dir/Cargo.toml" | head -n 1 | tr '-' '_')"
+  echo "$(cd "$dir" && pwd)/target/release/lib$pkg.dylib"
+}
+
+case "${1:-}" in
+  new) shift; new "$@" ;;
+  build) shift; build "$@" ;;
+  *) usage ;;
+esac

@@ -25,7 +25,7 @@ tools/nxkit-ctl log 200
 
 `keys` lists every live key with its value now. `set KEY=VALUE` and `unset KEY` change a key, and the next frame uses
 the new value. A change gives every rate limit its budget again. `log` reads the last lines of the log of the game, and
-`log +CURSOR` reads the lines after an earlier read. `help` lists every verb. Every other key is read at the start
+`log +CURSOR` reads the lines after an earlier read. `patch` loads patch modules (see "Patch modules"). `help` lists every verb. Every other key is read at the start
 only, and `set` refuses it. `NXKIT_CONTROL=0` turns the socket off.
 
 | variable | effect |
@@ -306,6 +306,103 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `tupjx`, `tupjy`, `tupmx`, `tupmy` | The temporal upscale (R72) flips the sign of the jitter in x or y, or of the motion in x or y, that it gives MetalFX. Set them in the file of `NXKIT_KNOB_FILE` to find a wrong sign while the game runs. A wrong jitter sign shimmers on a still picture. A wrong motion sign smears or ghosts what moves. |
 | `nancomp` | With `NXKIT_DIAG=nanscan`, the float storage images of every compute dispatch are counted before and after the compute pass (`image` lines), also when `NXKIT_DIAG_FS` is empty. |
 
+## Patch modules
+
+A patch module lets you test a change of the host's behaviour in a running game. You do not build the host again. You do not restart the game. The state stays in the host, so the game keeps its scene. A fix that a patch proves goes into the host for good (W38).
+
+The host cannot replace its own Rust code. Rust has no stable ABI, and the host keeps its state in objects and statics. So the host has fixed hook points and a small C ABI. A patch module is a separate crate that builds to a dynamic library. The control socket loads it.
+
+### The hook points
+
+The hook points are in the encoder of `nxkit-gpu`. A hook gets plain data and gives an answer. The default answer changes nothing.
+
+| hook | the patch gets | the patch can answer |
+|---|---|---|
+| frame begin | the frame number, the number of passes and draws | nothing |
+| frame end | the frame number, the render passes, the draws, the skipped commands, the command buffers, the pipeline builds, the encode time in nanoseconds | nothing |
+| render pass, before the host encodes it | the frame, the index of the pass, its first draw and draw count, each attachment (texture id, slot, size, format, load and store action), the program pairs of its draws (vertex and fragment key, at most 16) | skip the pass, force a full barrier before it, change the load action of colour slots (with a clear colour), mark it for capture |
+| draw, before the host encodes it | the frame, the pass, the draw number, the topology, the vertex and fragment key, the texture binds (stage, slot, texture id, handle), the blend state and write mask of each colour slot, the depth and stencil flags, the stencil reference | skip the draw, replace the blend state of colour slots, bind another texture in up to four slots, replace the stencil reference |
+| log (the host gives it to the patch) | nothing | a line of text. The host prints it in the log with the prefix `nxkit-patch:` |
+
+The structs are in `crates/nxkit-patch-abi`. A texture id of a draw is the id of the texture that the game's handle resolved to in this frame. A forced texture must be a texture that a draw of this frame binds too. Else the draw keeps its own texture. The pass hook runs for render passes only. Compute and copy passes have no hook.
+
+A pass that a patch marks for capture becomes the focus pass of `NXKIT_DIAG=lum`. Without that category the mark does nothing.
+
+### Write and build a patch
+
+Make a new patch from the example:
+
+```bash
+tools/nxkit-patch new my-fix
+```
+
+This writes `tools/patches/my-fix`. The folder is not in git. Edit `src/lib.rs`. The example skips the draws of one fragment program (`SKIP_FRAGMENT`) and logs each render pass of its first frames. A patch sets its name and its hooks in the init function:
+
+```rust
+extern "C" fn draw(info: &DrawInfo, answer: &mut DrawAnswer) {
+    if info.programs.fragment.as_str() == "KEY" {
+        answer.skip();
+    }
+}
+
+nxkit_patch_abi::export_patch!(init);
+
+fn init(host: &HostApi, table: &mut PatchTable) -> bool {
+    table.set_name("my-fix");
+    table.draw = Some(draw);
+    host.log("loaded");
+    true
+}
+```
+
+Build it in its folder. It takes about one second:
+
+```bash
+cd tools/patches/my-fix && cargo build --release
+```
+
+The result is `target/release/libmy_fix.dylib`. `tools/nxkit-patch build DIR` builds and prints this path.
+
+The example is not a member of the workspace. A dynamic library in the workspace would build with every run of the workspace. It has its own `[workspace]`, its own lock file and its own target folder. It uses only the contract crate `nxkit-patch-abi` by path.
+
+### Load, change and unload
+
+Use absolute paths. The verbs are:
+
+```bash
+tools/nxkit-ctl patch load /abs/path/libmy_fix.dylib
+tools/nxkit-ctl patch list
+tools/nxkit-ctl patch reload
+tools/nxkit-ctl patch unload my-fix
+```
+
+- `patch load PATH` copies the library to a path of its own, loads it and starts its hooks. The host replaces a patch of the same name at once.
+- `patch list` shows each loaded patch with its hooks and its path.
+- `patch reload [NAME]` loads the file of each loaded patch (or of one) again. Use it after a rebuild. If the load fails, the old patch stays.
+- `patch unload [NAME]` stops the hooks and unloads the library. Without a name it unloads all patches.
+
+The loop of an experiment is: edit, `cargo build --release`, `patch reload`, look at the game, `log 100`. You can load more than one patch. The host calls them in load order and merges the answers. A later answer wins when two patches change the same thing.
+
+### How unload stays safe
+
+The host copies the library to a new path before it loads it. Thus a rebuild of the same file is a new image, and the dyld cache of the old one is not used. The host checks the ABI version first. It refuses a patch of another version.
+
+A patch call runs under a read lock. Unload and replace take the write lock. They return only when no encoder thread is inside a patch call. After that, no thread can enter the old patch. Then the host calls `dlclose`.
+
+Without a loaded patch, each hook point costs one relaxed atomic load. A draw hook has one more effect. The encoder then does not replay recorded runs of draws, as with `NXKIT_SKIP_PROGRAMS`. A loaded patch also makes the frame note its texture handles.
+
+### Limits
+
+- Only the hook points can change behaviour. A patch cannot change anything else in the host.
+- A patch runs in the host process. A bug in it can crash the game. A panic in a hook aborts the process. Keep hooks small. Do not use `unwrap`.
+- A patch must not start a thread, keep a callback in the host or keep a pointer past the unload. Its code can go away.
+- A library that has thread-local variables (a Rust `cdylib` that prints with `println!` has them) stays mapped after `dlclose`. The hooks stop and the memory stays until the game ends. A reload still works, because each load is a new image.
+- The ABI version is exact. Any change of a struct changes the version. Build the patch again after you update the host.
+- The pass and draw hooks run on the encoder threads. Several threads can call a hook at the same time. A patch keeps its state in atomics or behind a lock.
+- A forced texture needs a texture that this frame binds in some draw. A texture that a shader reads through the bindless pool, with no bound handle, has no hook.
+- A skipped pass or draw counts as `skip.listed`. The frame does not render correctly.
+- The host does not check what a patch does with `unsafe` code. The loader is an experiment tool. Do not ship a patch.
+
 ## The render health report
 
 Defects that drop work are often silent. A texture upload is refused, a pool slot points to a dropped texture, a draw has no detail, or Metal refuses a view. The picture then has a hole, and the log shows no error. The health report counts every place that drops, refuses or degrades work. It counts always, at the cost of one atomic add. `NXKIT_DIAG=health` prints the counts.
@@ -352,7 +449,7 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `skip.transfer` | encoder | An upload or a copy-back failed. Look at `upload.*` and `copyback.*`. |
 | `skip.encode` | encoder | Metal refused an encoded command. |
 | `skip.pending` | encoder | The pipeline still compiles on a background thread. The draw shows a frame or two later. It is not a loss. |
-| `skip.listed` | encoder | A draw whose program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`. A debugging aid: the frame does not render correctly. |
+| `skip.listed` | encoder | A draw whose program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`, or a draw that a patch module skips (also each draw of a pass that it skips). A debugging aid: the frame does not render correctly. |
 | `walk.draw-no-args` | walker | A draw record without draw arguments (transform feedback, `DrawTexture` or an unknown draw kind). The draw gets an empty detail. |
 | `walk.draw-no-vertex` | walker | The bound program has no vertex stage, or a mesh draw finds no program with a mesh stage. |
 | `pipe.depth-mode-ignored` | encoder | The device is in the depth mode 0 to 1 (`nvnDeviceSetDepthMode`), but a vertex or mesh function has no entry that keeps the clip depth (a pulling `_bp` library, or a library from before `main0_z`). The draw converts the depth as for -1 to 1. |

@@ -242,6 +242,17 @@ pub(crate) fn render_pass(
         Ok(s) => s,
         Err(why) => return lost(stats, why),
     };
+    // A patch module (W38) may skip the pass, change its loads, mark it for capture and ask for a full barrier.
+    let patch = crate::patch::pass(sh, pass, index, &range, &s.desc);
+    if let Some(a) = &patch {
+        if a.flags & nxkit_patch_abi::PASS_SKIP != 0 {
+            return lost(stats, Skip::Listed);
+        }
+        crate::patch::apply_load(&mut s.desc, a);
+        if a.flags & nxkit_patch_abi::PASS_CAPTURE != 0 {
+            FOCUS_PASS.with(|c| c.set(true));
+        }
+    }
     // The block shadows that the pass loads get the blocks of their compressed texture first.
     let loads: Vec<&BlockTarget> = s.blocks.iter().filter(|b| b.1).map(|b| &b.0).collect();
     if !blocks::copy(sh.ctx, cb, &tables.vertex, &loads, blocks::Way::Load) {
@@ -281,6 +292,15 @@ pub(crate) fn render_pass(
     }
     if let Some(dep) = sh.barriers.before.get(index).copied().flatten()
         && rp.encode(&RenderCommand::Depend(dep)).is_err()
+    {
+        stats.skipped[Skip::Encode as usize] += 1;
+    }
+    if patch
+        .as_ref()
+        .is_some_and(|a| a.flags & nxkit_patch_abi::PASS_BARRIER != 0)
+        && rp
+            .encode(&RenderCommand::Depend(crate::patch::full_barrier()))
+            .is_err()
     {
         stats.skipped[Skip::Encode as usize] += 1;
     }
@@ -340,11 +360,9 @@ pub(crate) fn render_pass(
             n += 1;
             continue;
         }
-        if let Some(run) = sh
-            .run_at
-            .get(&n)
-            .filter(|r| n + r.draws <= range.end && !crate::diag::skip_list_on())
-            && (n..n + run.draws).all(|d| !is_off(d) && counts(d).is_none())
+        if let Some(run) = sh.run_at.get(&n).filter(|r| {
+            n + r.draws <= range.end && !crate::diag::skip_list_on() && !crate::patch::draw_on()
+        }) && (n..n + run.draws).all(|d| !is_off(d) && counts(d).is_none())
             && set_counting(&mut rp, &mut counting, None, stats)
             && run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats)
         {

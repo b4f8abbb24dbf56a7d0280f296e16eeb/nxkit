@@ -10,6 +10,7 @@
 #   tools/nxkit-ctl set NXKIT_WATCH_TEX=123,456
 #   tools/nxkit-ctl set NXKIT_DIAG=hitch,health
 #   tools/nxkit-ctl log 200
+#   tools/nxkit-ctl patch load /abs/path/libmy_fix.dylib   (patch modules, tools/nxkit-patch)
 #
 # The answer goes to stdout without the status line. The exit status is 0 for `.ok` and 1 for `.err`.
 set -eu

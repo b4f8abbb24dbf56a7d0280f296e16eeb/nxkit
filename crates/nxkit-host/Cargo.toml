@@ -21,6 +21,7 @@ path = "src/main.rs"
 
 [dependencies]
 nxkit-abi = { workspace = true }
+nxkit-patch-abi = { workspace = true }
 nxkit-pipestate = { workspace = true }
 nxkit-rt = { path = "../nxkit-rt" }
 nxkit-hos = { workspace = true }

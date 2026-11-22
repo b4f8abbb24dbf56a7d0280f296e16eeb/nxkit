@@ -90,6 +90,7 @@ fn start_control(board: nxkit_abi::live::Board, game: &crate::manifest::Game, ru
     crate::input_verbs::add(&mut control);
     #[cfg(target_os = "macos")]
     crate::shaderctl::shader_verbs(&mut control, &run.shader_hub);
+    crate::patchctl::add(&mut control);
     match crate::control::start(control) {
         Ok(path) => eprintln!("nxkit-host: control socket {}", path.display()),
         Err(e) => eprintln!("nxkit-host: no control socket: {e}"),

@@ -380,7 +380,7 @@ impl Gpu {
         }
         let res = textures.get(&id).ok_or(Skip::Texture)?;
         let tex_view = self.store.view(id, res, &slot.header, stats)?;
-        if crate::diag::tracks_handles() {
+        if crate::diag::tracks_handles() || crate::patch::handles_on() {
             crate::diag::note_handle(handle, id);
         }
         trace::trace_handle(view, handle, id, res, &slot.header);
