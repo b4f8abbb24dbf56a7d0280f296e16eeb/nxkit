@@ -6,6 +6,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- The guest threads that the services start get the priority of `nn::os`, 16 (#42). They got 44, the kernel's
+  default, which the kernel refused as 72. The SDK of Xenoblade Chronicles 3 aborted when the opening movie started.
 - The sampler pools of a game share an id space of 65536 sampler ids (#42). It had 4096, the ids of one console
   pool, and Xenoblade Chronicles 3 stopped at its second sampler pool (4096 and 2048 samplers) in
   `nvnSamplerPoolInitialize` with `ids above the handle limit`. It now reaches the title menu.

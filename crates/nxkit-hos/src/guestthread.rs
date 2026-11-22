@@ -37,7 +37,8 @@ pub struct GuestThread {
 }
 
 impl GuestThread {
-    /// Starts `body` on a new SDK thread of `priority` with a stack of `stack_size` bytes (rounded up to 4 KB).
+    /// Starts `body` on a new SDK thread of `priority` (the priority of `nn::os`, 0 to 31) with a stack of `stack_size`
+    /// bytes (rounded up to 4 KB).
     /// The stack comes from the SDK's `malloc`, because the SDK's `CreateThread` maps it with `MapMemory` and
     /// needs memory that the guest allocator owns.
     pub fn spawn(

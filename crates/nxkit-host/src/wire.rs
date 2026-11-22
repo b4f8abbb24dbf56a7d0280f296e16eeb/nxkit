@@ -12,8 +12,10 @@ use nxkit_svc_system::TextRequest;
 
 use crate::{guestsym, stop};
 
-/// The priority of the threads that a service starts when its seam gives none: the default priority of a Switch thread.
-const SERVICE_THREAD_PRIORITY: i32 = 44;
+/// The priority of the threads that a service starts when its seam gives none: `nn::os::DefaultThreadPriority`.
+/// `nn::os::CreateThread` takes the priority of `nn::os`, 0 to 31, which is the kernel's minus 28. The kernel's default
+/// 44 was 72 for the kernel, which refused it, and the SDK of Xenoblade Chronicles 3 aborted at its first movie.
+const SERVICE_THREAD_PRIORITY: i32 = 16;
 /// The stack of such a thread.
 const SERVICE_THREAD_STACK: u64 = 0x10_0000;
 /// The result code of a pacing bind that the kernel refused.
