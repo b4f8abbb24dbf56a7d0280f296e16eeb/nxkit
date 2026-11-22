@@ -110,7 +110,8 @@ pub fn run(opts: &Options) -> Result<()> {
         crate::frames::shown_to_step,
     )));
     let refresh = Arc::new(crate::refresh::Refresh::new(
-        crate::refresh::Request::from_settings(&settings, env),
+        crate::refresh::Request::from_settings(&settings, env)
+            .at_120(seams::runs_at_120(&placed.game)),
         screen.clone(),
     ));
 

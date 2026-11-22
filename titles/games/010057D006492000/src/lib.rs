@@ -1,7 +1,8 @@
 //! The title module of OCTOPATH TRAVELER for Nintendo Switch (`010057D006492000`).
 //!
 //! The game is update 1.0.5 (v327680) on SDK 3.5.1, graphics NVN. The engine tree names its engine: Unreal Engine 4.18.
-//! No engine family of nxkit holds it. The modules are `main`, `subsdk0` and `sdk`. This module holds what the engine
+//! The family `unreal` holds it, and its frame limit rule writes the target into `t.MaxFPS`. The modules are `main`,
+//! `subsdk0` and `sdk`. This module holds what the engine
 //! tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v327680, the
@@ -48,10 +49,8 @@ const SETTINGS: Fact<Settings> = Fact::new(
             ..Settings::DEFAULT.memory
         },
         display_versions: &[("67dacc049ceee8585b1583336c565b43", "1.0.5")],
-        // The engine's 60 fps came from the host writing t.MaxFPS 60 into Unreal's console variable; nxkit does not write
-        // it yet, so the game keeps its own 30 and a target of 60 made the load-driven step flip between holds of 1, 2
-        // and 3 (a frame cost exactly 2 vsyncs). 0: the game's own pace, as for a game whose target needs a missing part.
-        fps_target: 0,
+        // The game's config sets t.MaxFPS to 30. The limit rule of the family `unreal` writes the target into it.
+        fps_target: 60,
         fps_cvar: Some("t.MaxFPS"),
         tex_flush_upload: true,
         tex_dirty_upload: true,
@@ -126,7 +125,7 @@ impl Title for Octo {
     }
 
     fn family(&self) -> Option<&'static str> {
-        None
+        Some("unreal")
     }
 
     fn profile(&self) -> Option<&'static str> {

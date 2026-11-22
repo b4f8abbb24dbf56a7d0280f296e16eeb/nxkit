@@ -18,6 +18,7 @@ pub mod hostenv;
 pub mod input_file;
 pub mod json;
 pub mod layout;
+pub mod limits;
 pub mod macho;
 pub mod manifest;
 pub mod module;

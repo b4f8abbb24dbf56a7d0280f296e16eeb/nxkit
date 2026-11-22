@@ -42,7 +42,141 @@ fn find_from(img: &[u8], pat: &[u8], from: usize, to: usize) -> Option<usize> {
         .map(|p| from + p)
 }
 
-/// The object registered under the name whose reference ends at word `j` (`registered_at`).
+/// Whether `u` may write general register `r` (`r < 31`), as `ue_cvar.writes` decides. It errs towards yes: a write it
+/// cannot rule out stops [`base_of`], which then finds nothing.
+fn may_write(u: u32, r: u32) -> bool {
+    let (d, n, t2) = (u & 31, (u >> 5) & 31, (u >> 10) & 31);
+    if u & 0x7C00_0000 == 0x1400_0000 {
+        return (u >> 31) != 0 && r == 30;
+    }
+    if u & 0x1C00_0000 == 0x1000_0000 || u & 0x0E00_0000 == 0x0A00_0000 {
+        return d == r;
+    }
+    if u & 0x0A00_0000 == 0x0800_0000 {
+        if u & 0x3F00_0000 == 0x0800_0000 {
+            return r == d || r == t2 || r == (u >> 16) & 31;
+        }
+        if u & 0x3A00_0000 == 0x2800_0000 {
+            let load = (u >> 22) & 1 != 0 && (u >> 26) & 1 == 0 && (r == d || r == t2);
+            return load || (matches!((u >> 23) & 3, 1 | 3) && r == n);
+        }
+        if u & 0x3B00_0000 == 0x1800_0000 {
+            return d == r;
+        }
+        if u & 0x3B00_0000 == 0x3800_0000 {
+            if (u >> 21) & 1 != 0 && (u >> 10) & 3 == 0 {
+                return d == r;
+            }
+            if (u >> 21) & 1 == 0 && (u >> 10) & 1 != 0 && r == n {
+                return true;
+            }
+            return (u >> 22) & 3 != 0 && d == r && (u >> 26) & 1 == 0;
+        }
+        if u & 0x3B00_0000 == 0x3900_0000 {
+            return (u >> 22) & 3 != 0 && d == r && (u >> 26) & 1 == 0;
+        }
+        return false;
+    }
+    if u & 0x0E00_0000 == 0x0E00_0000 {
+        return u & 0x5F20_FC00 == 0x1E20_0000 && d == r;
+    }
+    if u & 0xFFF0_0000 == 0xD530_0000 {
+        return d == r;
+    }
+    false
+}
+
+/// The target of the direct branch `u` at `s` (b, bl, b.cond, cbz / cbnz, tbz / tbnz), as `ue_cvar.branch_target`.
+fn branch_target(u: u32, s: i64) -> Option<i64> {
+    let sx = |v: u32, bits: u32| -> i64 {
+        let v = i64::from(v);
+        if v >> (bits - 1) != 0 {
+            v - (1 << bits)
+        } else {
+            v
+        }
+    };
+    if u & 0x7C00_0000 == 0x1400_0000 {
+        return Some(s + 4 * sx(u & 0x3FF_FFFF, 26));
+    }
+    if u & 0xFF00_0010 == 0x5400_0000 || u & 0x7E00_0000 == 0x3400_0000 {
+        return Some(s + 4 * sx((u >> 5) & 0x7_FFFF, 19));
+    }
+    if u & 0x7E00_0000 == 0x3600_0000 {
+        return Some(s + 4 * sx((u >> 5) & 0x3FFF, 14));
+    }
+    None
+}
+
+/// The address in `xr` at byte offset `t` when the code before `t` made it by `adrp xr` (+ `add xr, xr`) with no other
+/// write to `xr` since, and every path to `t` passes there (`ue_cvar.base_of`). UE 4.18's inlined static constructors
+/// take a page base once and address many variables from it, with if / else blocks between. The search back crosses a
+/// forward `b` that lands at or before `t`, and stops at a `ret`, a `br`, any other `b`, a call that may overwrite `xr`
+/// (x0-x18), any other write to `xr` or 4,096 instructions. Then no direct branch from outside `[adrp, t)` within 1 MB may
+/// land in `(adrp, t]`.
+fn base_of(img: &[u8], text_end: usize, r: u32, t: usize) -> Option<i64> {
+    let mut lo: Option<i64> = None;
+    let mut at: Option<(usize, u32)> = None;
+    let lowest = (t as i64 - 4 * 4096).max(-4);
+    for s in (0..t / 4)
+        .rev()
+        .map(|i| i * 4)
+        .take_while(|s| *s as i64 > lowest)
+    {
+        let u = word(img, s);
+        if u == RET || u & 0xFFFF_FC1F == 0xD61F_0000 {
+            return None;
+        }
+        if u & 0xFC00_0000 == 0x1400_0000 {
+            let target = branch_target(u, s as i64)?;
+            if !((s as i64) < target && target <= t as i64) {
+                return None;
+            }
+        }
+        if r < 19 && (u & 0xFC00_0000 == 0x9400_0000 || u & 0xFFFF_FC1F == 0xD63F_0000) {
+            return None;
+        }
+        if !may_write(u, r) {
+            continue;
+        }
+        if is_adrp(u) && u & 31 == r {
+            at = Some((s, u));
+            break;
+        }
+        if lo.is_none()
+            && let Some(a) = add_imm(u)
+            && a.0 == r
+            && a.1 == r
+        {
+            lo = Some(a.2);
+            continue;
+        }
+        return None;
+    }
+    let (s, u) = at?;
+    let from = s.saturating_sub(0x10_0000);
+    let to = text_end.min(t + 0x10_0000);
+    let mut b = from;
+    while b + 4 <= to {
+        if !(s <= b && b < t)
+            && let Some(x) = branch_target(word(img, b), b as i64)
+            && (s as i64) < x
+            && x <= t as i64
+        {
+            return None;
+        }
+        b += 4;
+    }
+    Some(adrp_page(u, s as i64) + lo.unwrap_or(0))
+}
+
+/// The object registered under the name whose reference ends at word `j` (`ue_cvar.registered_at`). The first call after
+/// it, with the name still in x1, decides: a `bl` with x0 an address made by adrp + add is the variable's constructor
+/// (UE 4.18), and x0 is the object; a `blr` is IConsoleManager's register call (UE 4.2x and 5), and the object is the
+/// address that the value pointer it returns is then stored into, `str x0, [xN, #0x10]`. UE 4.18 also inlines that
+/// constructor into a long static initializer and addresses every object from one page base made far before the name
+/// (OCTOPATH TRAVELER: `str xV, [x22, #k]` the vtable, then, after the call that returns the value pointer,
+/// `str x0, [x22, #k + 0x10]`). The object is then `base_of(x22) + k`.
 fn registered_at(img: &[u8], text_end: usize, j: usize) -> Option<i64> {
     let w = |a: usize| word(img, a);
     let name_add = add_imm(w(j))?;
@@ -51,6 +185,8 @@ fn registered_at(img: &[u8], text_end: usize, j: usize) -> Option<i64> {
     }
     let (mut val, mut name, mut registered): (HashMap<u32, i64>, bool, bool) =
         (HashMap::new(), false, false);
+    let mut stored: BTreeSet<(u32, i64)> = BTreeSet::new();
+    let mut after = 0u32;
     let mut t = j.saturating_sub(64);
     while t < text_end.min(j + 192) {
         let u = w(t);
@@ -70,10 +206,13 @@ fn registered_at(img: &[u8], text_end: usize, j: usize) -> Option<i64> {
                     return val.get(&0).copied();
                 }
                 registered = true;
+            } else {
+                after += 1;
             }
             for r in 0..19 {
                 val.remove(&r);
             }
+            stored.retain(|(n, _)| *n >= 19);
             name = false;
             t += 4;
             continue;
@@ -81,12 +220,18 @@ fn registered_at(img: &[u8], text_end: usize, j: usize) -> Option<i64> {
         if br || u == RET {
             break;
         }
-        if registered
-            && u & 0xFFC0_001F == 0xF900_0000
-            && (u >> 10) & 0xFFF == 2
-            && val.contains_key(&((u >> 5) & 31))
-        {
-            return val.get(&((u >> 5) & 31)).copied();
+        if registered && u & 0xFFC0_0000 == 0xF900_0000 {
+            let (n, k) = ((u >> 5) & 31, i64::from((u >> 10) & 0xFFF) * 8);
+            if u & 31 == 0 && k == 0x10 && val.contains_key(&n) {
+                return val.get(&n).copied();
+            }
+            if u & 31 == 0 && after > 0 && !val.contains_key(&n) && stored.contains(&(n, k - 0x10))
+            {
+                return base_of(img, text_end, n, t).map(|b| b + k - 0x10);
+            }
+            stored.insert((n, k));
+            t += 4;
+            continue;
         }
         let (a, d) = (add_imm(u), u & 31);
         let mut v: Option<i64> = None;
@@ -425,3 +570,7 @@ pub(crate) fn fps_find(
         ),
     ))
 }
+
+#[cfg(test)]
+#[path = "finders_tests.rs"]
+mod tests;

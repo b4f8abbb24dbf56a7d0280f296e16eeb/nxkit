@@ -352,7 +352,7 @@ pub fn frame_presented(sample: &PresentSample) -> Result<Presented, Error> {
         .unwrap_or_else(PoisonError::into_inner)
         .as_mut()
     {
-        Some(l) => l.tick()?,
+        Some(l) => l.tick(u32::try_from(s.hold.load(Ordering::Relaxed)).unwrap_or(0))?,
         None => Vec::new(),
     };
     Ok(Presented { outcome, limits })
@@ -363,6 +363,11 @@ pub fn frame_presented(sample: &PresentSample) -> Result<Presented, Error> {
 /// link that make one vsync of that unit.
 pub fn hold() -> Result<i32, Error> {
     Ok(shared()?.hold.load(Ordering::Relaxed))
+}
+
+/// The vsyncs per second that [`hold`] counts in: 60, or 120 for a load-driven step at 120 fps.
+pub fn step_hz() -> Result<u32, Error> {
+    Ok(shared()?.step_hz)
 }
 
 /// The frame rate that the engine limiters take now at a target of 120: 120 while the hold is one tick, else 60.

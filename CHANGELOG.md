@@ -4,7 +4,24 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Added
+
+- The engine family `unreal` (`nxfamily-unreal`) holds a fact of every Unreal Engine 4 and 5 game: the frame limit is
+  the console variable `t.MaxFPS`. OCTOPATH TRAVELER names the family and runs at its `fps_target` of 60 again
+  (the game's config sets 30). Its `NXKIT_FPS_TARGET` row offers 30 and 60.
+- The frame limit rules of a title (`RuntimeHooks::limits`) reach the game. `nxb build` writes them as the `limits`
+  list of `game.json`, and the host passes them with the offsets from the fixups of `main` to the pacing service. Before,
+  the host passed no rule at all.
+- A game with an engine frame limit can run at 120 fps when its title module sets `fps_max` to 120. The link and the
+  vsync of the step run at 120 Hz, and the limit gets 120 while frames fit 1/120 s and 60 otherwise (R30b).
+- The host logs what it writes into a frame limit (`nxkit-pacing: Unreal t.MaxFPS (game thread) 30 -> 60 fps`) and
+  the notices of the pacing service at the start.
+
 ### Fixed
+
+- The rewriter finds Unreal console variables that Unreal Engine 4.18 registers in inlined static constructors, from a
+  page base made far before the name (`base_of` of the engine's `ue_cvar.py`). OCTOPATH TRAVELER's `t.MaxFPS` and
+  `nvn.SyncInterval` were not found.
 
 - `NXKIT_METAL_HUD=1` shows the Metal performance HUD. The host sets `MTL_HUD_ENABLED=1` in its own environment
   before it makes a Metal device. The `developerHUDProperties` of the window's layer alone showed nothing.

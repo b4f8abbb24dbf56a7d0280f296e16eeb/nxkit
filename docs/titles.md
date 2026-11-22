@@ -110,7 +110,7 @@ The Nintendo Switch game on NVN, update 1.9.0 (v1114112), family `agl`. The reco
 - The title states `fps_target 60`, `present_snap`, `pso_mtl4` and `screen_aspect`.
 - `fps_target 60` needs the frame-step stubs. They are the 168 steps of `rules/01007EF00011E000.toml` in the title module, which `rewrite_rules()` gives to the build.  These steps have the variable step, the render pool, the heap growth and the output size. The screen shape, layout and FOV stubs (about 2900 more steps) are not part of the file. They use the same sites and state page offsets as the variable step, so they need their own state page layout and host support first, and `screen_aspect` does nothing until then.
 - The settings are recorded values. R19 sets the target to 120 fps through the same frame step stubs, so `fps_target 60` is a record and not a cap. R10 and R17 replace `present_snap`, `enc_thread`, `core_preempt`, `draw_barriers_game` and the `tex_*` keys. The host reader reads no `settings` object yet.
-- `Settings` names no engine. An engine with a texture pool or a frame rate variable uses `texture_pool_mb` and `fps_cvar`. Two earlier games use these values. No Unreal family exists in nxkit yet, so those two games are not taken along.
+- `Settings` names no engine. An engine with a texture pool or a frame rate variable uses `texture_pool_mb` and `fps_cvar`.
 - The game is the pilot for the nxkit runtime.
 
 ## Super Mario Bros. Wonder (`010015100B514000`)
@@ -183,12 +183,16 @@ has the same parts:
 - `shared_font_decode`: `false` on SDK 10 and older (the engine's rule), the value of `shared_font`, or `false` where the
   README says that `main` does not import `ScalableFontEngineHelper::Decode`. On SDK 11 and later without a record the
   module gives no answer, and the core default (the TTF itself) holds.
-- The family is `agl` when the engine column names sead and agl. No other engine has a family in nxkit: a family holds
-  facts that every game of an engine shares, and the engine tree records none for the other engines in a form that a
-  hook takes.
+- The family is `agl` when the engine column names sead and agl. A family holds facts that every game of an engine
+  shares.
+- The family `unreal` holds Unreal Engine 4 and 5. Its fact is the frame limit: a `LimitRule` row on the console
+  variable `t.MaxFPS`, found by the rewriter by its registered name in any build (`UE_CVAR:t.MaxFPS` in the fixups of
+  `main`). The object holds at `+0x10` the pointer to the value, a float for the game thread and one for the render
+  thread (`dm/host/hle_fpslock.c` and `dm/host/hle_uecvar.c` at `034e91a8`, read 2026-11-22). OCTOPATH TRAVELER names
+  the family. The other Unreal titles name none yet: each needs a run that shows its speed at the written limit.
 - Unreal Engine 4 on NVN calls `nvnDeviceSetDepthMode(NEAR_IS_ZERO)` (seen in OCTOPATH TRAVELER, 4.18). The depth
   mode is a capability, not a profile key: the host follows the call, and the build learns it from the recorded pipeline
-  list. It is a candidate fact for an Unreal family once a second Unreal title needs a family.
+  list. It is a candidate fact for the family `unreal` once a second Unreal title names the family.
 - OCTOPATH TRAVELER sets `spatial_audio` in its run settings: CRIWARE ADX2 mixes its buses into a six-channel AudioOut
   in the SDK's order (L R C LFE Ls Rs, `criNcVoice_InterleavePcmFloat32toInt16`), so the game gains from 5.1 played as
   spatial audio. The setting is the default of the launch option `NXKIT_SPATIAL_AUDIO`; the player's choice wins.

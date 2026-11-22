@@ -160,25 +160,85 @@ fn state_page(game: &Game) -> Option<u64> {
     main.base.checked_add(offset)
 }
 
-/// Whether the host can make the game run at `target` fps: only through the frame step state page that the game's frame
-/// step patch writes (the host wires no limit rule yet). Without it a load-driven step can only hold the presents longer,
-/// which the game does not see: a game that paces itself (Octopath Traveler at 30 with a target of 60) then had its hold
-/// flip between 1, 2 and 3 vsyncs. 0 asks for nothing.
-fn target_enforceable(target: u32, has_page: bool) -> bool {
-    target == 0 || has_page
+/// The frame limits of the main module (R30b): the rules of `game.json` and the offsets that the fixups of the main
+/// module hold for their keys, with the title's target. `None` when the title has no rule.
+fn limits_config(game: &Game) -> Option<nxkit_svc_pacing::LimitsConfig> {
+    let rules = &game.limits;
+    if rules.is_empty() {
+        return None;
+    }
+    let main = game.main_module().ok()?;
+    let module = crate::limits::module_of(main, rules.found_keys(), |k| game.main_fixup(k));
+    Some(nxkit_svc_pacing::LimitsConfig {
+        module,
+        target: game.settings.fps_target,
+        rows: rules.rows.clone(),
+        reflected: rules.reflected,
+    })
+}
+
+/// Whether a limit rule of the title can take the target: a row whose place the fixups name, a row of a build or a
+/// reflected class. The pacing service checks the build and the class when it starts.
+fn has_limit(cfg: Option<&nxkit_svc_pacing::LimitsConfig>) -> bool {
+    cfg.is_some_and(|c| {
+        c.reflected.is_some()
+            || c.rows.iter().any(|r| match r.site {
+                nxkit_svc_pacing::limits::Site::Found { key, .. } => {
+                    c.module.found.iter().any(|f| f.key == key)
+                }
+                nxkit_svc_pacing::limits::Site::Fixed { .. } => true,
+            })
+    })
+}
+
+/// Whether the game runs at 120 fps through its engine's frame limit (R30b): a target of 120, `fps_max` of 120, no frame
+/// step state page and a limit rule. The refresh plans the link and the vsync at 120 then.
+pub fn runs_at_120(game: &Game) -> bool {
+    let (high, why) = high(game);
+    if let Some(n) = why {
+        eprintln!("nxkit-host: {}", n.text);
+    }
+    high
+}
+
+fn high(game: &Game) -> (bool, Option<nxkit_svc_pacing::Notice>) {
+    let s = &game.settings;
+    nxkit_svc_pacing::interval::runs_at_120(
+        s.fps_target,
+        s.fps_max,
+        state_page(game).is_some(),
+        has_limit(limits_config(game).as_ref()),
+    )
+}
+
+/// Whether the host can make the game run at `target` fps: through the frame step state page that the game's frame step
+/// patch writes, or through a frame limit of its engine that a rule of the title names. Without either a load-driven step
+/// can only hold the presents longer, which the game does not see: a game that paces itself (Octopath Traveler at 30
+/// with a target of 60) then had its hold flip between 1, 2 and 3 vsyncs. 0 asks for nothing.
+fn target_enforceable(target: u32, has_page: bool, has_limit: bool) -> bool {
+    target == 0 || has_page || has_limit
 }
 
 fn pacing_config(game: &Game, refresh: &Refresh) -> Result<nxkit_svc_pacing::Config> {
     let s = &game.settings;
     let page = state_page(game);
     let target = s.fps_target;
+    let limits = limits_config(game);
+    let limit = has_limit(limits.as_ref());
     let mut variable = None;
-    if !target_enforceable(target, page.is_some()) {
+    if !target_enforceable(target, page.is_some(), limit) {
         eprintln!(
             "nxkit-host: fps_target {target} has no way to be enforced (no frame step state page, no limit rule): the game runs at its own pace"
         );
     }
     let step = match (target, page.is_some()) {
+        // 120 through the engine's limit: the load-driven step without a page counts ticks of 1/120 s and decides the
+        // hold, and the limits write 120 or 60 by it.
+        (120, false) if high(game).0 => {
+            let mut load = LoadConfig::new(120).map_err(|e| HostError::Manifest(e.to_string()))?;
+            load.hold = s.fps_hold;
+            StepMode::Load(load)
+        }
         (0, _) | (_, false) => StepMode::Own,
         // The load-driven step decides the hold from the cost of the frames and writes the step into the state
         // page, so the game steps by the time each frame stays on screen (the engine's frame step).
@@ -218,7 +278,7 @@ fn pacing_config(game: &Game, refresh: &Refresh) -> Result<nxkit_svc_pacing::Con
         display_hz: 120.0,
         vsync_hz: 60.0,
         step,
-        limits: None,
+        limits,
         display_mode: s.present_display,
     })
 }
@@ -387,6 +447,9 @@ pub fn init_services(
     if has(mask, Service::Pacing) {
         nxkit_svc_pacing::init(&pacing_config(game, refresh)?)
             .map_err(|e| HostError::Manifest(format!("pacing: {e:?}")))?;
+        for n in nxkit_svc_pacing::notices().unwrap_or_default() {
+            eprintln!("nxkit-pacing: {}", n.text);
+        }
     }
     Ok(())
 }
@@ -506,9 +569,10 @@ mod tests {
 
     #[test]
     fn a_target_needs_the_frame_step_page() {
-        assert!(target_enforceable(0, false));
-        assert!(target_enforceable(60, true));
-        assert!(!target_enforceable(60, false));
-        assert!(!target_enforceable(30, false));
+        assert!(target_enforceable(0, false, false));
+        assert!(target_enforceable(60, true, false));
+        assert!(target_enforceable(60, false, true), "a limit rule");
+        assert!(!target_enforceable(60, false, false));
+        assert!(!target_enforceable(30, false, false));
     }
 }

@@ -111,6 +111,7 @@ impl Analysis {
             settings: self.settings,
             shared_font_decode: false,
             sf_services: vec![],
+            limits: vec![],
             vertex_stream_null_bind: false,
         })
     }

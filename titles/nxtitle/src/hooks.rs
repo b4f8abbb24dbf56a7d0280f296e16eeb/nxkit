@@ -180,10 +180,10 @@ pub enum LimitSite {
         /// The offset of the field in the object or the module.
         field: u64,
     },
-    /// An offset that the rewriter finds by a name (`key`, for example the name of a console variable). The host adds `add`
-    /// to it and reads the object pointer there.
+    /// An offset that the rewriter finds by a name and writes into the fixups of the main module as `# <key>\t<offset>`
+    /// (for example `UE_CVAR:t.MaxFPS`). The host adds `add` to it and reads the object pointer there.
     Found {
-        /// The name that the rewriter reports.
+        /// The fixups key that the rewriter writes.
         key: &'static str,
         /// Added to the found offset.
         add: u64,

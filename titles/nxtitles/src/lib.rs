@@ -11,6 +11,8 @@ pub fn catalog() -> Result<Catalog, String> {
     let families: Vec<&'static dyn Family> = vec![
         #[cfg(feature = "agl")]
         &nxfamily_agl::AGL,
+        #[cfg(feature = "unreal")]
+        &nxfamily_unreal::UNREAL,
     ];
     let titles: Vec<&'static dyn Title> = vec![
         #[cfg(feature = "oot")]
@@ -334,20 +336,47 @@ mod tests {
     #[test]
     fn the_catalog_builds() {
         let c = catalog().unwrap();
-        // every title names the family `agl` or none
+        // every title names the family `agl`, `unreal` or none
         assert!(
             c.titles()
                 .iter()
-                .all(|t| t.family().is_none_or(|f| f == "agl"))
+                .all(|t| t.family().is_none_or(|f| f == "agl" || f == "unreal"))
         );
-        let agl = c
-            .titles()
+        let named = |id| c.titles().iter().filter(|t| t.family() == Some(id)).count();
+        let missing = if cfg!(feature = "agl") {
+            0
+        } else {
+            named("agl")
+        } + if cfg!(feature = "unreal") {
+            0
+        } else {
+            named("unreal")
+        };
+        assert_eq!(c.missing_families().len(), missing);
+    }
+
+    #[cfg(all(feature = "unreal", feature = "octo"))]
+    #[test]
+    fn octopath_traveler_gets_the_unreal_frame_limit() {
+        use nxtitle::{FamilyFrom, LimitRule, LimitSite, TitleFacts, TitleId};
+        let c = catalog().unwrap();
+        let r = c.resolve(&TitleFacts::new(TitleId(0x0100_57D0_0649_2000)));
+        assert_eq!(r.family.map(|f| f.id()), Some("unreal"));
+        assert_eq!(r.family_from, FamilyFrom::Declared);
+        let sites: Vec<_> = r
+            .limits()
             .iter()
-            .filter(|t| t.family() == Some("agl"))
-            .count();
+            .filter_map(|l| match l.value {
+                LimitRule::Row(row) => Some(row.site),
+                LimitRule::Reflected(_) => None,
+            })
+            .collect();
         assert_eq!(
-            c.missing_families().len(),
-            if cfg!(feature = "agl") { 0 } else { agl }
+            sites,
+            [LimitSite::Found {
+                key: "UE_CVAR:t.MaxFPS",
+                add: 0x10
+            }]
         );
     }
 

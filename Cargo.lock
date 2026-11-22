@@ -630,6 +630,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxfamily-unreal"
+version = "0.15.0"
+dependencies = [
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-aaic"
 version = "0.15.0"
 dependencies = [
@@ -2268,6 +2275,7 @@ name = "nxtitles"
 version = "0.15.0"
 dependencies = [
  "nxfamily-agl",
+ "nxfamily-unreal",
  "nxgame-aaic",
  "nxgame-absolum",
  "nxgame-acnh",

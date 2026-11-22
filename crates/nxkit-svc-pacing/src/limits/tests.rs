@@ -48,7 +48,7 @@ fn a_module_without_a_row_has_no_limit_and_writes_nothing() {
     let (mut l, notices) = Limits::new(&config(module(0x10000, 0), 60, Vec::new()));
     assert!(!l.has_engine());
     assert!(notices.is_empty());
-    assert!(l.tick().is_ok_and(|e| e.is_empty()));
+    assert!(l.tick(0).is_ok_and(|e| e.is_empty()));
 }
 
 #[test]
@@ -79,11 +79,31 @@ fn a_name_that_the_rewriter_did_not_find_is_told() {
 }
 
 #[test]
-fn a_target_of_120_is_refused_for_an_engine_limit() {
+fn a_target_of_120_follows_the_hold_of_the_step() {
+    let _g = crate::GUEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut mem = vec![0u64; 0x40];
+    let base = mem.as_mut_ptr() as u64;
+    guest::set_range(base, (mem.len() * 8) as u64);
+    assert!(guest::write_u32(base + 0x40, 30).is_ok());
+    let row = fixed(BUILD, 0x40, Kind::FpsI32);
+    let (mut l, notices) = Limits::new(&config(module(base, 0), 120, vec![row]));
+    assert!(notices.is_empty());
+    assert_eq!(l.target(), 120);
+    assert!(l.tick(1).is_ok_and(|e| e.len() == 1));
+    assert_eq!(guest::read_u32(base + 0x40).ok(), Some(120));
+    assert!(
+        l.tick(2).is_ok_and(|e| e.len() == 1),
+        "a late frame steps down"
+    );
+    assert_eq!(guest::read_u32(base + 0x40).ok(), Some(60));
+}
+
+#[test]
+fn another_target_is_refused_for_an_engine_limit() {
     let _g = crate::GUEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     guest::set_range(0x10000, 0);
     let row = fixed(BUILD, 0x40, Kind::FpsI32);
-    let (l, notices) = Limits::new(&config(module(0x10000, 0), 120, vec![row]));
+    let (l, notices) = Limits::new(&config(module(0x10000, 0), 90, vec![row]));
     assert!(l.has_engine());
     assert_eq!(l.target(), 0);
     assert!(notices.iter().any(|n| n.warn));
@@ -112,7 +132,7 @@ fn a_target_of_zero_leaves_the_limits_and_still_writes_a_pinned_word() {
     assert!(l.has_engine());
     assert_eq!(l.target(), 0);
     assert!(notices.iter().any(|n| n.text.contains("stay as the game")));
-    assert!(l.tick().is_ok_and(|e| e.len() == 1));
+    assert!(l.tick(0).is_ok_and(|e| e.len() == 1));
     assert_eq!(guest::read_u32(base + 0x40).ok(), Some(30), "left alone");
     assert_eq!(guest::read_u32(base + 0x80).ok(), Some(0x3f80_0000));
 }
@@ -130,10 +150,10 @@ fn the_target_goes_into_the_row_of_the_build() {
     ];
     let (mut l, _) = Limits::new(&config(module(base, 0), 60, rows));
     assert_eq!(l.target(), 60);
-    assert!(l.tick().is_ok_and(|e| e.len() == 1));
+    assert!(l.tick(0).is_ok_and(|e| e.len() == 1));
     assert_eq!(guest::read_u32(base + 0x40).ok(), Some(60));
     assert!(
-        l.tick().is_ok_and(|e| e.is_empty()),
+        l.tick(0).is_ok_and(|e| e.is_empty()),
         "nothing left to change"
     );
 }
@@ -155,7 +175,7 @@ fn a_found_row_writes_the_game_thread_and_the_render_thread_copy() {
     }];
     let (mut l, notices) = Limits::new(&config(m, 60, vec![found("console.var", Kind::FpsF32, 2)]));
     assert!(notices.is_empty());
-    assert!(l.tick().is_ok_and(|e| e.len() == 2));
+    assert!(l.tick(0).is_ok_and(|e| e.len() == 2));
     assert_eq!(guest::read_u32(var).ok(), Some(60f32.to_bits()));
     assert_eq!(guest::read_u32(var + 4).ok(), Some(60f32.to_bits()));
 }

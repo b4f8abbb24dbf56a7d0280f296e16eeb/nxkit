@@ -87,6 +87,8 @@ pub struct Game {
     pub settings: Settings,
     /// The DLC folders.
     pub aoc: Vec<Aoc>,
+    /// The frame limit rules of the family and the title (`limits`).
+    pub limits: crate::limits::LimitRules,
 }
 
 /// One entry of an export list.
@@ -272,6 +274,7 @@ impl Game {
             dylib: PathBuf::from(text(&v, "dylib", ctx)?),
             settings: Settings::parse(field(&v, "settings", ctx)?)?,
             aoc: settings::parse_aoc(v.get("aoc"))?,
+            limits: crate::limits::LimitRules::parse(v.get("limits"))?,
         };
         let page = num(&v, "page_size", ctx)?;
         if page != PAGE {
@@ -289,6 +292,15 @@ impl Game {
             .iter()
             .find(|m| m.entry.is_some())
             .ok_or_else(|| bad("no module has an \"entry\""))
+    }
+
+    /// A value of the fixups table of the main module (`# KEY\t0x...`). `None` when the key or the file is missing.
+    pub fn main_fixup(&self, key: &str) -> Option<u64> {
+        let main = self.main_module().ok()?;
+        let text = std::fs::read_to_string(self.path(&main.fixups)).ok()?;
+        let prefix = format!("# {key}\t");
+        let v = text.lines().find_map(|l| l.strip_prefix(prefix.as_str()))?;
+        u64::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()
     }
 
     /// The game with every module moved by `delta`. dyld slides the library, so the modules sit at the preferred

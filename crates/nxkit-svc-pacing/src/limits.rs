@@ -120,7 +120,8 @@ pub struct ReflectSpec {
 pub struct LimitsConfig {
     /// The main module.
     pub module: Module,
-    /// The target frame rate of the title: 0 for the game's own limit, 30 or 60.
+    /// The target frame rate of the title: 0 for the game's own limit, 30, 60 or 120. At 120 a tick writes 120 while the
+    /// load-driven step holds each frame for one tick of 1/120 s, else 60 ([`crate::interval::high_target_now`]).
     pub target: u32,
     /// The rows of the title and the family.
     pub rows: Vec<RowSpec>,
@@ -220,9 +221,9 @@ impl Limits {
             target: 0,
             logged: 0,
         };
-        if !matches!(cfg.target, 0 | 30 | 60) {
+        if !matches!(cfg.target, 0 | 30 | 60 | 120) {
             notices.push(Notice::warn(format!(
-                "the target frame rate {} must be 0, 30 or 60 for an engine limit, so the game's own limit stays",
+                "the target frame rate {} must be 0, 30, 60 or 120 for an engine limit, so the game's own limit stays",
                 cfg.target
             )));
         } else if me.has_engine() && cfg.target == 0 {
@@ -245,13 +246,25 @@ impl Limits {
         self.target
     }
 
-    /// Writes the target into the limits. Runs once a present, after the step of the frame. Nothing is allocated unless a
-    /// value changes, and the first changes of each row are the only ones that make an event.
-    pub fn tick(&mut self) -> Result<Vec<LimitEvent>, Fault> {
+    /// The rate that a tick writes now. At a target of 120 it follows `hold`, the ticks of 1/120 s that the load-driven step
+    /// holds the frame for: 120 for one tick, else 60, so the game's step stays what the screen shows.
+    pub fn now(&self, hold: u32) -> u32 {
+        if self.target == crate::interval::HIGH_TARGET {
+            crate::interval::high_target_now(hold)
+        } else {
+            self.target
+        }
+    }
+
+    /// Writes the target into the limits. Runs once a present, after the step of the frame, with the hold that the step
+    /// decided (0 without a load-driven step). Nothing is allocated unless a value changes, and the first changes of each
+    /// row are the only ones that make an event.
+    pub fn tick(&mut self, hold: u32) -> Result<Vec<LimitEvent>, Fault> {
         let mut out = Vec::new();
+        let now = self.now(hold);
         if let Some(f) = &self.reflected
-            && self.target != 0
-            && let Some(w) = f.tick(self.base, i32::try_from(self.target).unwrap_or(60))?
+            && now != 0
+            && let Some(w) = f.tick(self.base, i32::try_from(now).unwrap_or(60))?
             && self.logged < rows::LOG_LIMIT
         {
             self.logged += 1;
@@ -261,11 +274,7 @@ impl Limits {
             });
         }
         for r in &mut self.rows {
-            out.extend(
-                r.tick(self.base, self.target)?
-                    .into_iter()
-                    .map(LimitEvent::Changed),
-            );
+            out.extend(r.tick(self.base, now)?.into_iter().map(LimitEvent::Changed));
         }
         Ok(out)
     }

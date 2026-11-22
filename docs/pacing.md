@@ -76,6 +76,16 @@ The failed probe also records the cost at the longer hold, scaled by how far the
 
 The record and the wait end when a probe holds `kmin`, when `kmin` changes and when the game sets its own step. The ordinary trial after 30 frames that fit is not delayed. `NXKIT_PACE_DIAG` prints the state as `retry <cost>@<hold> wait <vsyncs>` on the `diag state` line.
 
+## 120 fps through an engine's frame limit
+
+A game whose engine steps by the time that really passed follows a frame limit that the host writes (`Limits`, R30b). The family or the title module names the limit as a `LimitRule`. The family `unreal` names the console variable `t.MaxFPS`. A target of 120 runs when `fps_max` is 120, the game has no frame step state page and the fixups name the limit (`seams::runs_at_120`). Then:
+
+- The refresh plans the link at 120 Hz and the vsync of the step at 120 Hz, so a hold of one tick shows each frame for 1/120 s.
+- The load-driven step runs without a state page and counts in ticks of 1/120 s. It decides the hold from the cost of the frames as at 60.
+- Each present writes 120 into the limit while the hold is one tick, and 60 while it is longer. The game then makes as many frames as the screen shows.
+
+Without one of these the host prints why and the game runs at 60. At 30 and 60 the limit gets the target and the game keeps its own step.
+
 ## The variable step only under VRR
 
 The variable step (`StepMode::Variable`: the time between the last two shown frames) runs only when the screen is adaptive and the link has a range (see "Variable refresh (VRR)"). On a fixed screen the game keeps the load-driven step at 60. One title ran at about 10 fps on a fixed 120 Hz screen with the variable step (measured). `NXKIT_VRR=0` keeps the fixed grid on an adaptive screen.

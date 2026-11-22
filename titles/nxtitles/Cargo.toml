@@ -13,7 +13,7 @@ in_v = false
 
 [features]
 default = [
-    "agl", "oot", "botw", "acnh", "mtf", "smbw", "smo", "pkbd", "aaic", "mpr", "silksong", "snbz", "mk8d", "swheist",
+    "agl", "unreal", "oot", "botw", "acnh", "mtf", "smbw", "smo", "pkbd", "aaic", "mpr", "silksong", "snbz", "mk8d", "swheist",
     "ryza", "mp4", "diablo3", "pkarceus", "ragingloop", "animalwell", "okami", "sm3dwbf", "nfshp", "ghosttrick", "hwaoc",
     "celeste", "baba", "sshd", "cotl", "aw12", "mrsoh", "smbbr", "obradinn", "trvdx", "dbspz", "tgaac", "bastion",
     "fftic", "dq3hd", "sentinels", "blasphemous2", "dqb2", "subnautica", "sentinelsjp", "bayo3", "dsr", "kirbyfl",
@@ -29,6 +29,7 @@ default = [
     "fefw", "nssr", "pkpokopia", "mkw", "pragmata", "starfox",
 ]
 agl = ["dep:nxfamily-agl"]
+unreal = ["dep:nxfamily-unreal"]
 oot = ["dep:nxgame-oot"]
 botw = ["dep:nxgame-botw"]
 acnh = ["dep:nxgame-acnh"]
@@ -188,6 +189,7 @@ starfox = ["dep:nxgame-starfox"]
 [dependencies]
 nxtitle.workspace = true
 nxfamily-agl = { workspace = true, optional = true }
+nxfamily-unreal = { workspace = true, optional = true }
 nxgame-oot = { workspace = true, optional = true }
 nxgame-botw = { workspace = true, optional = true }
 nxgame-acnh = { workspace = true, optional = true }

@@ -17,9 +17,6 @@ use nxkit_svc_pacing::refresh::{self, TickPlan};
 
 use crate::settings::Settings;
 
-/// The vsync of the game's frame step. A Switch game steps in vsyncs of 1/60 s.
-const VSYNC_HZ: f32 = 60.0;
-
 /// The lowest rate under variable refresh when `NXKIT_VRR_MIN` does not say: the game steps by the measured time, but its
 /// physics and its audio want at least the rate of the Switch.
 const DEFAULT_VRR_FLOOR: u32 = 60;
@@ -29,6 +26,9 @@ const DEFAULT_VRR_FLOOR: u32 = 60;
 pub struct Request {
     /// The frame rate the game aims at.
     pub target_fps: u32,
+    /// The rate of the game's vsync: 60, or 120 when the game runs at 120 fps through its engine's frame limit. The hold
+    /// of the frame step counts in these vsyncs.
+    pub vsync_hz: u32,
     /// Whether any frame rate is fine for the game.
     pub free_rate: bool,
     /// The refresh rate to switch the display to, when set.
@@ -69,6 +69,20 @@ pub fn choose_presentation(
 }
 
 impl Request {
+    /// The request of a game that runs at 120 fps through its engine's frame limit (`seams::runs_at_120`): the link
+    /// and the vsync at 120, so a hold of one tick of 1/120 s shows each frame once.
+    pub fn at_120(self, high: bool) -> Self {
+        if high {
+            Self {
+                target_fps: 120,
+                vsync_hz: 120,
+                ..self
+            }
+        } else {
+            self
+        }
+    }
+
     /// The request of `settings` and the environment. `NXKIT_SET_REFRESH` and `NXKIT_TIMED_PRESENT` win over the keys.
     pub fn from_settings(settings: &Settings, env: &crate::hostenv::HostEnv) -> Self {
         let env_refresh = env.set_refresh;
@@ -84,6 +98,8 @@ impl Request {
             } else {
                 settings.fps_target.min(60)
             },
+            // A Switch game steps in vsyncs of 1/60 s.
+            vsync_hz: 60,
             free_rate: settings.fps_free,
             set_refresh,
             timed,
@@ -255,7 +271,7 @@ impl Refresh {
         let _ = nxkit_svc_pacing::set_rates(
             link_hz,
             if plan.fps == req.target_fps {
-                VSYNC_HZ
+                req.vsync_hz as f32
             } else {
                 fps
             },
@@ -355,7 +371,7 @@ impl Refresh {
         st.reported = rounded;
         let req = st.request;
         let vsync = if plan.fps == req.target_fps {
-            VSYNC_HZ
+            req.vsync_hz as f32
         } else {
             plan.fps as f32
         };
@@ -391,6 +407,7 @@ mod tests {
     fn request() -> Request {
         Request {
             target_fps: 60,
+            vsync_hz: 60,
             free_rate: false,
             set_refresh: None,
             timed: None,

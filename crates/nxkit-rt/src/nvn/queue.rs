@@ -188,17 +188,19 @@ extern "C" fn queue_finish(_q: u64) {
 /// What the screen showed of the present 8 back from `presents`, the one before it and how long it was to stay. The
 /// presents of the game queue up to [`nxkit_gpu`]'s `MAX_PENDING` ahead of the screen, so a frame that runs long is
 /// absorbed, and only the screen says whether the game was late. The interval between presents `n - 1` and `n` shows
-/// frame `n - 1`: it is judged against the larger hold of the two, at least one 60 Hz vsync.
+/// frame `n - 1`: it is judged against the larger hold of the two, at least one vsync of the step (1/60 s, or 1/120 s
+/// at 120 fps).
 fn snap_view(
     screen: &nxkit_nvn::screen::Screen,
     presents: u64,
 ) -> Option<nxkit_svc_pacing::load::SnapView> {
     let n = presents.checked_sub(8).filter(|n| *n > 1)?;
     let k = screen.hold(n).max(screen.hold(n - 1)).max(1);
+    let hz = nxkit_svc_pacing::step_hz().unwrap_or(60).max(1);
     Some(nxkit_svc_pacing::load::SnapView {
         presented: screen.shown_at(n),
         before: screen.shown_at(n - 1),
-        expect_ms: f64::from(k) * 1000.0 / 60.0,
+        expect_ms: f64::from(k) * 1000.0 / f64::from(hz),
     })
 }
 
@@ -224,6 +226,16 @@ fn pace_present(screen: &nxkit_nvn::screen::Screen, now_ns: u64) {
     };
     if let Ok(k) = nxkit_svc_pacing::hold() {
         screen.set_hold(presents, u32::try_from(k).unwrap_or(0));
+    }
+    for e in &done.limits {
+        match e {
+            nxkit_svc_pacing::LimitEvent::Changed(c) => {
+                eprintln!("nxkit-pacing: {} {} -> {}", c.what, c.was, c.now);
+            }
+            nxkit_svc_pacing::LimitEvent::Reflected { int, float } => {
+                eprintln!("nxkit-pacing: reflected frame limit {int} / {float} -> the target");
+            }
+        }
     }
     for e in done.outcome.iter().flat_map(|o| &o.events) {
         match e {

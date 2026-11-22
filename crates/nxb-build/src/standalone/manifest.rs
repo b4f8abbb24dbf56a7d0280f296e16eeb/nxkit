@@ -48,6 +48,8 @@ pub(crate) struct Manifest<'a> {
     pub shared_font_decode: bool,
     /// The services the game opens through `nn::sf::hipc` (`RuntimeHooks::sf_services`).
     pub sf_services: Vec<&'static str>,
+    /// The frame limits of the family and the title (`RuntimeHooks::limits`), written as `limits`.
+    pub limits: Vec<nxtitle::LimitRule>,
     /// The need `vertex_stream_null_bind` of the title.
     pub vertex_stream_null_bind: bool,
 }
@@ -164,6 +166,65 @@ fn settings(m: &Manifest) -> Value {
     obj(f)
 }
 
+/// One frame limit rule of the title module, for the host's `LimitsConfig` (R30b).
+fn limit(r: &nxtitle::LimitRule) -> Value {
+    use nxtitle::{LimitKind as K, LimitRule, LimitSite};
+    match r {
+        LimitRule::Row(row) => {
+            let mut kind = vec![(
+                "id",
+                s(match row.kind {
+                    K::FpsF32 => "fps_f32",
+                    K::VsyncsI32 => "vsyncs_i32",
+                    K::MsF32 => "ms_f32",
+                    K::FpsI32 => "fps_i32",
+                    K::TicksU32 { .. } => "ticks_u32",
+                    K::SecsF32 => "secs_f32",
+                    K::ModeU32 => "mode_u32",
+                    K::FpsF64 => "fps_f64",
+                    K::IntervalMinusOneU32 => "interval_minus_one_u32",
+                    K::PinU32 { .. } => "pin_u32",
+                }),
+            )];
+            match row.kind {
+                K::TicksU32 { scale } => kind.push(("scale", n(scale))),
+                K::PinU32 { from, to } => {
+                    kind.push(("from", n(from)));
+                    kind.push(("to", n(to)));
+                }
+                _ => {}
+            }
+            let site = match row.site {
+                LimitSite::Fixed { ptr_off, field } => {
+                    obj(vec![("ptr_off", n(ptr_off)), ("field", n(field))])
+                }
+                LimitSite::Found { key, add } => obj(vec![("found", s(key)), ("add", n(add))]),
+            };
+            let mut f = vec![("what", s(row.what))];
+            if let Some(b) = row.build {
+                f.push(("build", s(b)));
+            }
+            f.push(("site", site));
+            f.push(("kind", obj(kind)));
+            f.push(("copies", n(row.copies)));
+            obj(f)
+        }
+        LimitRule::Reflected(c) => obj(vec![(
+            "reflected",
+            obj(vec![
+                ("class", s(c.class)),
+                ("int_field", s(c.int_field)),
+                ("float_field", s(c.float_field)),
+                ("record_size", n(c.layout.record_size)),
+                ("fields_at", n(c.layout.fields_at)),
+                ("field_stride", n(c.layout.field_stride)),
+                ("field_offset_at", n(c.layout.field_offset_at)),
+                ("instance_type_at", n(c.layout.instance_type_at)),
+            ]),
+        )]),
+    }
+}
+
 fn segment(g: &Segment) -> Value {
     obj(vec![
         ("name", s(&g.name)),
@@ -261,6 +322,9 @@ pub(crate) fn game_json(m: &Manifest) -> String {
     f.push(("npdm", s("main.npdm")));
     f.push(("memory", memory(&m.settings.memory)));
     f.push(("settings", settings(m)));
+    if !m.limits.is_empty() {
+        f.push(("limits", Value::List(m.limits.iter().map(limit).collect())));
+    }
     f.push(("dylib", s("nxgame.dylib")));
     f.push(("page_size", n(PAGE)));
     f.push((
@@ -369,6 +433,39 @@ mod tests {
         assert_eq!(
             nxb_pyjson::dumps(&v),
             r#"[{"name": "nnFoo", "slot": 768, "addend": 8, "weak": true}]"#
+        );
+    }
+
+    #[test]
+    fn a_limit_row_names_its_site_and_kind() {
+        use nxtitle::{LimitKind, LimitRow, LimitRule, LimitSite};
+        let found = limit(&LimitRule::Row(LimitRow {
+            what: "Unreal t.MaxFPS",
+            build: None,
+            site: LimitSite::Found {
+                key: "t.MaxFPS",
+                add: 0x10,
+            },
+            kind: LimitKind::FpsF32,
+            copies: 2,
+        }));
+        assert_eq!(
+            nxb_pyjson::dumps(&found),
+            r#"{"what": "Unreal t.MaxFPS", "site": {"found": "t.MaxFPS", "add": 16}, "kind": {"id": "fps_f32"}, "copies": 2}"#
+        );
+        let fixed = limit(&LimitRule::Row(LimitRow {
+            what: "w",
+            build: Some("ab"),
+            site: LimitSite::Fixed {
+                ptr_off: 8,
+                field: 4,
+            },
+            kind: LimitKind::TicksU32 { scale: 19_200_000 },
+            copies: 1,
+        }));
+        assert_eq!(
+            nxb_pyjson::dumps(&fixed),
+            r#"{"what": "w", "build": "ab", "site": {"ptr_off": 8, "field": 4}, "kind": {"id": "ticks_u32", "scale": 19200000}, "copies": 1}"#
         );
     }
 }

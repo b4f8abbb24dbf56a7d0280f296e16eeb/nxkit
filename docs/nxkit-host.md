@@ -38,6 +38,7 @@ A number is a JSON number or a string in decimal or with a `0x` prefix. Every pa
 | `memory` | The memory profile of the game. See below. |
 | `settings` | The run settings of the title module. See below. |
 | `aoc` | The DLC packages. It may be absent, which means no DLC. See below. |
+| `limits` | The frame limit rules of the family and the title module (`RuntimeHooks::limits`). It may be absent, which means no rule. See below. |
 | `dylib` | The library with the module segments, `nxgame.dylib`. |
 | `page_size` | The page size of the build, 16384. The host stops if it differs from its own. |
 | `nvn_functions` | The NVN functions that the game imports. The GPU backend reads it. The loader ignores it. |
@@ -87,6 +88,10 @@ Any other key goes unread, in order, to the service that the title module addres
 ### aoc
 
 A list of `{ "index", "title_id", "version", "path" }`. `title_id` is a hex string and `path` is `aoc/<index>`. The host passes the list to the fs service as `Config.aoc`.
+
+### limits
+
+A list of rules, the family's first. A row is `{ "what", "build", "site", "kind", "copies" }`. `build` (32 hex digits) is there only for a row of one build. `site` is `{ "ptr_off", "field" }` for a place in the main module of that build, or `{ "found", "add" }` for an offset that the rewriter writes into the fixups of the main module as `# <found>\t<offset>` (`UE_CVAR:t.MaxFPS`). `kind` is `{ "id" }`, one of `fps_f32`, `vsyncs_i32`, `ms_f32`, `fps_i32`, `ticks_u32` (with `scale`), `secs_f32`, `mode_u32`, `fps_f64`, `interval_minus_one_u32` and `pin_u32` (with `from` and `to`). A reflected class is `{ "reflected": { "class", "int_field", "float_field", "record_size", "fields_at", "field_stride", "field_offset_at", "instance_type_at" } }`. The host reads the offsets of the `found` keys from the fixups and passes the rules with `fps_target` to the pacing service as `LimitsConfig` (R30b). It knows no engine in them.
 
 ### Other files
 
@@ -427,7 +432,7 @@ ring (`Screen`) and the refresh plan (`Refresh`), and passes them to the service
 | `attach_main_thread` | Attaches the `guest-main` thread with the NPDM priority and core, which the kernel got at its start. |
 | `big_stack_exports` | Collects the names of the big-stack entries of the enabled services from `nxkit_rt::entries()`. |
 | `register_server` | Builds the IPC server from the `services()` of the enabled service crates and registers it with `set_server`. |
-| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders (Saves, above) and the DLC folder for fs, the console facts and the font facts for system, the pad layout and `input.json` for input, the host seams for audio and video, and the step mode with the state page of the main module for pacing. It sets the symbol lookup of every crate. |
+| `init_services` | Starts the kernel's OS facts and the enabled service crates with typed values of `game.json`: the romfs, the save and temp folders (Saves, above) and the DLC folder for fs, the console facts and the font facts for system, the pad layout and `input.json` for input, the host seams for audio and video, and the step mode with the state page of the main module and the frame limits of `limits` for pacing. It sets the symbol lookup of every crate. |
 | `focus_changed` | Tells the `system` and `input` services about the focus of the window. |
 | `mouse` | Passes the motion, buttons and wheel of the held mouse to the input service. |
 | `mouse_mode` | When the window holds the mouse: never when `input.json` turns it off, on a click while a controller is connected, else whenever the window is key. |
