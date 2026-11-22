@@ -107,10 +107,11 @@ impl Resolver {
         for drawing in seeds.drawings(false) {
             for s in &chosen {
                 match resolve(s, &get, drawing) {
-                    Ok(Some(e)) => {
-                        out.insert(e);
+                    Ok(entries) => {
+                        for e in entries {
+                            out.insert(e);
+                        }
                     }
-                    Ok(None) => {}
                     Err(nxkit_pipestate::seeds::Unresolved::Shader(_)) => n.no_shader += 1,
                     Err(_) => n.refused += 1,
                 }

@@ -178,15 +178,13 @@ pub fn shaders_and_archive(
         b.profile.0.join("shader_pairs.tsv"),
         b.work.join("shader/pso_pairs.tsv"),
     ];
-    let text = nxb_archive::plan::pair_text(&pair_files);
-    // the pairs of the title's render seeds join the profile's: the archive holds their bases and their exact states
-    let mut pairs = nxb_archive::plan::read_pairs(&text);
-    let known: std::collections::HashSet<(String, String)> = pairs.iter().cloned().collect();
-    pairs.extend(
-        nxb_archive::seeded::pairs(&b.seeds)
-            .into_iter()
-            .filter(|p| !known.contains(p)),
-    );
+    // the pairs of the title's render seeds join the profile's, in the text that the plan, the stamp and the check of
+    // the compiled bases read: the archive holds their bases and their exact states
+    let mut text = nxb_archive::plan::pair_text(&pair_files);
+    for (v, f) in nxb_archive::seeded::pairs(&b.seeds) {
+        text.extend_from_slice(format!("\n{v}\t{f}\n").as_bytes());
+    }
+    let pairs = nxb_archive::plan::read_pairs(&text);
     let batches = Arc::new(nxb_archive::Batches::default());
     let acfg = match &arch {
         Some(arch) => Some(nxb_archive::Config {

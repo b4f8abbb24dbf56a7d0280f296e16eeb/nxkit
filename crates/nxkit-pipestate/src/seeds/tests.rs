@@ -149,7 +149,7 @@ fn a_render_seed_resolves_to_the_entry_of_the_draw() {
         },
     )
     .unwrap()
-    .unwrap();
+    .remove(0);
     let Entry::Render(r) = &e else {
         panic!("render")
     };
@@ -178,12 +178,42 @@ fn a_render_seed_resolves_to_the_entry_of_the_draw() {
         },
     )
     .unwrap()
-    .unwrap();
+    .remove(0);
     let Entry::Render(p) = pulled else {
         panic!("render")
     };
     assert_eq!(p.vertex.0, format!("{V}_bp"));
     assert_eq!(p.layout, VertexDescriptor::default());
+}
+
+#[test]
+fn a_vertex_shader_with_a_layer_entry_gives_the_layered_draw_too() {
+    let mut f = facts();
+    let v = f.get_mut(&(V, true)).unwrap();
+    v.entry_layer = Some("main0_l".into());
+    v.entry_z[1] = Some("main0_lz".into());
+    let get = |k: &str, v: bool| {
+        f.iter()
+            .find(|((fk, fv), _)| *fk == k && *fv == v)
+            .map(|(_, p)| p)
+    };
+    let e = resolve(
+        &sample().seeds()[2],
+        &get,
+        Drawing {
+            zero_to_one: true,
+            pull: false,
+        },
+    )
+    .unwrap();
+    let entries: Vec<&str> = e
+        .iter()
+        .map(|e| match e {
+            Entry::Render(r) => r.vertex.1.as_str(),
+            _ => "",
+        })
+        .collect();
+    assert_eq!(entries, ["main0_z", "main0_lz"]);
 }
 
 #[test]
@@ -195,8 +225,14 @@ fn mesh_compute_and_missing_shaders() {
             .map(|(_, p)| p)
     };
     let s = sample();
-    assert_eq!(resolve(&s.seeds()[0], &get, Drawing::default()), Ok(None));
-    let Some(Entry::Compute(c)) = resolve(&s.seeds()[1], &get, Drawing::default()).unwrap() else {
+    assert_eq!(
+        resolve(&s.seeds()[0], &get, Drawing::default()),
+        Ok(Vec::new())
+    );
+    let Some(Entry::Compute(c)) = resolve(&s.seeds()[1], &get, Drawing::default())
+        .unwrap()
+        .pop()
+    else {
         panic!("compute")
     };
     assert_eq!(c.function, (format!("{F}_b"), "main0".to_string()));
@@ -208,7 +244,8 @@ fn mesh_compute_and_missing_shaders() {
             pull: false,
         },
     )
-    .unwrap() else {
+    .unwrap()
+    .pop() else {
         panic!("mesh")
     };
     assert_eq!(m.mesh, (format!("{M}_b"), "main0_z".to_string()));

@@ -281,6 +281,9 @@ The build resolves a seed into the pipeline a draw of that state makes on the ho
 - The build writes the resolved list without keys to `pipelines/shipped.list` of the app. The host makes it at every start (see shader-step.md, "The runtime pipeline cache").
 - Mesh pipelines are in the shipped list but not in the archive: the host compiles them at the start.
 - A seed has no topology and no ICB flag. It is resolved for triangles without ICB support. Lines, points and ICB draws of a seeded pair are made at run time as before.
+- A seed does not say whether a geometry shader picked the layer. For a vertex shader with a layer entry the seed gives the layered draw too. The archive leaves out pairs whose vertex function writes the layer, so the start compiles these once.
+
+Measured on 2026-11-22 with Octopath Traveler II (v131072, M2 Max), the first 90 s from the start into the title: the shipped list has 762 pipelines from 378 seeds. The first start makes them in 0.5 s (660 archive loads, 98 compiles, 4 that the compiler refuses), and no draw is skipped as pending in 1,680 frames. Without the list (`NXKIT_PIPELINE_CACHE=0`) 107 draws were skipped in 1,380 frames. The second start loads 758 from the archives in 0.3 s.
 
 The seeds of 64 titles were imported once from the old engine (`nxb-seeds import --engine <checkout>`, upstream/main b4588a53): its `pso_manifest.tsv` (`S`, `C`, `R` and `M` rows), `shader_seen.tsv` and the `depth_mode` of `game.tsv`. Only `nxb-seeds` knows the engine's `pso_skey` (`nvn_pso_skey.h`). Its colour formats are `MTLPixelFormat` values and its blend and vertex state NVN values. Rows of passes that the engine merged and of target formats without a name in `nxkit-pipestate` are left out, and the file counts them. The shader keys of the engine and of `nxb-split` are the same hash (`skey` in both). 59 titles of the engine have no title module here, 19 of them with render rows (the importer lists them).
 

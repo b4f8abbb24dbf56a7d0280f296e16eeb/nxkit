@@ -438,12 +438,37 @@ fn colors_and_targets(c: &[Option<ColorSeed>]) -> (Vec<Option<Format>>, Vec<Blen
     (formats, blend, masks)
 }
 
-/// The pipeline list entry that a draw in the state of `seed` makes on the host, without its key (the host computes
-/// it). `facts` gives the facts of a shader key (`true`: read as a vertex shader). A shader seed gives none.
+/// The pipeline list entries that a draw in the state of `seed` makes on the host, without their keys (the host
+/// computes them). `facts` gives the facts of a shader key (`true`: read as a vertex shader). A shader seed gives none.
+///
+/// A seed does not say whether the draw had a geometry shader that picks the layer (the host then runs the layer entry
+/// of the vertex shader, `crate::draw::vertex_entry`). For a vertex shader with a layer entry both draws are given.
 pub fn resolve<'a>(
     seed: &Seed,
     facts: &impl Fn(&str, bool) -> Option<&'a ProgramFacts>,
     drawing: Drawing,
+) -> Result<Vec<Entry>, Unresolved> {
+    let Seed::Render(r) = seed else {
+        return Ok(resolve_one(seed, facts, drawing, false)?
+            .into_iter()
+            .collect());
+    };
+    let layered = facts(&r.vertex, true).is_some_and(|v| v.entry_layer.is_some())
+        && !(drawing.pull && facts(&r.vertex, true).is_some_and(|v| v.pull.is_some()));
+    let mut out: Vec<Entry> = resolve_one(seed, facts, drawing, false)?
+        .into_iter()
+        .collect();
+    if layered {
+        out.extend(resolve_one(seed, facts, drawing, true)?);
+    }
+    Ok(out)
+}
+
+fn resolve_one<'a>(
+    seed: &Seed,
+    facts: &impl Fn(&str, bool) -> Option<&'a ProgramFacts>,
+    drawing: Drawing,
+    layered: bool,
 ) -> Result<Option<Entry>, Unresolved> {
     let get = |k: &str, vertex: bool| facts(k, vertex).ok_or_else(|| Unresolved::Shader(k.into()));
     match seed {
@@ -474,7 +499,7 @@ pub fn resolve<'a>(
                 ),
                 None => {
                     let e = vertex_entry(
-                        false,
+                        layered,
                         &vs.entry,
                         vs.entry_layer.as_deref(),
                         [vs.entry_z[0].as_deref(), vs.entry_z[1].as_deref()],
