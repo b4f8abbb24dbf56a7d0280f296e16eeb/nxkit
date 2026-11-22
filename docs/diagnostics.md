@@ -72,7 +72,7 @@ The behaviour switches below are not diagnostics, but they help to find the caus
 | `NXKIT_TEMPORAL_UPSCALE=0` | Turns the temporal upscale of `temporal_upscale` in `game.json` off (R72, `docs/nxkit-gpu.md`, "Temporal upscale"). The game's own temporal anti-aliasing and upscale draws run. The log line `nxkit-gpu: temporal upscale: off, NXKIT_TEMPORAL_UPSCALE=0` confirms it. |
 | `NXKIT_SKIP_PROGRAMS=<key>,<key>` | Leaves out the dispatches whose compute program has one of these keys and the steps of a native plan with such a kernel. It also leaves out the draws whose vertex, task, mesh or fragment program has one (`skip.listed`). While a list is set, the encoder does not replay recorded runs of draws. Finds the pass that turns a picture black or costs GPU time. |
 | `NXKIT_SKIP_FILE=<path>` | The same list (draws too) in a file (comma or line separated), read again twice a second, so one run can measure one program after the other. |
-| `NXKIT_INPUT_FILE=<path>` | Scripted buttons for player 1, for a run that nobody attends. The host reads the file again twice a second (a missing or empty file means no scripted input). Entries are comma or line separated, and `#` starts a comment. `hold <action>` holds the action while the line is in the file. `pulse <action> <on_ms> <period_ms>` holds it for `on_ms` at the start of every `period_ms`. The periods start at the moment the host first read the content with the line, so the first press comes at once. An action is a button or stick direction of the key layout (`a`, `b`, `x`, `y`, `l`, `r`, `zl`, `zr`, `plus`, `minus`, `lstick`, `rstick`, `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, `ls_up`, `ls_down`, `ls_left`, `ls_right`, `rs_up`, `rs_down`, `rs_left`, `rs_right`). The actions join those of the keyboard before the sticks are worked out, so opposite directions cancel. They work without a controller, with the keyboard off and without the key focus. A line that does not parse is skipped, with one message per distinct text. When the content changes, the host prints `nxkit-input: scripted input: <entries or none>`. Example: `pulse a 100 1500, hold ls_up` presses A for 100 ms every 1.5 s and holds the left stick up. |
+| `NXKIT_INPUT_FILE=<path>` | Scripted buttons for player 1, for a run that nobody attends. The host reads the file again twice a second (a missing or empty file means no scripted input). Entries are comma or line separated, and `#` starts a comment. `hold <action>` holds the action while the line is in the file. `pulse <action> <on_ms> <period_ms>` holds it for `on_ms` at the start of every `period_ms`. The periods start at the moment the host first read the content with the line, so the first press comes at once. An action is a button or stick direction of the key layout (`a`, `b`, `x`, `y`, `l`, `r`, `zl`, `zr`, `plus`, `minus`, `lstick`, `rstick`, `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, `ls_up`, `ls_down`, `ls_left`, `ls_right`, `rs_up`, `rs_down`, `rs_left`, `rs_right`). The actions join those of the keyboard before the sticks are worked out, so opposite directions cancel. They work without a controller, with the keyboard off and without the key focus. A line that does not parse is skipped, with one message per distinct text. When the content changes, the host prints `nxkit-input: scripted input: <entries or none>`. Example: `pulse a 100 1500, hold ls_up` presses A for 100 ms every 1.5 s and holds the left stick up. A file with `wait`, `press`, `release`, `stick` or a `hold` of several buttons is a timeline, and so is a recording of the `record` verb (see "Input and replay"). |
 | `NXKIT_AV1_FRAMES=<n>` | The frames in flight of the rav1d worker, 1 to 8 (default 2). With one frame the worker waits for each picture. With more, a picture comes out on a later send. |
 | `NXKIT_LANGUAGE=<tag>` | The console language of the game, for example `de` or `en-GB`. Without it the first preferred language of the Mac that the console has, else `en-US`. |
 | `NXKIT_OP_MODE=docked\|handheld` | The operation mode that the game sees, over the `op_mode` of the title module. A launch option (`docs/nxkit-host.md`, launcher.json). Another value is ignored. |
@@ -394,6 +394,107 @@ The native replacement of a chain of dispatches (`ndve`, see `NXKIT_NDVE`) print
 The walker counts only when it reads a record. A recording that plays from the template cache does not count again. Without `NXKIT_WALK_CACHE=1` every frame counts. With `NXKIT_VERIFY_CACHE=1`, a recording is walked twice and counts twice.
 
 To add a reason, add it to `reasons!` in `nxkit-nvn/src/diag.rs`, call `nxkit_nvn::diag::note` where the work is dropped, and add a line to the table above.
+
+## Input and replay
+
+An agent or a person can move in a running game through the control socket. The input service (`nxkit-svc-input`) merges the injected input with the controllers, the keyboard and the input file. Player 1 is the default. The Home menu still takes the controllers.
+
+### Verbs
+
+| verb | effect |
+|---|---|
+| `press BUTTONS [MS] [player N]` | Presses the buttons for MS milliseconds (100), then lets them go. |
+| `hold BUTTONS [player N]` | Holds the buttons until a `release`. |
+| `release [BUTTONS] [player N]` | Lets the buttons go. Without buttons it lets everything go. |
+| `stick l\|r X Y [MS] [player N]` | Sets a stick. X and Y go from -1 to 1. Y up is positive. Without MS the stick stays until the next `stick`. |
+| `input COMMAND` | One line of the input script. It takes the commands above. |
+| `record start FILE [frames\|ms]` | Writes what player 1 gives the game to FILE. The default timing is `frames`. |
+| `record stop` | Ends the recording. `record` alone shows the state. |
+| `replay FILE` | Plays an input script now. `replay stop` stops it. `replay` alone shows the state. |
+
+BUTTONS are the names `a`, `b`, `x`, `y`, `l`, `r`, `zl`, `zr`, `plus`, `minus`, `lstick`, `rstick`, `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, and the stick directions `ls_up` and so on. Write several buttons as `a b` or `a+b`. N is 1 to 8. FILE is a path that the game process can open. Use an absolute path.
+
+```bash
+tools/nxkit-ctl press a
+tools/nxkit-ctl press dpad_down 50
+tools/nxkit-ctl hold zr
+tools/nxkit-ctl release zr
+tools/nxkit-ctl stick l 0 1 2000
+tools/nxkit-ctl input press plus+minus 200 player 2
+```
+
+### The input script
+
+`NXKIT_INPUT_FILE`, `record` and `replay` use one grammar. A line is one command. A comma also ends a command. A line that starts with `#` is a comment. The commands are the five above and these waits:
+
+| command | effect |
+|---|---|
+| `wait MS`, `wait 500ms`, `wait 2.5s` | Waits on the wall clock. |
+| `wait frames N` | Waits for N presented frames. |
+| `wait frame N` | Waits until N frames were presented since the start of the process. |
+
+A script that has one of these commands is a timeline. Its commands run in order. Only a `wait` stops the cursor. A `press` and a `hold` do not wait. A `hold` lasts until a `release`. The old lines `hold ACTION` and `pulse ACTION ON PERIOD` still work in a file that has no timeline command. A `pulse` line in a timeline runs from the start. A timeline starts at the first read of the file. When the text of the file changes, the timeline starts again. When it ends, the host prints `nxkit-input: scripted input: the timeline ended at frame N`.
+
+Example script `to-the-shop.txt`:
+
+```text
+# Wait for the title screen, then start the game and walk to the shop.
+wait frame 1800
+press a
+wait 2s
+press a
+wait frames 120
+hold ls_up
+wait 4s
+release
+stick l 1 0 1500
+press a
+```
+
+### How the timing stays stable
+
+There are two clocks.
+
+- Frames. The count is the number of presents of the game since the start of the process. The game steps once for each frame. Thus a frame wait gives the game the same input in the same step. This holds also when the machine is slower or when the frame rate changes. A wait does not drift. A late poll runs every command that is due, each at its own frame.
+- Wall clock. A wait on the wall clock ends at the time it was due, not at the time of the poll. Use it where no frame is presented, for example for a loading screen. A `press` that is shorter than the gap between two polls of the game is still shown once.
+
+Limits:
+
+- The time to load differs between runs. The frame count includes the frames of the loading screens. Thus a `wait frame N` before the scene can come at a different moment. Use `wait SECONDS` for a load.
+- A script cannot see the game. A scene that depends on chance, on the time of day or on the speed of the load can differ. A recording replays the input, not the game.
+- A game that does not present (a crash, the Home menu) stops every frame wait.
+- A game polls the controller at its own pace. A recording stores the state that the game saw, so it cannot lose a button. A `press` that you write by hand with a very short time can fall between two polls. The service shows it once.
+- Real controllers join a replay. Do not touch them during a replay.
+- A recording stores player 1 only.
+
+### Record and replay
+
+`record` writes each change of the buttons or of a stick as one line, with the wait before it. The input is what the game read: the controllers, the keyboard, the mouse camera, the input file and the injected input, all merged. It skips the time that the Home menu holds the controllers. In `frames` timing the waits count frames. In `ms` timing they count milliseconds. The waits are totals, so the rounding does not add up. A recording in `frames` timing that starts after the first present begins with `wait frame N`. When no frame was presented yet, `frames` timing writes milliseconds. At the end `record stop` writes the wait up to the stop and a `release`.
+
+Example of a recording:
+
+```text
+# nxkit input recording of player 1, timing frames, started at frame 0
+wait frames 212
+hold a
+wait frames 4
+release a
+wait frames 31
+stick l 0.00000 1.00000
+wait frames 240
+stick l 0.00000 0.00000
+release
+```
+
+### Workflow: back to the scene after a new build
+
+1. Start the game. Run `tools/nxkit-ctl record start /abs/path/scene.txt` as early as you can, before the game reads input. Then the frame count of the recording and the frame count of the replay agree.
+2. Load the save by hand. Walk to the scene of the problem.
+3. Stop the recording with `tools/nxkit-ctl record stop`.
+4. Open the file. Replace the gaps that wait for a load with `wait SECONDS`. Delete the part that you do not want.
+5. Change the host code. Build it. Start every new build with `NXKIT_INPUT_FILE=/abs/path/scene.txt`. The game then comes to the scene without a person. You can also start the replay later with `tools/nxkit-ctl replay /abs/path/scene.txt`.
+6. At the scene, use the other verbs (`keys`, `log`). Move on with `press` and `stick`.
+7. If the replay is off, record again from the point where it went wrong. Or put a `wait` before that point.
 
 ## Archive coverage
 

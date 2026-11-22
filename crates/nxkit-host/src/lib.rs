@@ -17,6 +17,7 @@ pub mod graphics;
 pub mod home;
 pub mod hostenv;
 pub mod input_file;
+mod input_verbs;
 pub mod json;
 pub mod layout;
 pub mod limits;
