@@ -16,7 +16,7 @@ pub const MAX_PROGRAMS: usize = 16;
 /// The most texture binds of one draw that a [`DrawInfo`] lists.
 pub const MAX_TEXTURES: usize = 16;
 
-/// The most texture slots that one [`DrawAnswer`] forces.
+/// The most texture slots that one [`DrawAnswer`](crate::DrawAnswer) forces.
 pub const MAX_FORCED: usize = 4;
 
 /// The value of a texture id that the host does not know (the handle did not resolve in this frame).
