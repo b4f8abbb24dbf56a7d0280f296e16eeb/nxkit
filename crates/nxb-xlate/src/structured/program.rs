@@ -293,10 +293,8 @@ fn add_operation(
         let dest_vec = ctx.new_temp(dest_type);
         let asg = ctx.ast.new_assign(dest_vec, source);
         ctx.add_node(asg)?;
-        for i in 0..operation.dests.len() {
-            let dest = ctx
-                .get_operand(ir, operation.dests[i])
-                .ok_or("null vector destination")?;
+        for (i, &d) in operation.dests.iter().enumerate() {
+            let dest = ctx.get_operand(ir, d).ok_or("null vector destination")?;
             let index = ctx.ast.new_operand(OperandType::Constant, i as i32);
             set_var_type(ctx, dest, dest_elem_type);
             let ex = ctx.ast.new_op(

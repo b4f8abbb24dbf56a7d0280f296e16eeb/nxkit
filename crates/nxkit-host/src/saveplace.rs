@@ -180,18 +180,18 @@ mod tests {
     #[test]
     fn the_save_is_under_application_support_unless_chosen() {
         let p = places(
-            Some(Path::new("/Users/a")),
+            Some(Path::new("/home/a")),
             None,
             Path::new("/App/nxkit"),
             0x0100_abcd_0000_0000,
             "0100abcd00000000",
         );
-        let support = "/Users/a/Library/Application Support/nxkit/0100ABCD00000000";
+        let support = "/home/a/Library/Application Support/nxkit/0100ABCD00000000";
         assert_eq!(p.save, Path::new(support).join("save"));
         assert_eq!(p.temp, Path::new(support).join("temp"));
         assert_eq!(p.bundled, Path::new("/App/nxkit/save/0100abcd00000000"));
         let chosen = places(
-            Some(Path::new("/Users/a")),
+            Some(Path::new("/home/a")),
             Some(Path::new("/x/s")),
             Path::new("/r"),
             1,

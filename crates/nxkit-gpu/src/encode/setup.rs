@@ -157,8 +157,8 @@ pub(super) fn setup(sh: &EncodeCtx<'_>, pass: &Pass) -> Result<Setup, Skip> {
                 outputs.insert(key, mask);
                 mask
             };
-            for slot in 0..8 {
-                if d.write_masks[slot] != 0 && locations & (1 << slot) != 0 {
+            for (slot, &m) in d.write_masks.iter().enumerate().take(8) {
+                if m != 0 && locations & (1 << slot) != 0 {
                     written |= 1 << slot;
                 }
             }

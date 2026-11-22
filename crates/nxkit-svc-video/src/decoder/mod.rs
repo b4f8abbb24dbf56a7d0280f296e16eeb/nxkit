@@ -279,13 +279,13 @@ impl Decoder {
     pub(crate) fn register_events(&self, entries: u64) {
         let mut st = lock(&self.shared.state);
         st.events_ptr = entries;
-        for i in 0..4 {
+        for (i, ev) in st.events.iter_mut().enumerate().take(4) {
             let p = if entries == 0 {
                 None
             } else {
                 self.shared.io.read_u64(entries + 8 * i as u64)
             };
-            st.events[i] = p.filter(|&p| self.shared.io.event_ok(p)).unwrap_or(0);
+            *ev = p.filter(|&p| self.shared.io.event_ok(p)).unwrap_or(0);
         }
     }
 
@@ -478,9 +478,9 @@ impl Decoder {
         let mut st = lock(&self.shared.state);
         let mut n = 0;
         if !st.tex_rel {
-            for k in 0..OUT_COUNT {
-                if k != index && st.out[k].rnd && st.out[k].cli {
-                    st.out[k] = Out::default();
+            for (k, o) in st.out.iter_mut().enumerate().take(OUT_COUNT) {
+                if k != index && o.rnd && o.cli {
+                    *o = Out::default();
                     n += 1;
                 }
             }

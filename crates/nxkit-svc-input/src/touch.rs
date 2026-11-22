@@ -248,11 +248,10 @@ impl Touches {
         };
         self.last_read_ns = now_ns;
         let mut k = 0;
-        for id in 0..FINGERS {
+        for (id, f) in self.fingers.iter_mut().enumerate().take(FINGERS) {
             if k == max {
                 break;
             }
-            let f = &mut self.fingers[id];
             if f.phase == Phase::Empty {
                 continue;
             }

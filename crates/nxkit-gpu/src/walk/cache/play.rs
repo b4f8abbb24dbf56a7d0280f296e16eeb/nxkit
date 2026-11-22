@@ -88,14 +88,14 @@ impl Walker {
                 Some(up) => (up.draws as usize, up.dispatches as usize),
                 None => (t.draws.len(), t.dispatches.len()),
             };
-            for k in d..de {
-                let a = self.fresh_draw(mem, &t.draws[k]);
-                t.draws[k] = a.clone();
+            for draw in &mut t.draws[d..de] {
+                let a = self.fresh_draw(mem, draw);
+                *draw = a.clone();
                 self.out.draws.push(a);
             }
-            for k in p..pe {
-                let x = self.fresh_dispatch(mem, &t.dispatches[k]);
-                t.dispatches[k] = x.clone();
+            for dispatch in &mut t.dispatches[p..pe] {
+                let x = self.fresh_dispatch(mem, dispatch);
+                *dispatch = x.clone();
                 self.out.dispatches.push(x);
             }
             (d, p) = (de, pe);

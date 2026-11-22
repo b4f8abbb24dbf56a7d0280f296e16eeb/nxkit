@@ -165,12 +165,12 @@ impl Platform {
         // SAFETY: `controllers` is a class method without arguments.
         let list = unsafe { GCController::controllers() }.to_vec();
         let live: Vec<usize> = list.iter().map(|c| Retained::as_ptr(c) as usize).collect();
-        for p in 0..PLAYERS {
+        for (p, pad) in self.pads.iter_mut().enumerate().take(PLAYERS) {
             if let Some(owner) = slots.owner_of(p)
                 && !live.contains(&owner)
             {
                 slots.free(owner);
-                self.pads[p] = None;
+                *pad = None;
             }
         }
         for controller in list {
