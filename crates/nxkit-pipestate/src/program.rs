@@ -136,6 +136,17 @@ pub fn pull_entry<'a, J: JsonView<'a>>(json: J) -> Option<String> {
     )
 }
 
+/// The entry of the `_bp` library that keeps the clip depth, for a device in the depth mode 0 to 1 (`entry_z` of the
+/// `pull` field), or `None` when the field names none (an older translator wrote only the converting entry).
+pub fn pull_entry_z<'a, J: JsonView<'a>>(json: J) -> Option<String> {
+    pull_entry(json)?;
+    json.get("pull")?
+        .get("entry_z")
+        .and_then(J::as_str)
+        .filter(|e| !e.is_empty())
+        .map(str::to_owned)
+}
+
 /// Reads the facts of a `<key>_b.json`. `vertex` reads the vertex inputs and the `pull` field.
 pub fn read<'a, J: JsonView<'a>>(json: J, vertex: bool) -> Result<ProgramFacts, FactsError> {
     let raster = json.get("raster");

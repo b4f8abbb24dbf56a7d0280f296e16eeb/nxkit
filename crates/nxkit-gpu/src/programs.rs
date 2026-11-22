@@ -172,9 +172,10 @@ type ProgramMap = crate::fastmap::FastMap<String, Result<Arc<StageProgram>, Skip
 pub(crate) struct Programs {
     ctx: Context,
     dir: PathBuf,
-    /// One map per reading of the vertex inputs (index 1 for vertex), so that a lookup by `&str` allocates nothing. A
-    /// read-write lock: every draw of every encode thread reads it, and a `Mutex` made them wait for each other.
-    cache: RwLock<[ProgramMap; 2]>,
+    /// One map per reading of the vertex inputs (index 1 for vertex, 2 for the pulling `_bp` variant of a vertex
+    /// shader), so that a lookup by `&str` allocates nothing. A read-write lock: every draw of every encode thread
+    /// reads it, and a `Mutex` made them wait for each other.
+    cache: RwLock<[ProgramMap; 3]>,
 }
 
 impl Programs {
@@ -182,7 +183,11 @@ impl Programs {
         Self {
             ctx: ctx.clone(),
             dir,
-            cache: RwLock::new([ProgramMap::default(), ProgramMap::default()]),
+            cache: RwLock::new([
+                ProgramMap::default(),
+                ProgramMap::default(),
+                ProgramMap::default(),
+            ]),
         }
     }
 
@@ -207,6 +212,22 @@ impl Programs {
         r
     }
 
+    /// The pulling `_bp` variant of the vertex shader `key`, also when pulling is off (`NXKIT_PULL`): a draw whose
+    /// attributes the stage_in layout cannot feed takes it (`nxkit_pipestate::nvn::stage_in_fits`). `Skip::Program`
+    /// when the shader has no `_bp` library. The result is cached, also a failure.
+    pub(crate) fn pulled(&self, key: &str) -> Result<Arc<StageProgram>, Skip> {
+        if let Some(p) = self.stage(key, true).ok().filter(|p| p.pull) {
+            return Ok(p);
+        }
+        if let Some(r) = self.cache.read().unwrap_or_else(PoisonError::into_inner)[2].get(key) {
+            return r.clone();
+        }
+        let r = self.load_as(key, true, true, true).map(Arc::new);
+        self.cache.write().unwrap_or_else(PoisonError::into_inner)[2]
+            .insert(key.to_owned(), r.clone());
+        r
+    }
+
     /// Forgets all programs, for example after the shader directory changed.
     pub(crate) fn clear(&self) {
         for m in self
@@ -220,6 +241,18 @@ impl Programs {
     }
 
     fn load(&self, key: &str, vertex: bool) -> Result<StageProgram, Skip> {
+        self.load_as(key, vertex, vertex && crate::pull::on(), false)
+    }
+
+    /// Loads the program of `key`. `pull` asks for the `_bp` library of a vertex shader. Without one the shader stays
+    /// on stage_in, unless `require` makes that a failure.
+    fn load_as(
+        &self,
+        key: &str,
+        vertex: bool,
+        pull: bool,
+        require: bool,
+    ) -> Result<StageProgram, Skip> {
         if key.is_empty() || key.contains(['/', '\\']) || key.contains("..") {
             return Err(Skip::Program);
         }
@@ -234,11 +267,14 @@ impl Programs {
         let json = parse(&text).ok_or_else(|| why("json parse"))?;
         let lib = ShaderLibrary::from_path(&self.ctx, &self.dir.join(format!("{key}_b.metallib")))
             .map_err(|e| why(&format!("metallib {e:?}")))?;
-        let pull = if vertex && crate::pull::on() {
+        let pull = if vertex && pull {
             self.pull_library(key, &json)
         } else {
             None
         };
+        if require && pull.is_none() {
+            return Err(why("no _bp library to pull with"));
+        }
         if crate::diag("prog")
             && json
                 .get("raster")
@@ -253,8 +289,10 @@ impl Programs {
         if let Some((lib, entry)) = pull {
             p.lib = lib;
             p.entry = entry;
-            // The `_bp` library has only its pulling entry.
-            p.entry_z = [None, None];
+            // The `_bp` library has its pulling entry and, from a current translator, the one that keeps the clip
+            // depth (`pull.entry_z`). Without it a device in the depth mode 0 to 1 draws with the converting entry
+            // (`pipe.depth-mode-ignored`).
+            p.entry_z = [nxkit_pipestate::program::pull_entry_z(&json), None];
             p.pull = true;
         }
         Ok(p)
