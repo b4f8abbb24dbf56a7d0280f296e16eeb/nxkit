@@ -45,7 +45,30 @@ impl BuildHooks for Fam {
         Some(Ok(vec![("f".into(), vars.len().to_string().into_bytes())]))
     }
 }
+const VELOCITY: VelocityCode = VelocityCode {
+    scale: [2.0, 2.0],
+    bias: [-1.0, -1.0],
+    y_up: true,
+    zero_means_camera: false,
+};
+
+fn view(jitter: u32) -> Fact<TemporalView> {
+    Fact::new(
+        TemporalView {
+            clip_to_prev_clip: 0,
+            jitter,
+            view_size: 8,
+            velocity: VELOCITY,
+            depth_reversed: false,
+        },
+        REC,
+    )
+}
+
 impl RuntimeHooks for Fam {
+    fn temporal_view(&self) -> Option<Fact<TemporalView>> {
+        Some(view(4))
+    }
     fn needs(&self) -> &'static [Fact<Need>] {
         const N: &[Fact<Need>] = &[Fact::new(
             Need {
@@ -164,6 +187,29 @@ impl RuntimeHooks for Game {
     fn upscaler(&self) -> Option<Fact<Upscaler>> {
         Some(Fact::new(Upscaler::Native, REC))
     }
+    fn temporal_view(&self) -> Option<Fact<TemporalView>> {
+        (self.0 == 2).then(|| view(12))
+    }
+    fn temporal_draws(&self) -> Option<Fact<TemporalDraws>> {
+        let d = DrawSlot {
+            fragment: "0123456789abcdef",
+            slot: 1,
+        };
+        Some(Fact::new(
+            TemporalDraws {
+                upscale: d,
+                source: SourceDraw {
+                    fragment: d.fragment,
+                    depth_slot: 0,
+                    velocity_slot: 1,
+                    view_stage: UboStage::Vertex,
+                    view_slot: 2,
+                },
+                passthrough: &[],
+            },
+            REC,
+        ))
+    }
     fn runtime(&self, s: Service) -> Option<Fact<Runtime>> {
         match (self.0, s) {
             (1, Service::Fs) => Some(Fact::new(Runtime::Engine, REC)),
@@ -220,6 +266,19 @@ fn title_wins_then_family_then_core() {
         archive: Some("up.bnsh"),
     };
     assert!(r.shader_role(&up).is_some());
+}
+
+#[test]
+fn the_temporal_view_comes_from_the_first_layer_that_answers() {
+    let c = catalog();
+    let jitter = |id| {
+        c.resolve(&TitleFacts::new(TitleId(id)))
+            .temporal_view()
+            .map(|f| f.value.jitter)
+    };
+    assert_eq!(jitter(1), Some(4));
+    assert_eq!(jitter(2), Some(12));
+    assert_eq!(UboStage::Vertex.id(), "vertex");
 }
 
 #[test]

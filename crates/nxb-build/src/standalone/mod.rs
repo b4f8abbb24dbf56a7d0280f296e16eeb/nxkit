@@ -101,6 +101,9 @@ struct Game {
     limits: Vec<nxtitle::LimitRule>,
     /// The program arguments that set the render size (`RuntimeHooks::render_args`).
     render_args: Option<nxtitle::RenderArgs>,
+    /// The temporal upscale facts, when the engine and the title both answer (`RuntimeHooks::temporal_view` and
+    /// `temporal_draws`).
+    temporal_upscale: Option<(nxtitle::TemporalView, nxtitle::TemporalDraws)>,
     /// The title needs the command buffer to ignore a bind of one null range at a stream of 16 or more.
     vertex_stream_null_bind: bool,
 }
@@ -131,6 +134,10 @@ fn module(src: &Inputs) -> Result<Option<Game>, String> {
         sf_services: r.sf_services().into_iter().map(|f| f.value).collect(),
         limits: r.limits().into_iter().map(|f| f.value).collect(),
         render_args: r.render_args().map(|f| f.value),
+        temporal_upscale: r
+            .temporal_view()
+            .zip(r.temporal_draws())
+            .map(|(v, d)| (v.value, d.value)),
         vertex_stream_null_bind: r.needs().iter().any(|n| {
             n.value.capability == "vertex_stream_null_bind" && n.value.setting == "ignore"
         }),
@@ -444,6 +451,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             sf_services: t.sf_services.clone(),
             limits: t.limits.clone(),
             render_args: t.render_args,
+            temporal_upscale: t.temporal_upscale,
             vertex_stream_null_bind: t.vertex_stream_null_bind,
         };
         let put = |n: &str, d: &[u8]| {

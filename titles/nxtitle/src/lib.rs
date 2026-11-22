@@ -26,6 +26,7 @@ mod hooks;
 mod resources;
 mod runtime;
 mod settings;
+mod temporal;
 pub mod threads;
 
 pub use catalog::{Catalog, FamilyFrom, Resolved};
@@ -42,6 +43,7 @@ pub use nxb_model::{Digest, TitleId};
 pub use resources::{Edit, ResourcePatch, ZstdDictionary};
 pub use runtime::{Runtime, Service};
 pub use settings::{Memory, Settings};
+pub use temporal::{DrawSlot, SourceDraw, TemporalDraws, TemporalView, UboStage, VelocityCode};
 
 /// An engine family: the facts and hooks that hold for every game of one engine.
 pub trait Family: BuildHooks + RuntimeHooks {

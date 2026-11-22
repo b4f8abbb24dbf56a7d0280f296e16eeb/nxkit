@@ -19,6 +19,9 @@
 //! reads them in `nninitStartup` into the display size (1280x720 when absent), the platform application reports that
 //! size as the display, and `UGameEngine::DetermineGameWindowResolution` gives the game window the display size. The
 //! renderer scales its view by `r.ScreenPercentage` of the device profile on top of that size.
+//!
+//! The layout of the view uniform buffer (`FViewUniformShaderParameters`) and of the velocity changes with the engine
+//! version, and the family has no version. A title states it (`RuntimeHooks::temporal_view`).
 
 mod cvarpak;
 mod ini;

@@ -52,6 +52,8 @@ pub(crate) struct Manifest<'a> {
     pub limits: Vec<nxtitle::LimitRule>,
     /// The program arguments that set the render size (`RuntimeHooks::render_args`), written as `render_args`.
     pub render_args: Option<nxtitle::RenderArgs>,
+    /// The facts of `settings.temporal_upscale`, written when the engine and the title both gave theirs.
+    pub temporal_upscale: Option<(nxtitle::TemporalView, nxtitle::TemporalDraws)>,
     /// The need `vertex_stream_null_bind` of the title.
     pub vertex_stream_null_bind: bool,
 }
@@ -165,7 +167,69 @@ fn settings(m: &Manifest) -> Value {
             obj(vec![("major", n(major)), ("minor", n(minor))]),
         ));
     }
+    if let Some((view, draws)) = &m.temporal_upscale {
+        f.push(("temporal_upscale", temporal_upscale(view, draws)));
+    }
     obj(f)
+}
+
+fn float_pair(v: [f64; 2]) -> Value {
+    Value::List(v.iter().map(|x| Value::Float(*x)).collect())
+}
+
+fn draw_slot(d: &nxtitle::DrawSlot, slot_key: &str) -> Value {
+    obj(vec![("fragment", s(d.fragment)), (slot_key, n(d.slot))])
+}
+
+/// The `temporal_upscale` object of `settings`, in the shape that `nxkit-host` `tupscale.rs` reads.
+fn temporal_upscale(view: &nxtitle::TemporalView, draws: &nxtitle::TemporalDraws) -> Value {
+    let src = &draws.source;
+    obj(vec![
+        ("upscale", draw_slot(&draws.upscale, "color_slot")),
+        (
+            "source",
+            obj(vec![
+                ("fragment", s(src.fragment)),
+                ("depth_slot", n(src.depth_slot)),
+                ("velocity_slot", n(src.velocity_slot)),
+                (
+                    "view",
+                    obj(vec![
+                        ("stage", s(src.view_stage.id())),
+                        ("slot", n(src.view_slot)),
+                    ]),
+                ),
+            ]),
+        ),
+        (
+            "passthrough",
+            Value::List(
+                draws
+                    .passthrough
+                    .iter()
+                    .map(|d| draw_slot(d, "slot"))
+                    .collect(),
+            ),
+        ),
+        (
+            "view",
+            obj(vec![
+                ("clip_to_prev_clip", n(view.clip_to_prev_clip)),
+                ("jitter", n(view.jitter)),
+                ("view_size", n(view.view_size)),
+            ]),
+        ),
+        (
+            "velocity",
+            obj(vec![
+                ("scale", float_pair(view.velocity.scale)),
+                ("bias", float_pair(view.velocity.bias)),
+                ("y_up", flag(view.velocity.y_up)),
+                ("zero_means_camera", flag(view.velocity.zero_means_camera)),
+            ]),
+        ),
+        ("depth_reversed", flag(view.depth_reversed)),
+    ])
 }
 
 /// One frame limit rule of the title module, for the host's `LimitsConfig` (R30b).
@@ -472,5 +536,62 @@ mod tests {
             nxb_pyjson::dumps(&fixed),
             r#"{"what": "w", "build": "ab", "site": {"ptr_off": 8, "field": 4}, "kind": {"id": "ticks_u32", "scale": 19200000}, "copies": 1}"#
         );
+    }
+
+    /// The temporal upscale object of OCTOPATH TRAVELER, read back with the host's expectations (`tupscale.rs`).
+    #[test]
+    fn temporal_upscale_has_the_shape_the_host_reads() {
+        let c = nxtitles::catalog().unwrap();
+        let r = c.resolve(&nxtitle::TitleFacts::new(nxtitle::TitleId(
+            0x0100_57D0_0649_2000,
+        )));
+        let (view, draws) = (
+            r.temporal_view().unwrap().value,
+            r.temporal_draws().unwrap().value,
+        );
+        let text = nxb_pyjson::dumps_indent(&temporal_upscale(&view, &draws), 1);
+        println!("{text}");
+        let v = nxb_pyjson::parse(&text).unwrap();
+        let int = |o: &Value, k: &str| o.get(k).and_then(Value::as_i64).unwrap();
+        let pair = |o: &Value, k: &str| -> Vec<f64> {
+            o.get(k)
+                .and_then(Value::as_list)
+                .unwrap()
+                .iter()
+                .map(|x| match x {
+                    Value::Float(f) => *f,
+                    other => panic!("{other:?}"),
+                })
+                .collect()
+        };
+        let up = v.get("upscale").unwrap();
+        assert_eq!(
+            up.get("fragment").and_then(Value::as_str),
+            Some("be89b1ada1308881")
+        );
+        assert_eq!(int(up, "color_slot"), 0);
+        let src = v.get("source").unwrap();
+        assert_eq!((int(src, "depth_slot"), int(src, "velocity_slot")), (3, 0));
+        let ubo = src.get("view").unwrap();
+        assert_eq!(ubo.get("stage").and_then(Value::as_str), Some("fragment"));
+        assert_eq!(int(ubo, "slot"), 0);
+        let pass = v.get("passthrough").and_then(Value::as_list).unwrap();
+        assert_eq!(pass.len(), 2);
+        assert_eq!(int(&pass[1], "slot"), 2);
+        let offsets = v.get("view").unwrap();
+        assert_eq!(
+            [
+                int(offsets, "clip_to_prev_clip"),
+                int(offsets, "jitter"),
+                int(offsets, "view_size")
+            ],
+            [1760, 1824, 1888]
+        );
+        let vel = v.get("velocity").unwrap();
+        assert_eq!(pair(vel, "scale"), [4.008016, 4.008016]);
+        assert_eq!(pair(vel, "bias"), [-2.003976, -2.003976]);
+        assert_eq!(vel.get("y_up"), Some(&Value::Bool(true)));
+        assert_eq!(vel.get("zero_means_camera"), Some(&Value::Bool(true)));
+        assert_eq!(v.get("depth_reversed"), Some(&Value::Bool(true)));
     }
 }

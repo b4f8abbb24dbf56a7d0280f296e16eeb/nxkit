@@ -113,6 +113,7 @@ impl Analysis {
             sf_services: vec![],
             limits: vec![],
             render_args: None,
+            temporal_upscale: None,
             vertex_stream_null_bind: false,
         })
     }

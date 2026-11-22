@@ -1,6 +1,9 @@
 //! The questions a family or title answers. Every method has a default of "no opinion".
 
-use crate::{ConsoleFiles, ConsoleVar, Fact, ResourcePatch, RomfsRead, Runtime, Service};
+use crate::{
+    ConsoleFiles, ConsoleVar, Fact, ResourcePatch, RomfsRead, Runtime, Service, TemporalDraws,
+    TemporalView,
+};
 
 /// A shader stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -356,6 +359,16 @@ pub trait RuntimeHooks: Sync {
     /// The program arguments that set the size the game renders at, for the launch option `NXKIT_RENDER_SIZE`.
     /// `None`: the game has no such arguments, and the launcher shows no row.
     fn render_args(&self) -> Option<Fact<RenderArgs>> {
+        None
+    }
+    /// The layout of the engine's view uniform buffer and velocity texture, for `settings.temporal_upscale`. A fact of
+    /// the engine, and of its version where the layout changes with it.
+    fn temporal_view(&self) -> Option<Fact<TemporalView>> {
+        None
+    }
+    /// The draws of the game that MetalFX temporal upscaling replaces, for `settings.temporal_upscale`. A fact of the
+    /// title. The build writes the key only when this and [`RuntimeHooks::temporal_view`] are both answered.
+    fn temporal_draws(&self) -> Option<Fact<TemporalDraws>> {
         None
     }
 }

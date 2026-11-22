@@ -15,13 +15,20 @@
 //! `DefaultDeviceProfiles.ini`). They serve the MetalFX temporal upscaler: the game renders at half the back buffer
 //! size per side and every frame is jittered.
 //!
+//! The module also holds what `settings.temporal_upscale` of `game.json` needs, and `upscaler()` is MetalFX: the encoder
+//! replaces the game's TAA and upscale draws with the MetalFX temporal scaler. The draws are named by their fragment
+//! shader keys ([`RuntimeHooks::temporal_draws`]). The layout of the view uniform buffer and of the velocity is the one of
+//! UE 4.18's `FViewUniformShaderParameters`. It sits here and not in the family `unreal`, which has no engine version
+//! and covers UE 4 and 5 ([`RuntimeHooks::temporal_view`]).
+//!
 //! The rewrite rules are data in `rules/010057D006492000.toml`: the build row of v327680 and the engine's SDK-wide
 //! rules for the `sdk` module (12 implementations of the node area of 62 MB and of the 2 MB alignment of large
 //! regions).
 
 use nxtitle::{
-    BuildHooks, ConsoleVar, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings,
-    Standalone, Title, TitleId,
+    BuildHooks, ConsoleVar, DrawSlot, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service,
+    Settings, SourceDraw, Standalone, TemporalDraws, TemporalView, Title, TitleId, UboStage,
+    Upscaler, VelocityCode,
 };
 
 /// The title module.
@@ -118,6 +125,59 @@ const CONSOLE_VARS: &[Fact<ConsoleVar>] = &[
     ),
 ];
 
+/// The view uniform buffer dumps and the bindings of the TAA draw in runs of the game.
+const TAA_RUN: Evidence = Evidence::Recorded {
+    source: "view uniform buffer dumps of OCTOPATH TRAVELER (NXKIT_DIAG=ubo with NXKIT_DIAG_FS) and the TAA draw's \
+             bindings, runs of 2026-11-22",
+    read: "2026-11-22",
+};
+
+/// The offsets belong to the layout of UE 4.18's `FViewUniformShaderParameters`. Another engine version may differ. The
+/// velocity is a `Rg16Unorm` texel: UE writes `V * (0.499 * 0.5) + 32767 / 65535`, so `V = raw * 4.008016 - 2.003976`.
+const TEMPORAL_VIEW: Fact<TemporalView> = Fact::new(
+    TemporalView {
+        clip_to_prev_clip: 1760,
+        jitter: 1824,
+        view_size: 1888,
+        velocity: VelocityCode {
+            scale: [4.008016, 4.008016],
+            bias: [-2.003976, -2.003976],
+            y_up: true,
+            zero_means_camera: true,
+        },
+        depth_reversed: true,
+    },
+    TAA_RUN,
+);
+
+/// The fragment shaders of the TAA and upscale draws of v327680.
+const TEMPORAL_DRAWS: Fact<TemporalDraws> = Fact::new(
+    TemporalDraws {
+        upscale: DrawSlot {
+            fragment: "be89b1ada1308881",
+            slot: 0,
+        },
+        source: SourceDraw {
+            fragment: "cc0fa26ed24e4da1",
+            depth_slot: 3,
+            velocity_slot: 0,
+            view_stage: UboStage::Fragment,
+            view_slot: 0,
+        },
+        passthrough: &[
+            DrawSlot {
+                fragment: "cc0fa26ed24e4da1",
+                slot: 2,
+            },
+            DrawSlot {
+                fragment: "befb9b8e18bd3e4f",
+                slot: 2,
+            },
+        ],
+    },
+    TAA_RUN,
+);
+
 impl BuildHooks for Octo {
     fn console_vars(&self) -> &'static [Fact<ConsoleVar>] {
         CONSOLE_VARS
@@ -157,6 +217,19 @@ const NXKIT: Fact<Runtime> = Fact::new(
 impl RuntimeHooks for Octo {
     fn runtime(&self, _service: Service) -> Option<Fact<Runtime>> {
         Some(NXKIT)
+    }
+
+    /// MetalFX temporal upscaling replaces the game's TAA and upscale draws (R70, R72).
+    fn upscaler(&self) -> Option<Fact<Upscaler>> {
+        Some(Fact::new(Upscaler::MetalFx, TAA_RUN))
+    }
+
+    fn temporal_view(&self) -> Option<Fact<TemporalView>> {
+        Some(TEMPORAL_VIEW)
+    }
+
+    fn temporal_draws(&self) -> Option<Fact<TemporalDraws>> {
+        Some(TEMPORAL_DRAWS)
     }
 
     /// SDK 3: the address of the shared font is the TTF itself, whatever `main` imports.
@@ -224,6 +297,32 @@ mod tests {
                 ("r.TemporalAASamples", "8")
             ]
         );
+    }
+
+    #[test]
+    fn the_temporal_upscale_facts_are_the_recorded_ones() {
+        let v = OCTO.temporal_view().unwrap().value;
+        assert_eq!(
+            [v.clip_to_prev_clip, v.jitter, v.view_size],
+            [1760, 1824, 1888]
+        );
+        assert_eq!(v.velocity.scale, [4.008016; 2]);
+        assert_eq!(v.velocity.bias, [-2.003976; 2]);
+        assert!(v.velocity.y_up && v.velocity.zero_means_camera && v.depth_reversed);
+        let d = OCTO.temporal_draws().unwrap().value;
+        assert_eq!(
+            (d.upscale.fragment, d.upscale.slot),
+            ("be89b1ada1308881", 0)
+        );
+        assert_eq!(d.source.fragment, "cc0fa26ed24e4da1");
+        assert_eq!((d.source.depth_slot, d.source.velocity_slot), (3, 0));
+        assert_eq!(
+            (d.source.view_stage, d.source.view_slot),
+            (UboStage::Fragment, 0)
+        );
+        let pass: Vec<_> = d.passthrough.iter().map(|p| (p.fragment, p.slot)).collect();
+        assert_eq!(pass, [("cc0fa26ed24e4da1", 2), ("befb9b8e18bd3e4f", 2)]);
+        assert_eq!(OCTO.upscaler().map(|f| f.value), Some(Upscaler::MetalFx));
     }
 
     #[test]

@@ -267,6 +267,16 @@ impl Resolved {
         self.runtime_hooks().find_map(|h| h.render_args())
     }
 
+    /// The layout of the view uniform buffer and the velocity. The title's answer, then the family's.
+    pub fn temporal_view(&self) -> Option<Fact<crate::TemporalView>> {
+        self.runtime_hooks().find_map(|h| h.temporal_view())
+    }
+
+    /// The draws the temporal upscaler replaces. The title's answer, then the family's.
+    pub fn temporal_draws(&self) -> Option<Fact<crate::TemporalDraws>> {
+        self.runtime_hooks().find_map(|h| h.temporal_draws())
+    }
+
     /// The services the game opens through `nn::sf::hipc`, of the family and then the title.
     pub fn sf_services(&self) -> Vec<Fact<&'static str>> {
         let hooks: Vec<_> = self.runtime_hooks().collect();

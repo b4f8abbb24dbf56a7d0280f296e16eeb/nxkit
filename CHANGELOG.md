@@ -20,7 +20,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   OCTOPATH TRAVELER sets `r.ScreenPercentage=50`, `r.DefaultFeature.AntiAliasing=2` and `r.TemporalAASamples=8` for
   the temporal upscaler.
 - A title can replace a game's own temporal anti-aliasing and upscale pass by MetalFX temporal upscaling (R72).
-  `temporal_upscale` of `game.json` names the draws. The encoder leaves out the anti-aliasing draws and copies the
+  `temporal_upscale` of `game.json` names the draws. `nxb build` writes it from the title's `temporal_view` (the
+  engine's view uniform buffer layout and velocity encoding) and `temporal_draws` (the shader keys and slots). The encoder leaves out the anti-aliasing draws and copies the
   jittered scene into their target, writes a motion texture, runs MetalFX's temporal scaler and draws its output into
   the back buffer before the game's UI. When an input is missing or does not fit, the game's draws run and the log
   says why (`nxkit-gpu: temporal upscale: ...`). `NXKIT_TEMPORAL_UPSCALE=0` turns it off, `NXKIT_DIAG=tupscale` prints

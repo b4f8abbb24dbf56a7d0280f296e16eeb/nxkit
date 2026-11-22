@@ -39,6 +39,8 @@ A family and a title answer questions through hooks. `None` means no opinion.
 | `pacing` | `RuntimeHooks` | the game, the display or a fixed rate paces the frames |
 | `pace_profile` | `RuntimeHooks` | the keys that steer the frame step and the presents |
 | `limits` | `RuntimeHooks` | where the game's own frame limit sits, so that the host can write the target into it |
+| `temporal_view` | `RuntimeHooks` | the engine's layout for MetalFX temporal upscaling: the byte offsets of `ClipToPrevClip`, the jitter and the view size in the view uniform buffer, the velocity code (`scale`, `bias`, `y_up`, `zero_means_camera`) and `depth_reversed`. A family answers it only for an engine version whose layout it knows, otherwise the title does |
+| `temporal_draws` | `RuntimeHooks` | the draws of the game that MetalFX temporal upscaling replaces: the upscale draw (fragment key, colour slot), the source draw (fragment key, depth slot, velocity slot, stage and slot of the view uniform buffer) and the pass-through draws (fragment key, slot). `nxb build` writes `settings.temporal_upscale` of `game.json` (R72) only when `temporal_view` and `temporal_draws` are both answered |
 | `runtime` | `RuntimeHooks` | whether the nxkit runtime runs one service of the game |
 
 A role names what a shader does. The core decides what to do with it. A title module does not change the core's code path for a shader.
