@@ -75,6 +75,9 @@ pub struct StreamInputs {
     /// only when the pair is in `pairs` and the plan accepts its functions. A group compiles them in batches of their
     /// own, apart from its bases.
     pub exacts: Vec<crate::exact::ExactState>,
+    /// The pipeline seeds of the title ([`crate::seeded`]). A group resolves the render seeds of its pairs when its
+    /// shaders are done and compiles them with the exact states.
+    pub seeds: nxkit_pipestate::seeds::Seeds,
     /// `depth_mode zero`.
     pub zero: bool,
     /// Pairs per group (about, a group's identity hash cuts it, at most 4x).
@@ -396,7 +399,7 @@ fn group(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .extend(refused);
-    let mine_exact: Vec<crate::exact::ExactState> = inp
+    let mut mine_exact: Vec<crate::exact::ExactState> = inp
         .exacts
         .iter()
         .filter(|e| {
@@ -405,6 +408,24 @@ fn group(
         })
         .cloned()
         .collect();
+    if !inp.seeds.is_empty() {
+        let (entries, _) = crate::seeded::Resolver::new(&inp.lib_dir).resolve(&inp.seeds, |s| {
+            matches!(s, nxkit_pipestate::seeds::Seed::Render(r)
+                if r.fragment.as_deref().is_some_and(|f| here.contains(&(r.vertex.as_str(), f))))
+        });
+        let known: HashSet<crate::exact::ExactState> = mine_exact.iter().cloned().collect();
+        mine_exact.extend(
+            entries
+                .iter()
+                .filter_map(|e| match e {
+                    nxkit_pipestate::list::Entry::Render(r) => {
+                        crate::exact::ExactState::from_render(r)
+                    }
+                    _ => None,
+                })
+                .filter(|e| !known.contains(e)),
+        );
+    }
     let (exacts, refused) = crate::exact::usable(&inp.lib_dir, &inp.chain, &mine_exact, inp.zero);
     dropped
         .lock()

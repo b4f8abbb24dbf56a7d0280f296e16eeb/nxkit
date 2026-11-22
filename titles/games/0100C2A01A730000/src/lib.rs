@@ -83,6 +83,10 @@ impl BuildHooks for Rotk8 {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/0100C2A01A730000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 /// The game builds without the engine, so nxkit runs every service.

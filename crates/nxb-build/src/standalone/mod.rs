@@ -31,6 +31,7 @@ mod pipelist;
 mod replace_tests;
 mod romfs;
 mod shaders;
+mod shipped;
 mod version;
 mod vk_shaders;
 
@@ -106,6 +107,8 @@ struct Game {
     temporal_upscale: Option<(nxtitle::TemporalView, nxtitle::TemporalDraws)>,
     /// The title needs the command buffer to ignore a bind of one null range at a stream of 16 or more.
     vertex_stream_null_bind: bool,
+    /// The pipeline seeds of the family and the title.
+    seeds: nxkit_pipestate::seeds::Seeds,
 }
 
 /// The title module of the input's game, `None` when the game has no module or has no data for this build.
@@ -119,6 +122,10 @@ fn module(src: &Inputs) -> Result<Option<Game>, String> {
     let rules = r.title_rules().ok_or_else(|| {
         format!("the title module of {id:016X} has build data and no rewrite rules")
     })?;
+    let (seeds, errors) = nxb_archive::seeded::read_seeds(&r.pipeline_seeds());
+    if let Some(e) = errors.first() {
+        return Err(format!("the pipeline seeds of {id:016X}: {e}"));
+    }
     Ok(Some(Game {
         id,
         name: t.name(),
@@ -141,6 +148,7 @@ fn module(src: &Inputs) -> Result<Option<Game>, String> {
         vertex_stream_null_bind: r.needs().iter().any(|n| {
             n.value.capability == "vertex_stream_null_bind" && n.value.setting == "ignore"
         }),
+        seeds,
     }))
 }
 
@@ -267,6 +275,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
                 .map(PathBuf::from)
                 .as_deref(),
         ),
+        seeds: t.seeds.clone(),
         src,
     };
     if a.dry_run {

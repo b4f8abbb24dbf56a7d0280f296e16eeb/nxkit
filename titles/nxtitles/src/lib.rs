@@ -381,6 +381,32 @@ mod tests {
     }
 
     #[test]
+    fn every_seed_file_reaches_the_build_through_its_module() {
+        use nxtitle::TitleFacts;
+        let c = catalog().unwrap();
+        let games = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../games");
+        for t in c.titles() {
+            let file = games.join(t.id().to_string()).join("pipelines.seeds");
+            let hook = c.resolve(&TitleFacts::new(t.id())).pipeline_seeds();
+            match std::fs::read_to_string(&file) {
+                Ok(text) => {
+                    assert!(
+                        text.starts_with("nxkit-pipeline-seeds 1\n"),
+                        "{}",
+                        file.display()
+                    );
+                    assert!(
+                        hook.contains(&text.as_str()),
+                        "{} has no pipeline_seeds hook",
+                        t.name()
+                    );
+                }
+                Err(_) => assert!(hook.is_empty(), "{}", t.name()),
+            }
+        }
+    }
+
+    #[test]
     fn every_title_builds_standalone() {
         use nxtitle::TitleFacts;
         let c = catalog().unwrap();

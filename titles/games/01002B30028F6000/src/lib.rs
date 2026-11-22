@@ -81,6 +81,10 @@ impl BuildHooks for Celeste {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/01002B30028F6000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 /// The game builds without the engine, so nxkit runs every service.

@@ -91,6 +91,10 @@ impl BuildHooks for Acnh {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/01006F8002326000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 const SF_SERVED: Evidence = Evidence::Recorded {

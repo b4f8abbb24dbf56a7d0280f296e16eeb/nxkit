@@ -1,0 +1,41 @@
+nxkit-pipeline-seeds 1
+# Imported by nxb-seeds from the old engine at b4588a5396cb: dm/games/010020D01AD24000/pso_manifest.tsv, shader_seen.tsv and game.tsv.
+# Left out: 0 rows of merged passes, 0 with a target format the host has no name for, 0 that do not parse.
+S	a6a072edbf3bd5ed
+S	5ba46358396fee5f
+R	0b0ac46ce1bb16d0	fa98cf59bf8caaf9	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	1e4436041506f391	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	d301acea51fc3eb6	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	d301acea51fc3eb6	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	f3bc0b672bcaec18	1	0	Rgba8Unorm:e:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	956f5e5ef09394f9	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	b09670068ca42e47	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	287ac93d8df58825	1	0	Rgba8Unorm:f:5.2.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	b746b6029eb4e6bf	1	0	Rgba8Unorm:f:5.2.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	8a06eac485a3aae9	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	d301acea51fc3eb6	1	0	Rgba8Unorm:f:5.2.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	b1671936f6077db5	1	0	Rgba16Float:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	6e5645567270b066	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	d825ecda2a6e6273	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	4430b90de0f09767	1	0	Rg16Float:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	87937c1e1581ad91	1	0	Rg16Float:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	f3dbd337d07a3116	1	0	Rgba16Float:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	efae53ecfaa4cf90	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	8087d8ebdf9db3e5	1	0	Rgba8Unorm:f:5.2.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	0beb3e2482cee6fa	1	0	Rgba8Unorm:f:5.2.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	4ff61e31c7956800	1	0	Rgba8Unorm:f:8.7.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	5d3997e4d50f71b7	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	74cfbf20268f478a	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	367e8c478aa3a30e	1	0	Rgba8Unorm:f:9.1.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	c32b12a8093c21c6	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	33aafa3ce6ab1eee	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	08d2e017a9316e6e	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	fa98cf59bf8caaf9	1	0	Rgba8Unorm:f:5.2.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	c49fad58efbb1415	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	85ad86ea910354b5	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	c3a3af25114f4058	1	0	Rgba8Unorm:f:5.2.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	0b7f8baf3953eb6a	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	a81db7903695ecee	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	8603ddb5cf608eef	1	0	Rgba16Float:f:5.2.1.2.2.1	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	091c95d8f3925b01	1	0	Rgba8Unorm:f:5.6.1.2.2.5	0:2e:0:0,1:25:16:0	0:32:0
+R	0b0ac46ce1bb16d0	a81db7903695ecee	1	0	Rgba8Unorm:1:2.2.2.2.1.1	0:2e:0:0,1:25:16:0	0:32:0

@@ -12,6 +12,7 @@ fn inputs(n: usize) -> StreamInputs {
         computes: Vec::new(),
         extras: Vec::new(),
         exacts: Vec::new(),
+        seeds: Default::default(),
         zero: false,
         group_target: 8,
         limits: Limits::new(1, 1, 0),

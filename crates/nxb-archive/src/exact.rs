@@ -189,19 +189,26 @@ fn color_of(t: &Option<ColorTarget>) -> Option<Option<ColorSlot>> {
 /// The state of one `R` line with a fragment function, or none for a line that does not parse, names a format or a
 /// factor the script has no name for, or has no fragment stage.
 fn state_of_line(l: &str) -> Option<ExactState> {
-    let r = render_of_line(l)?;
-    let (attributes, layouts) = layout_parts(&r.layout)?;
-    Some(ExactState {
-        vertex: r.vertex,
-        fragment: r.fragment?,
-        attributes,
-        layouts,
-        topology: format!("{:?}", r.topology),
-        samples: r.samples,
-        alpha_to_coverage: r.a2c,
-        icb: r.icb,
-        colors: r.colors.iter().map(color_of).collect::<Option<_>>()?,
-    })
+    ExactState::from_render(&render_of_line(l)?)
+}
+
+impl ExactState {
+    /// The state of a render entry with a fragment function, or none for one without, or one that names a format or a
+    /// factor the script has no name for.
+    pub fn from_render(r: &nxkit_pipestate::list::RenderRec) -> Option<ExactState> {
+        let (attributes, layouts) = layout_parts(&r.layout)?;
+        Some(ExactState {
+            vertex: r.vertex.clone(),
+            fragment: r.fragment.clone()?,
+            attributes,
+            layouts,
+            topology: format!("{:?}", r.topology),
+            samples: r.samples,
+            alpha_to_coverage: r.a2c,
+            icb: r.icb,
+            colors: r.colors.iter().map(color_of).collect::<Option<_>>()?,
+        })
+    }
 }
 
 /// The exact states of a list text, without repeats, in the order of the list. A text of another version gives none.

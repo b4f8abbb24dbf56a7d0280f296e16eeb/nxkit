@@ -179,6 +179,10 @@ impl BuildHooks for Botw {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/01007EF00011E000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 const THREAD_NOTE: &str = "the thread names and priorities are guesses from the engine's usual layout and are not \

@@ -71,8 +71,22 @@ fn sample() -> Seeds {
 
 #[test]
 fn the_seeds_round_trip_through_their_text() {
-    let s = sample();
+    let mut s = sample();
+    s.depth = Some(DepthMode::Zero);
     let text = s.to_text(&["from a test".into()]);
+    assert!(text.contains("\nD\tzero\n"));
+    assert_eq!(
+        s.drawings(false),
+        [Drawing {
+            zero_to_one: true,
+            pull: false
+        }]
+    );
+    assert_eq!(
+        sample().drawings(false).len(),
+        2,
+        "an unknown mode resolves for both"
+    );
     assert!(text.starts_with(HEADER));
     assert!(text.contains("\n# from a test\n"));
     assert_eq!(Seeds::parse(&text).unwrap(), s);

@@ -68,15 +68,6 @@ pub enum ShaderRole {
     },
 }
 
-/// A shader or pipeline to prepare before the first frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Seed {
-    /// The shader key (16 hex digits).
-    pub key: &'static str,
-    /// Where it was seen first (the scene or the run).
-    pub seen: &'static str,
-}
-
 /// A host behaviour a game depends on, with the setting that turns it on where it is not the default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Need {
@@ -287,9 +278,11 @@ pub trait BuildHooks: Sync {
     fn shader_role(&self, _shader: &ShaderView<'_>) -> Option<Fact<ShaderRole>> {
         None
     }
-    /// Shaders to prepare before the first frame. Lists of all layers add up.
-    fn seeds(&self) -> &'static [Seed] {
-        &[]
+    /// The pipeline seeds: the state of the pipelines the game uses, as the text of a `pipelines.seeds` file
+    /// (`nxkit_pipestate::seeds`). The build resolves them against its shaders, archives the pipelines and ships the
+    /// list in the app, so the first start makes them before the first frame. Lists of all layers add up.
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        None
     }
     /// Rewriter rules as TOML text (`rules/*.toml` shape). Rules of all layers add up.
     fn rewrite_rules(&self) -> Option<&'static str> {

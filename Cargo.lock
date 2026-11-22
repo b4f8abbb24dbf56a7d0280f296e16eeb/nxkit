@@ -419,6 +419,7 @@ dependencies = [
  "nxb-tool",
  "nxb-xlate",
  "nxkit-abi",
+ "nxkit-pipestate",
  "nxtitle",
  "nxtitles",
 ]
@@ -531,6 +532,13 @@ version = "0.15.2"
 dependencies = [
  "nxb-sys",
  "nxb-testkit",
+]
+
+[[package]]
+name = "nxb-seeds"
+version = "0.15.2"
+dependencies = [
+ "nxkit-pipestate",
 ]
 
 [[package]]
@@ -2157,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "nxkit-pipestate"
-version = "0.15.0"
+version = "0.15.2"
 
 [[package]]
 name = "nxkit-rt"

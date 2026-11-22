@@ -98,6 +98,7 @@ pub(super) fn extract(a: &Args, p: &Progress) -> Result<Extracted, String> {
         gpus: vec![],
         split: true,
         pipeline_lists: vec![],
+        seeds: Default::default(),
         src,
     };
     for note in &b.src.notes {

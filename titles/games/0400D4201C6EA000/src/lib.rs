@@ -85,6 +85,10 @@ impl BuildHooks for Mtf {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/0400D4201C6EA000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 const HLE_NVN: Evidence = Evidence::Recorded {

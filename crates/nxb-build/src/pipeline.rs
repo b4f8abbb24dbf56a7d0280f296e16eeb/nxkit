@@ -19,8 +19,11 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
     let chain = nxb_shader::chain::standalone_version();
     let inputs = nxb_shader::chain::inputs(&b.profile.0)?;
     let sh = b.work.join("shader");
+    // the shaders to translate first: `--shader-manifest`, else the shaders of the title's pipeline seeds (not with
+    // `--partial`, where the manifest is the set that is built)
     let manifest = match &a.manifest {
         Some(f) => nxb_sched::UseManifest::read(f)?.keys().to_vec(),
+        None if !a.partial => nxb_archive::seeded::shader_order(&b.seeds),
         None => Vec::new(),
     };
     Ok(BuildConfig {
@@ -54,13 +57,20 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
 
 /// The compute shaders that get compute pipelines in the archive: the profile's prewarm list (`pso_manifest.tsv`, `C`
 /// rows first), the compute pipelines that the host recorded (`C` rows of the pipeline lists) and the compute rows of
-/// its `shader_map.tsv`, as `pso_offline.py --game` reads them.
+/// its `shader_map.tsv`, as `pso_offline.py --game` reads them, then the compute seeds of the title module.
 fn compute_shaders(b: &Build) -> Vec<String> {
-    nxb_archive::compute::read_computes_with(
+    let mut c = nxb_archive::compute::read_computes_with(
         &[b.profile.0.join("shader_map.tsv")],
         &[b.profile.0.join("pso_manifest.tsv")],
         &b.pipeline_lists,
-    )
+    );
+    // and the compute seeds of the title module
+    for k in nxb_archive::seeded::computes(&b.seeds) {
+        if !c.contains(&k) {
+            c.push(k);
+        }
+    }
+    c
 }
 
 /// The archive's inputs for one architecture over the library folder the shader step writes.
@@ -169,6 +179,14 @@ pub fn shaders_and_archive(
         b.work.join("shader/pso_pairs.tsv"),
     ];
     let text = nxb_archive::plan::pair_text(&pair_files);
+    // the pairs of the title's render seeds join the profile's: the archive holds their bases and their exact states
+    let mut pairs = nxb_archive::plan::read_pairs(&text);
+    let known: std::collections::HashSet<(String, String)> = pairs.iter().cloned().collect();
+    pairs.extend(
+        nxb_archive::seeded::pairs(&b.seeds)
+            .into_iter()
+            .filter(|p| !known.contains(p)),
+    );
     let batches = Arc::new(nxb_archive::Batches::default());
     let acfg = match &arch {
         Some(arch) => Some(nxb_archive::Config {
@@ -182,10 +200,11 @@ pub fn shaders_and_archive(
     let sinp = nxb_archive::stream::StreamInputs {
         lib_dir: std::path::absolute(&lib).map_err(|e| e.to_string())?,
         chain: cfg.chain.clone(),
-        pairs: nxb_archive::plan::read_pairs(&text),
+        pairs,
         computes: compute_shaders(b),
         extras,
         exacts,
+        seeds: b.seeds.clone(),
         zero,
         group_target: GROUP_TARGET,
         limits: acfg.as_ref().map_or_else(

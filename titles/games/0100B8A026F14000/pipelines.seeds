@@ -1,0 +1,161 @@
+nxkit-pipeline-seeds 1
+# Imported by nxb-seeds from the old engine at b4588a5396cb: dm/games/0100B8A026F14000/pso_manifest.tsv, shader_seen.tsv and game.tsv.
+# Left out: 0 rows of merged passes, 0 with a target format the host has no name for, 0 that do not parse.
+R	0323b640ea6cd454	9d1fab793c51f040	1	0	Rgba8Unorm:f:5.6.1.2.6.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+C	812650f2ed1cba0d
+C	6dadf815b0eaec52
+C	980e2eb9218a049b
+C	8557b251fa68e420
+C	7ba5d6a8a2526fe2
+C	7b72f69702b3e18a
+C	120e6fbdf2cb9516
+S	e2f17523c090feaf
+R	80325485796f6108	ede23df4de1a9201	1	0	R8Unorm:f:-	0:2e:0:0	0:16:0
+R	6e9683d5d012ebac	174f495733e0595e	1	0	R8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	46f4b6069bf78834	f8ebaca1487ecc89	1	0	Rg11B10Float:f:1.3.1.1.5.1	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	9583dace52ec6706	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	bdc2764321339efb	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	ec2c4eb318a4a353	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+C	3e82cae58ba83265
+C	f632c6a1bc76cd19
+R	075529d2544531f3	894d0e6de72a70e3	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	1ae3d445ea724b99	a7e3a99978bf3daa	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	1ae3d445ea724b99	91381d5ef3dcec0d	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	3ff5c28219da3035	8a8771d883962032	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	3ff5c28219da3035	cbc4b766f68b9da3	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	a91013fdfd2f43ce	90a00eb4097a6475	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	a91013fdfd2f43ce	d3ea8ae28989217b	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	5da863c88bbba18f	100228f730f6e007	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	5da863c88bbba18f	ae66f53ff6782659	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	f701ff79cec258e6	125869e4271d053b	1	0	Rgb10A2Unorm:f:-	0:16:0:0,1:16:8:0	0:16:0
+R	315fd0e69cae491f	8201e29be86bacaf	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	46f4b6069bf78834	a259339843187002	1	0	Rgba8Unorm:f:-	0:2e:0:0	0:32:0
+R	6e9683d5d012ebac	16405ad0ea722934	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	6e9683d5d012ebac	7d05eef41136554f	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+C	a0a24a464b0006f4
+C	e918336692525691
+C	5fdafb9cc48f093d
+C	61308412eb911f79
+C	645015f9a276a423
+C	433b6dd3e0f778b8
+C	227039efe908b349
+C	205ef32bf13654a2
+C	57053b963ae322a0
+C	d16df8dfe430e4f2
+C	1d0e296df7df9d2e
+R	facd460cd3f10620	881d6b4a2fb026a1	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	a25e0f82f166b403	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	6872f5a997159004	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	60f9146ce50b231c	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	d3c86f82ef84233a	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	0323b640ea6cd454	387993871884f3f9	1	0	Rgba8Unorm:f:5.6.1.2.6.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+C	8acf323d2c25ed93
+C	de6c6d6c8080928a
+C	79a64dad544b8a04
+C	ffffb14f6cdb412b
+C	e486541c2d07e22b
+R	46f4b6069bf78834	c81ce2b743a3adac	1	0	Rgba16Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	ff42242420a0ac7f	1	0	Rgba16Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	b0ba842cac0629e0	1	0	Rgba16Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	fde7f5d5883aab6f	1	0	Rgba16Float:f:1.7.1.1.2.1	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	10f5782bbb139239	1	0	Rgba16Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	e259dd37b0314194	1	0	Rgba16Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	d8b3ab1b067fc3a1	1	0	Rgba16Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	582eeed67a8161ae	1	0	Rgba16Float:f:-	0:2e:0:0	0:32:0
+C	544e80ec57b3a10b
+C	41b20b5f09269ad8
+R	facd460cd3f10620	852d34472c078820	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	46c3ad311a855694	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	eca4fd8a36a24d25	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	0323b640ea6cd454	9d1fab793c51f040	1	0	Bgra8UnormSrgb:f:5.6.1.2.6.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	16c156370eeb7701	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	c637d9bbd8839c7f	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	e057d979ac84ce45	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	c724a52b254eab46	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+R	facd460cd3f10620	e3ab27dff7d8dd74	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0,4:25:36:0	0:44:0
+C	56495c73002c95a8
+C	4a9ee62164efcfb2
+C	bd0c385cb99a8e2c
+C	510e06a448e012f7
+C	87db742bf9ed561d
+C	f3c5ced35cb619d0
+C	a960d729840ecac2
+C	c0a487a5afca4bb9
+C	5854663e6002c250
+C	98dee7b8a8eb9f9f
+R	406bc59dec6d556d	-	1	0	-	0:22:0:0	0:12:0
+R	e6de0b62929df1c2	79af296cee58b397	1	0	-	0:22:0:0	0:12:0
+R	1ed69167e3f8e347	31f1e9a958600195	1	0	-	0:22:0:0	0:12:0
+R	732a01adb7d659b2	5c4463fce8d1adca	1	0	-	0:22:0:0	0:12:0
+R	e6de0b62929df1c2	e0c257bcb36006c5	1	0	-	0:22:0:0	0:12:0
+R	b37b185efd89db7f	dbc0c5cff7ad117f	1	0	Rg16Unorm:f:-	0:22:0:0	0:12:0
+R	1a970a5d8e09b226	cc4afccfb14f88c8	1	0	Rg16Unorm:f:-	0:22:0:0	0:12:0
+R	1114be9ea20fb7d2	-	1	0	-	0:22:0:0	0:12:0
+R	2dbe8d55b3702839	0e620e5fb6afd052	1	0	-	0:22:0:0	0:12:0
+R	7aab9fbab46a576d	963bab0c857d6050	1	0	Bgra8UnormSrgb:f:5.6.1.1.6.1,Bgra8Unorm:0:1.2.1.1.2.1,Bgra8Unorm:f:5.6.1.1.6.1,Bgra8Unorm:f:2.2.1.2.2.1	0:2e:0:0	0:16:0
+R	0647a88c955fcc6e	5d0ae619db4eb4a6	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	19274e72bf8f5d0d	3a936705350a634e	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	bb3615c8b5248329	a8c1c3be772f74f7	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	4b77884416903035	04cafc1da027dcc9	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5d2ef77fed020547	87820a67033c2222	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	26591729966941d6	dfb845dfc251e825	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	4b77884416903035	7777044e4c965e50	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	64005e47d9e08250	cfb812e61ab6e5ec	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	4b77884416903035	5f49ad8319daf710	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	64005e47d9e08250	69d5b67772ec33a9	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	64005e47d9e08250	76f6904507912170	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	4b77884416903035	d5a0f42e4946028e	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	0647a88c955fcc6e	55747a0c0a712e57	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	64005e47d9e08250	b0bcdffe79cd575e	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	64005e47d9e08250	da42c66e63c5f7f3	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	64005e47d9e08250	668802d336a7dcc7	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	64005e47d9e08250	29cfeedf8407d375	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	4b77884416903035	04b0476cfedffe86	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	6e9683d5d012ebac	c254eaa40e0c4f1e	1	0	R8Uint:f:-	0:2e:0:0,1:16:16:0	0:32:0
+C	5538ba6d597e34bb
+R	6de8a58e4d85d8ec	f754d7aa4af2fa44	1	0	Rg11B10Float:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0	0:32:0
+R	f701ff79cec258e6	3627ad747abc01ad	1	0	Rgba16Float:f:2.2.1.2.2.1,Rgba16Float:7:2.2.1.2.2.1	0:16:0:0,1:16:8:0	0:16:0
+R	46f4b6069bf78834	e9167e494d8581fc	1	0	Rg11B10Float:7:2.2.1.2.1.1	0:2e:0:0	0:32:0
+R	692c7a282b80bc85	7d613d091867cfce	1	0	Rg11B10Float:7:2.5.1.2.1.1	0:16:0:0	0:8:0
+R	70eb4102a6b42ce5	ae9c76a5835ad55f	1	0	Rg11B10Float:f:2.2.1.1.6.1	0:22:0:0	0:12:0
+R	c55d54c8f41b1520	ef59736ed615be96	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+R	1300ca45ddca3566	6967897c65605995	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+R	6a4e114179eda634	82915af3170f2b73	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+C	ef6bf608f57addb1
+C	fd4759c9dadb0429
+C	9afcf0c9fbc757ea
+C	f06e871ad7d86bf4
+C	fc0dc911a2850953
+R	6e9683d5d012ebac	17e1a7a160b9265b	1	0	Rg11B10Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	ec7a5c0598a46227	d7f4f078bfad1481	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	46f4b6069bf78834	9828cac38318673e	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	182ab65422cea68f	149eb5798a8f276a	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	a7b95f814ab37653	b6980ce45b6b5d7e	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	a7b95f814ab37653	6b3e6cb63afd28d0	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	1b0647e41d7700ca	c41a4f7bbb5b50c7	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	1b0647e41d7700ca	801ef50b23e3fcdd	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	a91013fdfd2f43ce	80d469cccc76b168	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	a91013fdfd2f43ce	525dac32ee758bcb	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	5da863c88bbba18f	535a1d06f775c161	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+C	1c3e39a8c3ef791b
+C	8aab6c121626d098
+C	cb3a54ff498223f8
+C	165ae6d617685aec
+R	bb3615c8b5248329	e67fab882d2ef3e9	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	e6de0b62929df1c2	c9a23f1f6083c293	1	0	-	0:22:0:0	0:12:0
+R	e6de0b62929df1c2	2bfb775ea50248dd	1	0	-	0:22:0:0	0:12:0
+R	4b77884416903035	bcea09d687f78073	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	1b0647e41d7700ca	6b3e6cb63afd28d0	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	4b77884416903035	176800eec362d571	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	64005e47d9e08250	a69251c27b4eed64	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	6e9683d5d012ebac	-	1	0	Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	6e9683d5d012ebac	-	1	0	Bgra8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	6e9683d5d012ebac	-	1	0	R8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	fb570ef861debd17	f13d489bf4d3bdff	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	1bbd4f87bfa7cdf5	fd0140274f0ad620	1	0	Rgba16Float:f:2.2.1.1.6.1	0:16:0:0	0:8:0
+R	6a4e114179eda634	82915af3170f2b73	1	0	Rgba16Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	26591729966941d6	86358da94029e3c7	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	0647a88c955fcc6e	f04a90597a04bc77	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	2ae92981ae60d21f	959ae0599bae3da0	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	2ae92981ae60d21f	b994373ec1f4847d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	2ae92981ae60d21f	fa227e4c58bb8260	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0

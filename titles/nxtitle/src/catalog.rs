@@ -2,8 +2,8 @@
 
 use crate::{
     BuildHooks, ConfigKey, ConsoleSettings, ConsoleVar, Fact, Family, GraphicsApi, LimitRule,
-    Match, Need, PaceProfile, Pacing, ResourcePatch, RomfsRead, Runtime, RuntimeHooks, Seed,
-    Service, ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
+    Match, Need, PaceProfile, Pacing, ResourcePatch, RomfsRead, Runtime, RuntimeHooks, Service,
+    ShaderRole, ShaderView, Standalone, Title, TitleFacts, Upscaler,
 };
 use std::collections::BTreeSet;
 
@@ -145,13 +145,13 @@ impl Resolved {
         self.build_hooks().find_map(|h| h.shader_role(shader))
     }
 
-    /// The seeds of the family, then the title's.
-    pub fn seeds(&self) -> Vec<Seed> {
+    /// The pipeline seed texts of the family, then the title's.
+    pub fn pipeline_seeds(&self) -> Vec<&'static str> {
         let hooks: Vec<_> = self.build_hooks().collect();
         hooks
             .into_iter()
             .rev()
-            .flat_map(|h| h.seeds().iter().copied())
+            .filter_map(|h| h.pipeline_seeds())
             .collect()
     }
 

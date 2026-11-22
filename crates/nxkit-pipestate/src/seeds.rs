@@ -13,6 +13,7 @@
 //! ```text
 //! nxkit-pipeline-seeds 1
 //! # a comment
+//! D <gl|zero>
 //! S <shader key>
 //! C <compute shader key>
 //! R <vertex key> <fragment key|-> <samples> <a2c> <colors> <attributes> <streams>
@@ -23,8 +24,9 @@
 //! `<Format>:<mask in hex>:<blend>`, the format named as in the pipeline list, the blend being `-` or the six NVN values
 //! `src_rgb.dst_rgb.op_rgb.src_alpha.dst_alpha.op_alpha` in decimal. `attributes` is `-` or a comma separated list of
 //! `<location>:<NVN format in hex>:<offset>:<stream>`, `streams` is `-` or a comma separated list of
-//! `<index>:<stride>:<divisor>`. An `S` line names a shader seen in play: the build translates it early. A line that does
-//! not parse is left out.
+//! `<index>:<stride>:<divisor>`. An `S` line names a shader seen in play: the build translates it early. The `D` line says
+//! the depth mode the game sets on its device: `zero` (0 to 1, the vertex functions that keep the clip depth) or `gl`
+//! (-1 to 1). Without it the build resolves each seed for both. A line that does not parse is left out.
 
 use std::collections::HashSet;
 
@@ -103,9 +105,20 @@ pub enum Seed {
     Mesh(MeshSeed),
 }
 
+/// The depth mode a game sets on its device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DepthMode {
+    /// -1 to 1, the default of NVN.
+    Gl,
+    /// 0 to 1.
+    Zero,
+}
+
 /// The seeds of a title, without repeats, in their order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Seeds {
+    /// The depth mode of the game, when it is known.
+    pub depth: Option<DepthMode>,
     seeds: Vec<Seed>,
     index: HashSet<Seed>,
 }
@@ -156,6 +169,11 @@ impl Seeds {
                 o.push('\n');
             }
         }
+        match self.depth {
+            Some(DepthMode::Gl) => o.push_str("D\tgl\n"),
+            Some(DepthMode::Zero) => o.push_str("D\tzero\n"),
+            None => {}
+        }
         for s in &self.seeds {
             o.push_str(&line(s));
             o.push('\n');
@@ -174,6 +192,11 @@ impl Seeds {
         }
         let mut s = Seeds::default();
         for l in lines.filter(|l| !l.starts_with('#')) {
+            match l {
+                "D\tgl" => s.depth = Some(DepthMode::Gl),
+                "D\tzero" => s.depth = Some(DepthMode::Zero),
+                _ => {}
+            }
             if let Some(seed) = parse_line(l) {
                 s.insert(seed);
             }
@@ -367,6 +390,21 @@ pub fn parse_line(l: &str) -> Option<Seed> {
             colors: colors_of(f[6])?,
         })),
         _ => None,
+    }
+}
+
+impl Seeds {
+    /// The ways of drawing to resolve the seeds for: the known depth mode, or both.
+    pub fn drawings(&self, pull: bool) -> Vec<Drawing> {
+        let modes: &[bool] = match self.depth {
+            Some(DepthMode::Gl) => &[false],
+            Some(DepthMode::Zero) => &[true],
+            None => &[false, true],
+        };
+        modes
+            .iter()
+            .map(|&zero_to_one| Drawing { zero_to_one, pull })
+            .collect()
     }
 }
 

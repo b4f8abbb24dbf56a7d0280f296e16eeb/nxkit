@@ -84,6 +84,10 @@ impl BuildHooks for Mlbs {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/01006D0017F7A000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 /// The game builds without the engine, so nxkit runs every service.

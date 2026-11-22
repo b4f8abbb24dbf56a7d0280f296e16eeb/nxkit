@@ -83,6 +83,10 @@ impl BuildHooks for Feengage {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/0100A6301214E000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 /// The game builds without the engine, so nxkit runs every service.

@@ -86,6 +86,10 @@ impl BuildHooks for Nierasia {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/0100B8E016F76000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 /// The game builds without the engine, so nxkit runs every service.

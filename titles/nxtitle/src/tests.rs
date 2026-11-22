@@ -9,11 +9,8 @@ impl BuildHooks for Fam {
         (s.archive == Some("up.bnsh"))
             .then_some(Fact::new(ShaderRole::Upscaler { name: "fam" }, REC))
     }
-    fn seeds(&self) -> &'static [Seed] {
-        &[Seed {
-            key: "f",
-            seen: "boot",
-        }]
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some("f")
     }
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some("family")
@@ -189,17 +186,8 @@ impl BuildHooks for Game {
     fn graphics_api(&self) -> Option<Fact<GraphicsApi>> {
         (self.0 == 2).then_some(Fact::new(GraphicsApi::Vulkan, REC))
     }
-    fn seeds(&self) -> &'static [Seed] {
-        &[
-            Seed {
-                key: "t1",
-                seen: "title",
-            },
-            Seed {
-                key: "t2",
-                seen: "title",
-            },
-        ]
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some("t")
     }
 }
 impl RuntimeHooks for Game {
@@ -282,8 +270,7 @@ fn title_wins_then_family_then_core() {
     assert_eq!(r.upscaler().map(|f| f.value), Some(Upscaler::Native));
     assert_eq!(r.pacing().map(|f| f.value), Some(Pacing::Display));
     assert_eq!(r.pace_profile().map(|f| f.value.fps_target), Some(30));
-    let keys: Vec<_> = r.seeds().iter().map(|s| s.key).collect();
-    assert_eq!(keys, ["f", "t1", "t2"]);
+    assert_eq!(r.pipeline_seeds(), ["f", "t"]);
     assert_eq!(r.rewrite_rules(), ["family"]);
     let whats: Vec<_> = r
         .limits()

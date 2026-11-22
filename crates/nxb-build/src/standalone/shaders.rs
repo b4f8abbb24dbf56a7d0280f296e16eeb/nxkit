@@ -82,7 +82,7 @@ pub(crate) struct Done {
 
 /// Runs the shader step and the archive, then copies the Metal libraries, their `_b.json` reflection and the tables
 /// into `<run>/shaders` and the archive to `<run>/pipelines/` (the shards and their index) or `<run>/pipelines.mtl4archive`
-/// (`NXB_ARCHIVE_LAYOUT`, see `crate::archive_layout`).
+/// (`NXB_ARCHIVE_LAYOUT`, see `crate::archive_layout`), and writes the shipped pipeline list (`super::shipped`).
 pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, String> {
     let layout = crate::archive_layout::Layout::from_env();
     let o = crate::pipeline::shaders_and_archive(a, b, p, layout)?;
@@ -156,6 +156,8 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
         }
         (None, _) => summary.push_str(", no archive (--gpu none)"),
     }
+    // after the shard folder: its copy replaces `<run>/pipelines`
+    summary.push_str(&super::shipped::write(&b.seeds, &o.lib, run)?);
     Ok(Done { summary })
 }
 

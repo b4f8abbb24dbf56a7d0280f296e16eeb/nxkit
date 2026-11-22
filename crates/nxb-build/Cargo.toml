@@ -23,6 +23,8 @@ nxb-pack.workspace = true
 nxb-archive.workspace = true
 # the shard folder names and the index file of the pipeline archive
 nxkit-abi.workspace = true
+# the pipeline seeds of a title and the shipped pipeline list
+nxkit-pipestate.workspace = true
 nxb-stages.workspace = true
 nxb-shader.workspace = true
 nxb-rewrite.workspace = true

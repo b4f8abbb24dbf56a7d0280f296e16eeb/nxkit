@@ -82,6 +82,10 @@ impl BuildHooks for Bastion {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/010038600B27E000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 /// The game builds without the engine, so nxkit runs every service.

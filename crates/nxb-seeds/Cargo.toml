@@ -1,0 +1,23 @@
+[package]
+name = "nxb-seeds"
+description = "Imports the pipeline lists of the old engine (pso_manifest.tsv, shader_seen.tsv) once into the pipeline seeds of the title modules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L3"
+in_v = false
+
+[[bin]]
+name = "nxb-seeds"
+path = "src/main.rs"
+
+[dependencies]
+# The seed text (the runtime contract R0).
+nxkit-pipestate.workspace = true
+
+[lints]
+workspace = true

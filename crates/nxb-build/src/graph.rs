@@ -27,6 +27,9 @@ pub struct Build {
     /// Lists of the pipelines a title asked for while it played (`pipelines.seen`). The archive compiles the states in
     /// them that a plain base cannot serve. Empty: none.
     pub pipeline_lists: Vec<PathBuf>,
+    /// The pipeline seeds of the title module (`nxkit_pipestate::seeds`). The archive compiles their pipelines and the
+    /// app ships them as its list (`nxkit_pipestate::list::SHIPPED_LIST`).
+    pub seeds: nxkit_pipestate::seeds::Seeds,
     /// What the game is read from.
     pub src: crate::inputs::Inputs,
 }

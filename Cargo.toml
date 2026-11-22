@@ -41,6 +41,7 @@ nxkit-gpu = { path = "crates/nxkit-gpu" }
 nxkit-vk-gpu = { path = "crates/nxkit-vk-gpu" }
 nxkit-native-plan = { path = "crates/nxkit-native-plan" }
 nxkit-pipestate = { path = "crates/nxkit-pipestate" }
+nxb-seeds = { path = "crates/nxb-seeds" }
 nxkit-ndve = { path = "crates/nxkit-ndve" }
 nxkit-ndsr = { path = "crates/nxkit-ndsr" }
 nxkit-svc-system = { path = "crates/nxkit-svc-system" }

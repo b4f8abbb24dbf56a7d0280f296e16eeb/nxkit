@@ -81,6 +81,10 @@ impl BuildHooks for Blasphemous2 {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/010040801A4C8000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 /// The game builds without the engine, so nxkit runs every service.

@@ -1,0 +1,22 @@
+nxkit-pipeline-seeds 1
+# Imported by nxb-seeds from the old engine at b4588a5396cb: dm/games/0100698009C6E000/pso_manifest.tsv, shader_seen.tsv and game.tsv.
+# Left out: 0 rows of merged passes, 0 with a target format the host has no name for, 0 that do not parse.
+D	zero
+R	b44cbd228707589a	95ba9ad441581242	1	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:24:0,2:16:28:0	0:60:0
+R	64ef8aa26a83eb3e	fb767e3d5ac37ed0	1	0	Rgba8Unorm:f:2.1.1.2.1.1	0:22:0:0,1:16:24:0	0:48:0
+R	a57915e8ff285c10	e7610280cb69eaa1	1	0	Rgba8Unorm:f:5.6.1.2.2.1	0:22:0:0,1:2e:24:0,2:22:40:0	0:88:0
+R	b9b7f5224d3200d1	015411a96f51ef69	1	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:24:0,2:16:28:0	0:60:0
+R	1da91a013f17066a	268ee1f0ff3bde8f	1	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:24:0,2:16:28:0	0:60:0
+R	b44cbd228707589a	95ba9ad441581242	2	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:24:0,2:16:28:0	0:60:0
+R	b44cbd228707589a	95ba9ad441581242	2	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:8:1,2:16:24:0	0:48:0,1:16:0
+R	23a96226b26b7a42	33884ce1e9b8e42e	1	0	Rgba8Unorm:f:2.1.1.2.1.1	0:22:0:0,1:16:12:0	0:20:0
+R	1b9840df5cf59ff5	9d3ea1a698a1d431	1	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:24:0,2:16:28:0	0:60:0
+R	727b3b3192c5e8e9	cb9ab9142ae6c7c9	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:24:0,2:16:28:0	0:60:0
+R	9271070d68fc1e25	4e4aa46a644c7a51	1	0	Rgba8Unorm:f:2.1.1.2.1.1	0:22:0:0,1:16:12:0	0:20:0
+R	727b3b3192c5e8e9	cb9ab9142ae6c7c9	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:8:1,2:16:12:0	0:20:0,1:16:0
+R	b44cbd228707589a	95ba9ad441581242	1	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:12:0,2:16:16:0	0:24:0
+R	b44cbd228707589a	95ba9ad441581242	1	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:8:1,2:16:24:0	0:48:0,1:16:0
+R	727b3b3192c5e8e9	cb9ab9142ae6c7c9	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:12:0,2:16:16:0	0:24:0
+R	307dd25b27339f4d	a7393927886473e0	1	0	Rgba8Unorm:f:2.1.1.2.1.1	0:22:0:0,1:16:28:0	0:60:0
+R	18653e67bc9e38c0	3e5be06d6860c841	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:12:0,2:16:16:0	0:24:0
+R	15f36330267895d2	2a5a9ed2d336b6d2	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:12:0,2:16:16:0	0:24:0

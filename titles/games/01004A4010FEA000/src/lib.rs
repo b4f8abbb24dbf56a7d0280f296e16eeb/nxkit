@@ -83,6 +83,10 @@ impl BuildHooks for Bayo3 {
     fn rewrite_rules(&self) -> Option<&'static str> {
         Some(include_str!("../rules/01004A4010FEA000.toml"))
     }
+
+    fn pipeline_seeds(&self) -> Option<&'static str> {
+        Some(include_str!("../pipelines.seeds"))
+    }
 }
 
 /// The game builds without the engine, so nxkit runs every service.
