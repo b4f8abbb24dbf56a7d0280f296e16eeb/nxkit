@@ -1,17 +1,35 @@
 //! GameController through objc2. The controller, motion, keyboard and mouse reads of the crate are here, and so is
-//! the `unsafe` they need. Rumble is in `haptics`.
+//! the `unsafe` they need. Rumble is in `haptics` (Core Haptics) and `hid_rumble` (HD Rumble of a Switch Pro
+//! Controller). The platform picks one of them for each controller when it joins.
 //!
 //! Every read is made at the moment of the call. Nothing polls and no handler is installed (R39).
+
+use std::ffi::c_void;
+use std::time::{Duration, Instant};
 
 use objc2::rc::Retained;
 use objc2_game_controller::*;
 
-use super::haptics::Haptics;
+use super::haptics::{self, Haptics};
+use super::hid_rumble::HidRumble;
 use crate::config::Config;
 use crate::keys::KeySet;
 use crate::npad::{PLAYERS, RawPad, btn};
-use crate::rumble::PlayerLevels;
+use crate::rumble::PlayerRumble;
 use crate::slots::Slots;
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    static kCFRunLoopDefaultMode: *const c_void;
+    fn CFRunLoopRunInMode(
+        mode: *const c_void,
+        seconds: f64,
+        return_after_source_handled: u8,
+    ) -> i32;
+}
+
+/// The product category of the controller that gets HD Rumble.
+const PRO_CONTROLLER: &str = "Switch Pro Controller";
 
 /// A connected controller that has an extended gamepad profile.
 struct Pad {
@@ -21,6 +39,8 @@ struct Pad {
     /// True when the face buttons carry the Nintendo names, so A is A. Other pads have the Xbox layout.
     labelled: bool,
     haptics: Haptics,
+    /// HD Rumble in place of `haptics`, for a Switch Pro Controller.
+    hd: Option<HidRumble>,
 }
 
 /// The controllers, the keyboard and the mouse of the Mac.
@@ -28,6 +48,7 @@ pub(crate) struct Platform {
     pads: [Option<Pad>; PLAYERS],
     motion: bool,
     rumble: bool,
+    hd_rumble: bool,
     keyboard: bool,
     /// A new controller waits for its first button press, then takes the lowest free slot.
     press_to_join: bool,
@@ -150,6 +171,7 @@ impl Platform {
             pads: std::array::from_fn(|_| None),
             motion: config.motion,
             rumble: config.rumble,
+            hd_rumble: config.hd_rumble,
             keyboard: config.keyboard,
             press_to_join: config.press_to_join(),
             keys: if config.keyboard {
@@ -200,9 +222,34 @@ impl Platform {
                 motion: self.attach_motion(&controller),
                 labelled: is_labelled(&category),
                 haptics: Haptics::default(),
+                hd: self.open_hd(&category),
                 controller,
                 gamepad,
             });
+        }
+    }
+
+    /// HD Rumble for a new controller: only a Switch Pro Controller, and only one, gets it. Logs the outcome.
+    fn open_hd(&self, category: &str) -> Option<HidRumble> {
+        if !(self.rumble && self.hd_rumble && category == PRO_CONTROLLER)
+            || self.pads.iter().flatten().any(|p| p.hd.is_some())
+        {
+            return None;
+        }
+        match HidRumble::open() {
+            Ok(hd) => {
+                eprintln!(
+                    "nxkit-input: rumble: {PRO_CONTROLLER}: HD Rumble over {:?}",
+                    hd.link()
+                );
+                Some(hd)
+            }
+            Err(e) => {
+                eprintln!(
+                    "nxkit-input: rumble: {PRO_CONTROLLER}: no HD Rumble ({e}), Core Haptics plays it"
+                );
+                None
+            }
         }
     }
 
@@ -349,13 +396,55 @@ impl Platform {
         out
     }
 
-    /// Plays the levels of a player on its controller.
-    pub(crate) fn rumble(&mut self, slot: usize, levels: &PlayerLevels) {
+    /// Plays the rumble of a player on its controller: HD Rumble while it works, else Core Haptics.
+    pub(crate) fn rumble(&mut self, slot: usize, rumble: &PlayerRumble) {
         if !self.rumble {
             return;
         }
-        if let Some(Some(pad)) = self.pads.get_mut(slot) {
-            pad.haptics.update(&pad.controller, levels);
+        let Some(Some(pad)) = self.pads.get_mut(slot) else {
+            return;
+        };
+        if let Some(hd) = &pad.hd {
+            if !hd.failed() {
+                hd.send(rumble.bands);
+                return;
+            }
+            eprintln!(
+                "nxkit-input: rumble: {PRO_CONTROLLER}: a write failed, Core Haptics plays it"
+            );
+            pad.hd = None;
+        }
+        pad.haptics.update(&pad.controller, rumble);
+    }
+
+    /// The name of the controller in `slot` and how it rumbles.
+    pub(crate) fn rumble_info(&self, slot: usize) -> Option<String> {
+        let pad = self.pads.get(slot)?.as_ref()?;
+        // SAFETY: property reads on a live controller.
+        let (name, category) = unsafe {
+            (
+                pad.controller
+                    .vendorName()
+                    .map(|n| n.to_string())
+                    .unwrap_or_default(),
+                pad.controller.productCategory().to_string(),
+            )
+        };
+        let how = match &pad.hd {
+            Some(hd) => format!("HD Rumble over {:?}", hd.link()),
+            None => haptics::describe(&haptics::localities(&pad.controller)),
+        };
+        Some(format!("{name} ({category}): {how}"))
+    }
+
+    /// Lets the run loop of the calling thread work until GameController reports a controller or `timeout` ends.
+    /// For a program without an application loop.
+    pub(crate) fn wait_for_controllers(&self, timeout: Duration) {
+        let end = Instant::now() + timeout;
+        // SAFETY: `controllers` is a class method without arguments. The run loop call takes the default mode.
+        while unsafe { GCController::controllers() }.is_empty() && Instant::now() < end {
+            // SAFETY: as above.
+            unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, 0) };
         }
     }
 }

@@ -3,7 +3,7 @@
 use crate::config::Config;
 use crate::keys::KeySet;
 use crate::npad::RawPad;
-use crate::rumble::PlayerLevels;
+use crate::rumble::PlayerRumble;
 use crate::slots::Slots;
 
 /// No devices.
@@ -35,7 +35,13 @@ impl Platform {
         None
     }
 
-    pub(crate) fn rumble(&mut self, _slot: usize, _levels: &PlayerLevels) {}
+    pub(crate) fn rumble(&mut self, _slot: usize, _rumble: &PlayerRumble) {}
+
+    pub(crate) fn rumble_info(&self, _slot: usize) -> Option<String> {
+        None
+    }
+
+    pub(crate) fn wait_for_controllers(&self, _timeout: std::time::Duration) {}
 
     pub(crate) fn system_buttons(&self) -> crate::SystemButtons {
         crate::SystemButtons::default()

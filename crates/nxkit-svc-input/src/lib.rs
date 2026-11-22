@@ -17,6 +17,11 @@ mod bind;
 mod config;
 mod deadzone;
 mod exports;
+// The planners are used by the platform layer of macOS only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod haptic_plan;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod hd;
 mod input_map;
 mod ipc;
 mod keys;
@@ -25,6 +30,7 @@ mod mac_keycodes;
 mod motion;
 mod npad;
 mod pointer;
+pub mod probe;
 mod rumble;
 mod script;
 mod seam;

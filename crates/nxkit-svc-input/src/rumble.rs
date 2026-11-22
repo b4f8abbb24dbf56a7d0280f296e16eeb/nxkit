@@ -129,6 +129,23 @@ pub(crate) fn controller_level(x: f32, min: f32) -> f32 {
     }
 }
 
+/// The value of one motor as a controller plays it: both amplitudes scaled by one factor, so the power of the motor
+/// is the intensity of [`level`] with `gain` after [`controller_level`] with `min`. The frequencies stay.
+pub(crate) fn scaled(v: VibrationValue, gain: f32, min: f32) -> VibrationValue {
+    let v = v.sanitized();
+    let power = (v.amp_low * v.amp_low + v.amp_high * v.amp_high).sqrt();
+    let k = if power > 0.0 {
+        controller_level(level(&[v], gain).intensity, min) / power
+    } else {
+        0.0
+    };
+    VibrationValue {
+        amp_low: (v.amp_low * k).min(1.0),
+        amp_high: (v.amp_high * k).min(1.0),
+        ..v
+    }
+}
+
 /// The levels of one player: each motor alone, for a controller with a left and a right engine, and both motors
 /// together, for a controller with one engine.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -137,6 +154,22 @@ pub(crate) struct PlayerLevels {
     pub(crate) motors: [Level; 2],
     /// Both motors.
     pub(crate) mixed: Level,
+}
+
+/// What a controller of one player gets: the levels for Core Haptics and the values of both motors with the gain and
+/// the minimum applied, for a controller that plays the two bands itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct PlayerRumble {
+    /// The levels of [`Rumble::levels`].
+    pub(crate) levels: PlayerLevels,
+    /// Motor 0 (left) and motor 1 (right), each through [`scaled`].
+    pub(crate) bands: [VibrationValue; 2],
+}
+
+impl Default for VibrationValue {
+    fn default() -> Self {
+        VibrationValue::IDLE
+    }
 }
 
 /// The last value the game sent to each motor of each player.
@@ -192,6 +225,14 @@ impl Rumble {
         PlayerLevels {
             motors: [map(level(&p[0..1], gain)), map(level(&p[1..2], gain))],
             mixed: map(level(&p[..], gain)),
+        }
+    }
+
+    /// The levels and the scaled values of a player for a given gain and controller minimum.
+    pub(crate) fn player(&self, player: usize, gain: f32, min: f32) -> PlayerRumble {
+        PlayerRumble {
+            levels: self.levels(player, gain, min),
+            bands: [0, 1].map(|m| scaled(self.get(player, m), gain, min)),
         }
     }
 }
@@ -273,6 +314,21 @@ mod tests {
         assert_eq!(l.motors[0].intensity, 0.0);
         assert!((l.motors[1].intensity - 0.8).abs() < 1e-5);
         assert!((l.mixed.intensity - 0.8).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_scaled_value_has_the_power_of_its_level() {
+        let x = v(0.3, 100.0, 0.4, 400.0);
+        let s = scaled(x, 1.0, 0.0);
+        assert!((s.amp_low - 0.3).abs() < 1e-6 && (s.amp_high - 0.4).abs() < 1e-6);
+        let s = scaled(x, 2.0, 0.0);
+        assert!((s.amp_low - 0.6).abs() < 1e-5 && (s.amp_high - 0.8).abs() < 1e-5);
+        assert_eq!((s.freq_low, s.freq_high), (100.0, 400.0));
+        // power 0.5 with a minimum of 0.2: (0.5 - 0.2) / 0.8 = 0.375, so each amplitude is 0.75 of itself
+        let s = scaled(x, 1.0, 0.2);
+        assert!((s.amp_low - 0.225).abs() < 1e-5 && (s.amp_high - 0.3).abs() < 1e-5);
+        assert_eq!(scaled(v(0.1, 160.0, 0.0, 320.0), 1.0, 0.2).amp_low, 0.0);
+        assert_eq!(scaled(VibrationValue::IDLE, 3.0, 0.0), VibrationValue::IDLE);
     }
 
     #[test]

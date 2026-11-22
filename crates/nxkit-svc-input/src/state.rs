@@ -336,10 +336,18 @@ impl Input {
         if !self.config.rumble {
             return;
         }
-        let levels = self
+        let rumble = self
             .rumble
-            .levels(player, self.config.gain(), self.config.min());
-        self.platform.rumble(player, &levels);
+            .player(player, self.config.gain(), self.config.min());
+        self.platform.rumble(player, &rumble);
+    }
+
+    /// How the controller of a player rumbles, after GameController had up to `wait` to report one (the probe).
+    pub(crate) fn rumble_info(&mut self, player: usize, wait: Duration) -> Option<String> {
+        self.platform.wait_for_controllers(wait);
+        self.last_refresh = None;
+        self.refresh();
+        self.platform.rumble_info(player)
     }
 
     /// True when a controller can rumble: the setting is on.

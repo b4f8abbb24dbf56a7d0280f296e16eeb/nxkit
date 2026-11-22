@@ -1,6 +1,6 @@
 [package]
 name = "nxkit-svc-input"
-description = "The input service of the nxkit host: nn::hid through GameController, rumble through Core Haptics and the hid IPC service"
+description = "The input service of the nxkit host: nn::hid through GameController, rumble through Core Haptics or HD Rumble, and the hid IPC service"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,7 +16,7 @@ nxkit-abi = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true, features = ["std"] }
-objc2-core-foundation = { workspace = true, features = ["std"] }
+objc2-core-foundation = { workspace = true, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFString"] }
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSSet", "NSString"] }
 objc2-game-controller = { workspace = true, features = [
     "std",
@@ -48,8 +48,8 @@ objc2-core-haptics = { workspace = true, features = [
     "CHHapticPatternPlayer",
 ] }
 
-# Not `workspace = true`: `unsafe` is denied for the crate and allowed in one module, `sys`, which calls GameController
-# and Core Haptics.
+# Not `workspace = true`: `unsafe` is denied for the crate and allowed in one module, `sys`, which calls GameController,
+# Core Haptics and IOKit.
 [lints.rust]
 missing_docs = "deny"
 unsafe_code = "deny"

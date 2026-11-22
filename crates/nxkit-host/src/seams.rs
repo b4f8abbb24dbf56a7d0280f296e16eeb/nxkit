@@ -403,6 +403,7 @@ pub fn init_services(
             rumble: env.rumble,
             rumble_gain: env.rumble_gain,
             rumble_min: env.rumble_min,
+            hd_rumble: env.hd_rumble,
             stick_deadzone_l: env.stick_deadzone_l,
             stick_deadzone_r: env.stick_deadzone_r,
             pad_merge: env.pad_merge,

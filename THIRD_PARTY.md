@@ -196,6 +196,50 @@ SOFTWARE.
 The fonts themselves are not in this repository or in a release. `nxb build` makes them on the Mac from the macOS system
 fonts Arial Unicode and Arial Rounded Bold (Monotype), and they stay in the app on that Mac.
 
+## RenHDrum
+
+The rumble of `nxkit-svc-input` ports code and ideas of RenHDrum (https://github.com/trzz1214/RenHDrum, Copyright (c) 2026
+Three-Dola). RenHDrum is published under MIT OR Apache-2.0. nxkit uses it under the MIT licence. These parts come from it:
+
+- `src/hd/encoding.rs` ports `src/encoding/standard.rs`: the amplitude table, the frequency codes, the 4-byte side of a
+  rumble report and the motor protection that scales two strong bands down. Its tests take the golden values of RenHDrum's
+  tests. RenHDrum has the table, the frequency formula and the layout of reports 0x10 and 0x01 from dekuNukem's
+  Nintendo_Switch_Reverse_Engineering (`rumble_data_table.md`, `bluetooth_hid_notes.md`,
+  https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering). The subcommand 0x48 that switches the actuators on is
+  from the same notes.
+- `src/hd/pacer.rs` ports the pacing of `src/backend/nintendo_hd.rs`: the 15 ms spacing over USB with the strongest
+  value since the last report, and the Bluetooth level 4 "Compatible" with 32 ms spacing, the newest value and a resend
+  after 40 ms. The values come from `docs/research/03-bluetooth-congestion-and-pacing.md`.
+- `src/haptic_plan.rs` ports the idea of the Xbox mapper (`src/xbox/mod.rs`, `classify.rs`, `rotor.rs`,
+  `docs/research/10-xbox-one-rumble.md`): the band split of the grips, the start of a hit, the extra kick of a resting
+  rotor with its time constants, and the trigger tick on a strong hit with its rest. The code is written anew.
+
+This is the full notice of the licence. It applies to the parts listed in this section.
+
+```
+MIT License
+
+Copyright (c) 2026 Three-Dola
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Manrope
 
 `nxkit-host` contains the Manrope typeface (`crates/nxkit-host/assets/Manrope.ttf`, Copyright 2018 The Manrope Project

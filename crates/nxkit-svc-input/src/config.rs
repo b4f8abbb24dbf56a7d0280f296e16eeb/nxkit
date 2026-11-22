@@ -18,6 +18,9 @@ pub struct Config {
     pub rumble_gain: f32,
     /// The rumble intensity below which a controller does not move, 0 to 0.9.
     pub rumble_min: f32,
+    /// HD Rumble on a Switch Pro Controller: the game's values go to the controller as its own rumble reports. Off,
+    /// or when that fails, the controller rumbles through Core Haptics like any other.
+    pub hd_rumble: bool,
     /// Motion from `GCMotion` into the six-axis sensor.
     pub motion: bool,
     /// The correction of the tilt drift while the controller is near 1 G.
@@ -62,6 +65,7 @@ impl Default for Config {
             rumble: true,
             rumble_gain: 1.0,
             rumble_min: 0.0,
+            hd_rumble: true,
             motion: true,
             motion_gain: 0.5,
             motion_axes: "x,y,z".to_owned(),

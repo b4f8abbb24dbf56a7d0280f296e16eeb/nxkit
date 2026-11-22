@@ -62,6 +62,8 @@ pub struct HostEnv {
     pub rumble_gain: f32,
     /// `NXKIT_RUMBLE_MIN` (0 to 0.9, 0 otherwise, a launch option): the rumble below which a controller does not move.
     pub rumble_min: f32,
+    /// `NXKIT_HD_RUMBLE` (on unless `0`, a launch option): a Switch Pro Controller gets HD Rumble.
+    pub hd_rumble: bool,
     /// `NXKIT_METAL_HUD=1` (a launch option): the Metal performance HUD over the game.
     pub metal_hud: bool,
     /// `NXKIT_PRESENT_UPSCALE` (`metalfx` or `1` for MetalFX, off otherwise, a launch option): how the present scales a
@@ -189,6 +191,7 @@ impl HostEnv {
             rumble: env.var(launch::RUMBLE).map_or(true, |v| v.trim() != "0"),
             rumble_gain: in_range(env, launch::RUMBLE_GAIN, 0.0, 3.0).unwrap_or(1.0),
             rumble_min: in_range(env, launch::RUMBLE_MIN, 0.0, 0.9).unwrap_or(0.0),
+            hd_rumble: env.var(launch::HD_RUMBLE).map_or(true, |v| v.trim() != "0"),
             metal_hud: env.var(launch::METAL_HUD).is_ok_and(|v| v.trim() == "1"),
             present_upscale: match env.var(launch::PRESENT_UPSCALE).as_deref().map(str::trim) {
                 Ok("metalfx" | "1") => nxkit_metal::PresentUpscale::MetalFx,
