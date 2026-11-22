@@ -194,7 +194,7 @@ Each verb that needs a frame waits for the next frame. It gives up after 15 s, f
 `capture [frame|passes] [DIR]` writes the folder `<DIR>/capture-<n>/`. Without `DIR` the folder is in the diagnostics folder (`diag_dir` of `info`). The answer has the folder path and a short summary.
 
 ```
-/Users/me/nxkit-diag/capture-1
+~/nxkit-diag/capture-1
 frame 4812: 61 passes (47 render), 3120 draws
 83 pictures written, 2 skipped, mode passes
 skipped pass-12-depth: format with a stencil aspect: the copy of its depth plane is not made
