@@ -1,5 +1,5 @@
 //! Opt-in Mac producer built on the same title-independent analysis used by other targets.
-use super::{Say, analysis, auto_shaders, bundle, extract, io, link, stage};
+use super::{Say, analysis, auto_shaders, bundle, extract, graphics, io, link, stage};
 use crate::Args;
 use std::path::Path;
 
@@ -100,6 +100,9 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             Ok((analyzed, note))
         },
     )?;
+    // A game on Vulkan or OpenGL would otherwise be built as an NVN game and fail in a way that names nothing.
+    graphics::generic_supported(graphics::detect(&analyzed.modules), game.title_id)
+        .map_err(|e| crate::exit::fail(4, e))?;
     let shaders = stage(
         p,
         "shaders",
