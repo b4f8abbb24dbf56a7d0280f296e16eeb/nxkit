@@ -153,6 +153,7 @@ fn build_object(b: &Build) -> Value {
         ),
         ("engine".to_string(), b.engine.map_or(Value::Null, s)),
         ("graphics".to_string(), s(b.graphics)),
+        ("nxkit_version".to_string(), s(env!("CARGO_PKG_VERSION"))),
         (
             "evidence".to_string(),
             Value::List(b.evidence.iter().map(|e| s(e)).collect()),
@@ -226,6 +227,10 @@ mod tests {
         assert_eq!(b.get("profile").and_then(Value::as_str), Some("generic"));
         assert_eq!(b.get("engine").and_then(Value::as_str), Some("unity"));
         assert_eq!(b.get("graphics").and_then(Value::as_str), Some("vulkan"));
+        assert_eq!(
+            b.get("nxkit_version").and_then(Value::as_str),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
         assert_eq!(
             b.get("evidence").and_then(Value::as_list).map(<[_]>::len),
             Some(1)
