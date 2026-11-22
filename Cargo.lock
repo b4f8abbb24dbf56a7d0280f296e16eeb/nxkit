@@ -3120,6 +3120,7 @@ dependencies = [
  "nxkit-ndsr",
  "nxkit-ndve",
  "nxkit-nvn",
+ "nxkit-patch-abi",
  "nxkit-pipestate",
  "nxkit-svc-video",
 ]
@@ -3142,6 +3143,7 @@ dependencies = [
  "nxkit-ipc",
  "nxkit-metal",
  "nxkit-nvn",
+ "nxkit-patch-abi",
  "nxkit-pipestate",
  "nxkit-rt",
  "nxkit-save-sync",
@@ -3212,6 +3214,10 @@ dependencies = [
  "foldhash 0.2.0",
  "nxkit-abi",
 ]
+
+[[package]]
+name = "nxkit-patch-abi"
+version = "0.15.2"
 
 [[package]]
 name = "nxkit-pipestate"

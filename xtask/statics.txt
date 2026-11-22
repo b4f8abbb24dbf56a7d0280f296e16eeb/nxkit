@@ -10,6 +10,7 @@ nxkit-hos: 19
 nxkit-host: 22
 nxkit-metal: 19
 nxkit-nvn: 32
+nxkit-patch-abi: 2
 nxkit-pipestate: 1
 nxkit-rt: 67
 nxkit-save-sync: 2
