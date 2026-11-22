@@ -1,6 +1,6 @@
 //! Target-independent facts and rewritten modules from the input, without a title catalog. The `sdk` module gets the
 //! SDK-wide rules, which match by function fingerprint and not by build ID.
-use super::{auto_shaders, extract, graphics, layout, manifest, modules, npdm, nvn};
+use super::{auto_shaders, elf, extract, graphics, layout, manifest, modules, npdm, nvn};
 use nxtitle::GraphicsApi;
 use std::collections::BTreeSet;
 
@@ -12,6 +12,8 @@ pub(super) struct Analysis {
     pub thread: npdm::MainThread,
     /// The API the modules ask for by name. A game that names none is taken for NVN.
     pub graphics: GraphicsApi,
+    /// The modules left out because the host's Vulkan layer replaces them (the loader and the driver).
+    pub replaced: Vec<String>,
     settings: nxtitle::Settings,
 }
 
@@ -44,26 +46,40 @@ fn ordered(input: &[(String, Vec<u8>)]) -> Result<Vec<&(String, Vec<u8>)>, Strin
     Ok(selected.into_iter().map(|(_, m)| m).collect())
 }
 
-/// The graphics API of the modules, from the names in their read-only data.
-fn api_of(selected: &[&(String, Vec<u8>)]) -> Result<GraphicsApi, String> {
-    let mut loaded = Vec::new();
+/// The graphics API of the modules, from the names in their read-only data, and for Vulkan the modules that the host's
+/// layer replaces: a module besides `main` and `sdk` that exports `vk*` functions is the Vulkan loader or the driver.
+fn api_of(selected: &[&(String, Vec<u8>)]) -> Result<(GraphicsApi, Vec<String>), String> {
+    let mut ro = Vec::new();
+    let mut vulkan_modules = Vec::new();
     for (name, data) in selected {
         let m = nxb_rewrite::nso::load(data, name).map_err(|e| format!("module {name}: {e:?}"))?;
         let (off, size) = m.segments[1];
-        loaded.push(
+        ro.push(
             m.image
                 .get(off..off.saturating_add(size))
                 .unwrap_or_default()
                 .to_vec(),
         );
+        let exports_vk = elf::symbols(&m.image)
+            .is_ok_and(|s| s.exports.iter().any(|e| e.name.starts_with("vk")));
+        if exports_vk && !matches!(name.as_str(), "main" | "sdk") {
+            vulkan_modules.push(name.clone());
+        }
     }
-    Ok(graphics::detect(loaded.iter().map(Vec::as_slice)).unwrap_or(GraphicsApi::Nvn))
+    let api = graphics::detect(ro.iter().map(Vec::as_slice)).unwrap_or(GraphicsApi::Nvn);
+    let replaced = if api == GraphicsApi::Vulkan {
+        vulkan_modules
+    } else {
+        vec![]
+    };
+    Ok((api, replaced))
 }
 
 pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
     let thread = npdm::main_thread(&game.npdm)?;
-    let selected = ordered(&game.modules)?;
-    let graphics = api_of(&selected)?;
+    let mut selected = ordered(&game.modules)?;
+    let (graphics, replaced) = api_of(&selected)?;
+    selected.retain(|(name, _)| !replaced.contains(name));
     let ids = selected
         .iter()
         .map(|(name, data)| {
@@ -115,6 +131,7 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
         modules: built.into_iter().zip(bases).collect(),
         thread,
         graphics,
+        replaced,
         settings,
     })
 }

@@ -1,5 +1,5 @@
 //! Opt-in Mac producer built on the same title-independent analysis used by other targets.
-use super::{Say, analysis, auto_shaders, bundle, extract, io, link, stage};
+use super::{Say, analysis, auto_shaders, bundle, extract, io, link, stage, vk_shaders};
 use crate::Args;
 use std::path::Path;
 
@@ -100,13 +100,11 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             Ok((analyzed, note))
         },
     )?;
-    if analyzed.graphics == nxtitle::GraphicsApi::Vulkan {
-        return Err(crate::exit::fail(
-            4,
-            format!(
-                "unsupported: the game {:016X} renders with Vulkan, which the generic path does not build yet",
-                game.title_id
-            ),
+    let vulkan = analyzed.graphics == nxtitle::GraphicsApi::Vulkan;
+    if vulkan && !analyzed.replaced.is_empty() {
+        p.say(&format!(
+            "the Vulkan layer of the host replaces the modules {}: they are left out",
+            analyzed.replaced.join(", ")
         ));
     }
     let shaders = stage(
@@ -116,6 +114,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         || {
             // Only a game on NVN has NVN shaders to split and translate
             if analyzed.graphics != nxtitle::GraphicsApi::Nvn {
+                // a game on Vulkan has its shaders translated after the RomFS is in the run folder
                 return Ok((
                     vec![],
                     format!("none: the game renders with {}", analyzed.graphics.id()),
@@ -137,7 +136,7 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
     }
     std::fs::create_dir(&partial).map_err(|e| io(&partial, e))?;
-    stage(p, "link", "make Mac app and sign guest dylib", || {
+    let run = stage(p, "link", "make Mac app and sign guest dylib", || {
         let run = bundle::skeleton(
             &partial,
             &host,
@@ -155,8 +154,16 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
         }
         link::module_files(&run, &analyzed.modules, |_, _| {})?;
         link::write_dylib(&run, &analyzed.modules, |_, _| {})?;
-        Ok(((), "Mac host and guest linked".into()))
+        Ok((run, "Mac host and guest linked".into()))
     })?;
+    if vulkan {
+        let scratch =
+            crate::host::TempDir::new_in(a.work_dir.as_deref().unwrap_or(&std::env::temp_dir()))?;
+        stage(p, "shaders", "translate the SPIR-V shaders", || {
+            let d = vk_shaders::run(a, scratch.path(), p, &run)?;
+            Ok(((), d.summary))
+        })?;
+    }
     stage(p, "bundle", "sign and publish new app", || {
         bundle::sign(&partial)?;
         publish(&partial, &out)?;

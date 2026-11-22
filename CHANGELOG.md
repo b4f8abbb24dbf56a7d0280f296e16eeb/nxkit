@@ -29,7 +29,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   game and applies the SDK-wide rules (`sdk_rules.toml`, matched by function fingerprint) to the `sdk` module. The game
   has no title patches and can fail to run. The path finds the graphics API in the modules (`nvnBootstrapLoader`,
   `vkCreateInstance`, the OpenGL entry points) and writes it into `game.json`. A game on OpenGL builds with no shader
-  step, and the host has no OpenGL layer to run it yet.
+  step, and the host has no OpenGL layer to run it yet. A game on Vulkan leaves out the modules besides `main` and
+  `sdk` that export `vk*` functions (the loader and the driver, which the host's Vulkan layer replaces) and translates
+  its SPIR-V shaders. This is not checked on a Vulkan game.
 
 ## 0.15.2 - 2026-11-22
 

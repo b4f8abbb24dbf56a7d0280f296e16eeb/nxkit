@@ -10,7 +10,6 @@
 use super::shaders::Done;
 use crate::Args;
 use crate::events::{Count, Progress};
-use crate::graph::Build;
 use nxb_shader::target::MAC;
 use nxb_spirv::{Kind, Outcome, Shader, Stage};
 use nxb_tool::{Io, MetalTools, ProcessRegistry, Resolver};
@@ -125,7 +124,7 @@ fn one(tools: &MetalTools, key: vk_table::Key, bytes: &[u8], source: &str) -> Ma
 }
 
 /// Makes the library and the table of a Vulkan game in `<run>/shaders`.
-pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<Done, String> {
+pub(crate) fn run(a: &Args, work: &Path, p: &Arc<Progress>, run: &Path) -> Result<Done, String> {
     let romfs = run.join("romfs");
     p.say("finding the SPIR-V modules in the RomFS");
     let files = find(&romfs)?;
@@ -143,7 +142,7 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>, run: &Path) -> Result<
             romfs.display()
         ));
     }
-    let tmp = b.work.join("shader/vk/tmp");
+    let tmp = work.join("shader/vk/tmp");
     std::fs::create_dir_all(&tmp).map_err(|e| io(&tmp, e))?;
     let tools = MetalTools::for_target(
         &Resolver::from_env(),

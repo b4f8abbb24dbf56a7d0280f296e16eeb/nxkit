@@ -506,7 +506,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     }
     stage(p, "shaders", "shaders and pipeline archive", || {
         let d = if vulkan {
-            vk_shaders::run(a, &b, p, &run_dir)?
+            vk_shaders::run(a, &b.work, p, &run_dir)?
         } else {
             shaders::run(a, &b, p, &run_dir)?
         };
