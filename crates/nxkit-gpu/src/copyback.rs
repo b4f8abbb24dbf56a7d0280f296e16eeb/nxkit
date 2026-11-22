@@ -26,6 +26,11 @@
 //!    `GPU_NO_ACCESS` or `COMPRESSIBLE`: nothing says the game does not read it with the CPU, and a wrong guess
 //!    loses data, a copy-back only costs time. `GPU_NO_ACCESS` alone never rejects.
 //! 4. A texture in no known pool is not copied back.
+//! 5. A texture made with `NVN_TEXTURE_FLAGS_COMPRESSIBLE` whose storage lies in a pool with
+//!    `NVN_MEMORY_POOL_FLAGS_COMPRESSIBLE` is not copied back. The console stores such a texture with the compression
+//!    of the GPU, and its bytes mean nothing to the CPU without the compression tags, so no game reads them with the
+//!    CPU. Unreal Engine 4 games put their render targets in one pool without `CPU_NO_ACCESS` (Octopath Traveler:
+//!    flags 0xe2), and their copy-back was about 105 MB and 2.3 ms of GPU time each frame.
 //!
 //! `NXKIT_COPYBACK=0` turns it off. `NXKIT_COPYBACK_MAX_MB` caps the storage copied back per frame (128 MiB).
 //! `NXKIT_DIAG=copyback` names each texture the first time it is copied back, and prints a summary now and then.
@@ -44,6 +49,9 @@ pub(crate) const CPU_NO_ACCESS: u32 = 0x1;
 
 /// `NVN_MEMORY_POOL_FLAGS_VIRTUAL_BIT`: a window of a virtual pool, not a pool with storage of its own.
 pub(crate) const VIRTUAL: u32 = 0x200;
+
+/// `NVN_MEMORY_POOL_FLAGS_COMPRESSIBLE_BIT`.
+pub(crate) const COMPRESSIBLE: u32 = 0x80;
 
 /// Why a GPU-written texture is or is not copied back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,10 +72,12 @@ pub(crate) enum Why {
     PoolNoCpu,
     /// A virtual window (or the windows together) that holds it has `CPU_NO_ACCESS`.
     WindowNoCpu,
+    /// A compressible texture in compressible pool memory: its bytes are compressed on the console.
+    Compressed,
 }
 
 impl Why {
-    const ALL: [Why; 8] = [
+    const ALL: [Why; 9] = [
         Why::Copied,
         Why::Off,
         Why::FrameLocal,
@@ -76,6 +86,7 @@ impl Why {
         Why::NoPool,
         Why::PoolNoCpu,
         Why::WindowNoCpu,
+        Why::Compressed,
     ];
 
     fn name(self) -> &'static str {
@@ -88,6 +99,7 @@ impl Why {
             Why::NoPool => "no-pool",
             Why::PoolNoCpu => "pool-cpu-no-access",
             Why::WindowNoCpu => "window-cpu-no-access",
+            Why::Compressed => "compressed",
         }
     }
 }
@@ -225,6 +237,12 @@ impl CopyBack {
         {
             return (Why::WindowNoCpu, Some(flags));
         }
+        // The physical pool under a window decides the compression, so any pool that holds it whole counts.
+        if rec.desc.flags & nxkit_nvn::layout::FLAG_COMPRESSIBLE != 0
+            && self.pools.covered_by(start, end, |f| f & COMPRESSIBLE != 0)
+        {
+            return (Why::Compressed, Some(flags));
+        }
         (Why::Copied, Some(flags))
     }
 
@@ -240,10 +258,11 @@ impl CopyBack {
         decided.insert(id, why);
         {
             eprintln!(
-                "DIAG copyback decision {id:?} fmt {:#x} {}x{} at {:#x} size {:#x}: {} (pool flags {})",
+                "DIAG copyback decision {id:?} fmt {:#x} {}x{} texture flags {:#x} at {:#x} size {:#x}: {} (pool flags {})",
                 rec.desc.format,
                 rec.desc.width,
                 rec.desc.height,
+                rec.desc.flags,
                 rec.address.get(),
                 rec.layout.size,
                 why.name(),
@@ -345,230 +364,4 @@ impl CopyBack {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_range_is_in_a_pool_only_when_the_pool_holds_all_of_it() {
-        let mut c = CopyBack::default();
-        c.add_pool(0x1_0000, 0x1_0000, 0x4);
-        c.add_pool(0x3_0000, 0x1_0000, CPU_NO_ACCESS);
-        assert_eq!(c.pool_flags(0x1_0000, 0x2_0000), Some(0x4));
-        assert_eq!(c.pool_flags(0x1_8000, 0x1_9000), Some(0x4));
-        assert_eq!(c.pool_flags(0x1_8000, 0x2_0001), None);
-        assert_eq!(c.pool_flags(0x0_8000, 0x0_9000), None);
-        assert_eq!(c.pool_flags(0x2_0000, 0x2_1000), None);
-        assert_eq!(c.pool_flags(0x3_0000, 0x3_1000), Some(CPU_NO_ACCESS));
-    }
-
-    #[test]
-    fn a_pool_inside_another_does_not_remove_it() {
-        let mut c = CopyBack::default();
-        c.add_pool(0x1_0000, 0x4_0000, 0x4);
-        c.add_pool(0x2_0000, 0x1_0000, CPU_NO_ACCESS);
-        assert_eq!(c.pool_of(0x1_1000), Some((0x1_0000, 0x5_0000, 0x4)));
-        assert_eq!(
-            c.pool_of(0x2_8000),
-            Some((0x2_0000, 0x3_0000, CPU_NO_ACCESS))
-        );
-        // a range that the inner pool does not hold whole belongs to the outer one
-        assert_eq!(c.pool_flags(0x2_8000, 0x3_8000), Some(0x4));
-        c.remove_pool(0x2_0000);
-        assert_eq!(c.pool_of(0x2_8000), Some((0x1_0000, 0x5_0000, 0x4)));
-        assert_eq!(c.pool_flags(0x2_8000, 0x2_9000), Some(0x4));
-    }
-
-    #[test]
-    fn a_new_pool_at_the_start_of_an_old_one_survives_the_removal_of_the_old_one() {
-        let mut c = CopyBack::default();
-        c.add_pool(0x1_0000, 0x1_0000, 0x4);
-        c.add_pool(0x1_0000, 0x2_0000, CPU_NO_ACCESS);
-        c.remove_pool(0x1_0000);
-        assert_eq!(
-            c.pool_of(0x2_8000),
-            Some((0x1_0000, 0x3_0000, CPU_NO_ACCESS))
-        );
-        c.remove_pool(0x1_0000);
-        assert_eq!(c.pool_of(0x2_8000), None);
-    }
-
-    #[test]
-    fn pool_of_gives_the_newest_pool_for_an_address_in_two_pools() {
-        let mut c = CopyBack::default();
-        c.add_pool(0x1_0000, 0x1_0000, 0x4);
-        c.add_pool(0x1_8000, 0x1_0000, CPU_NO_ACCESS);
-        assert_eq!(c.pool_of(0x1_1000), Some((0x1_0000, 0x2_0000, 0x4)));
-        assert_eq!(
-            c.pool_of(0x1_9000),
-            Some((0x1_8000, 0x2_8000, CPU_NO_ACCESS))
-        );
-        assert_eq!(c.pool_flags(0x1_8000, 0x1_9000), Some(CPU_NO_ACCESS));
-        // the older pool holds the whole range that the newer one does not
-        assert_eq!(c.pool_flags(0x1_0000, 0x1_1000), Some(0x4));
-        c.remove_pool(0x1_8000);
-        assert_eq!(c.pool_of(0x1_9000), Some((0x1_0000, 0x2_0000, 0x4)));
-        assert_eq!(c.pool_of(0x2_1000), None);
-    }
-
-    #[test]
-    fn an_upload_waits_only_for_recent_copy_backs_it_overlaps() {
-        use nxkit_nvn::layout::{Target, TextureDesc};
-        use nxkit_nvn::resource::ResourceTable;
-        use nxkit_nvn::space::GpuAddr;
-        let desc = TextureDesc {
-            target: Target::D2,
-            format: 0x25,
-            flags: 0,
-            samples: 0,
-            width: 64,
-            height: 64,
-            depth: 1,
-            levels: 1,
-            stride: 0,
-            packaged_block: None,
-        };
-        let mut t = ResourceTable::new();
-        let id = t.create(desc, GpuAddr::new(0x10_0000).unwrap()).unwrap();
-        let rec = *t.get(id).unwrap();
-        let mut c = CopyBack::default();
-        assert!(!c.upload_waits(&rec));
-        c.submitted(1, &[(rec.end(), rec.end() + 0x1000)]);
-        assert!(!c.upload_waits(&rec));
-        c.submitted(2, &[(rec.address.get() + 0x100, rec.address.get() + 0x200)]);
-        assert!(c.upload_waits(&rec));
-        c.submitted(2 + RECENT_BATCHES, &[]);
-        assert!(!c.upload_waits(&rec));
-        c.submitted(20, &[(rec.address.get(), rec.end())]);
-        c.idle();
-        assert!(!c.upload_waits(&rec));
-    }
-
-    /// A 64x64 RGBA8 texture at `addr`: 0x4000 bytes of storage in a pitch or block layout.
-    fn texture(addr: u64) -> (TexId, TextureRecord) {
-        use nxkit_nvn::layout::{Target, TextureDesc};
-        use nxkit_nvn::resource::ResourceTable;
-        use nxkit_nvn::space::GpuAddr;
-        let desc = TextureDesc {
-            target: Target::D2,
-            format: 0x25,
-            flags: 0,
-            samples: 0,
-            width: 64,
-            height: 64,
-            depth: 1,
-            levels: 1,
-            stride: 0,
-            packaged_block: None,
-        };
-        let mut t = ResourceTable::new();
-        let id = t.create(desc, GpuAddr::new(addr).unwrap()).unwrap();
-        (id, *t.get(id).unwrap())
-    }
-
-    const PHYS_FLAGS: u32 = 0x18c;
-
-    #[test]
-    fn a_window_with_cpu_no_access_hides_a_texture_of_a_cpu_visible_physical_pool() {
-        let (id, rec) = texture(0x10_0000);
-        let mut c = CopyBack::default();
-        c.add_pool(0x10_0000, 0x10_0000, PHYS_FLAGS);
-        assert_eq!(c.why(id, &rec), (Why::Copied, Some(PHYS_FLAGS)));
-        assert_eq!(c.candidate(id, &rec), Some(PHYS_FLAGS));
-        c.add_window(0x10_0000, 0x10_0000, CPU_NO_ACCESS);
-        assert_eq!(
-            c.why(id, &rec),
-            (Why::WindowNoCpu, Some(CPU_NO_ACCESS | VIRTUAL))
-        );
-        assert_eq!(c.candidate(id, &rec), None);
-        c.remove_windows(0x10_0000, 0x10_0000);
-        assert_eq!(c.candidate(id, &rec), Some(PHYS_FLAGS));
-    }
-
-    #[test]
-    fn an_unmap_drops_only_the_windows_inside_it_and_never_a_physical_pool() {
-        let (id, rec) = texture(0x10_0000);
-        let mut c = CopyBack::default();
-        c.add_pool(0x10_0000, 0x10_0000, PHYS_FLAGS);
-        c.add_window(0x10_0000, 0x4000, CPU_NO_ACCESS);
-        c.add_window(0x20_0000 - 0x4000, 0x4000, CPU_NO_ACCESS);
-        // a partial unmap leaves the window
-        c.remove_windows(0x10_0000, 0x2000);
-        assert_eq!(c.candidate(id, &rec), None);
-        c.remove_windows(0x10_0000, 0x4000);
-        assert_eq!(c.candidate(id, &rec), Some(PHYS_FLAGS));
-        assert_eq!(
-            c.pool_of(0x10_0000),
-            Some((0x10_0000, 0x20_0000, PHYS_FLAGS))
-        );
-        // the same range mapped twice is one window
-        c.add_window(0x10_0000, 0x4000, CPU_NO_ACCESS);
-        c.add_window(0x10_0000, 0x4000, CPU_NO_ACCESS);
-        c.remove_windows(0x10_0000, 0x4000);
-        assert_eq!(c.candidate(id, &rec), Some(PHYS_FLAGS));
-    }
-
-    #[test]
-    fn a_texture_over_two_hidden_windows_is_hidden_and_over_a_visible_one_is_not() {
-        let (id, rec) = texture(0x10_0000);
-        let mut c = CopyBack::default();
-        c.add_pool(0x10_0000, 0x10_0000, PHYS_FLAGS);
-        c.add_window(0x10_0000, 0x2000, CPU_NO_ACCESS);
-        // half covered: the physical pool decides
-        assert_eq!(c.why(id, &rec).0, Why::Copied);
-        c.add_window(0x10_2000, 0x2000, CPU_NO_ACCESS);
-        assert_eq!(c.why(id, &rec).0, Why::WindowNoCpu);
-        // a window the CPU may read, over part of it
-        c.add_window(0x10_3000, 0x1000, 0);
-        assert_eq!(c.why(id, &rec).0, Why::Copied);
-    }
-
-    #[test]
-    fn gpu_no_access_of_the_physical_pool_alone_does_not_reject() {
-        let (id, rec) = texture(0x10_0000);
-        let mut c = CopyBack::default();
-        c.add_pool(0x10_0000, 0x10_0000, 0x8 | 0x4);
-        assert_eq!(c.why(id, &rec).0, Why::Copied);
-        c.add_pool(0x10_0000, 0x10_0000, 0x8 | CPU_NO_ACCESS);
-        assert_eq!(c.why(id, &rec).0, Why::PoolNoCpu);
-    }
-
-    #[test]
-    fn a_texture_in_no_pool_or_with_another_reason_says_so() {
-        let (id, rec) = texture(0x10_0000);
-        let mut c = CopyBack::default();
-        assert_eq!(c.why(id, &rec), (Why::NoPool, None));
-        c.add_pool(0x10_0000, 0x10_0000, 0);
-        c.presented.insert(id);
-        assert_eq!(c.why(id, &rec).0, Why::Presented);
-        let mut frame_local = rec;
-        frame_local.frame_local = true;
-        assert_eq!(c.why(id, &frame_local).0, Why::FrameLocal);
-    }
-
-    #[test]
-    fn the_registry_tells_overlap_and_coverage() {
-        let mut r: Registry<u32> = Registry::default();
-        r.add_with(0x1000, 0x1000, 1);
-        r.add_with(0x2000, 0x1000, 1);
-        r.add_with(0x3000, 0x1000, 2);
-        assert!(r.covered_by(0x1000, 0x3000, |v| v == 1));
-        assert!(!r.covered_by(0x1000, 0x3001, |v| v == 1));
-        assert!(!r.covered_by(0x0fff, 0x2000, |v| v == 1));
-        assert!(r.any_overlap(0x2fff, 0x3001, |v| v == 2));
-        assert!(!r.any_overlap(0x1000, 0x3000, |v| v == 2));
-        assert_eq!(r.remove_where(|_, _, v| v == 1), 2);
-        assert_eq!(r.len(), 1);
-    }
-
-    #[test]
-    fn dirty_parts_stay_inside_the_texture() {
-        let mut d = Dirty::default();
-        assert!(d.is_empty());
-        d.add(1, 3);
-        d.add(0, 3);
-        d.add(1, 3);
-        d.add(9, 0);
-        assert_eq!(d.parts(2, 8), vec![(0, 3), (1, 3)]);
-        assert_eq!(Dirty::All.parts(2, 2), vec![(0, 0), (1, 0), (0, 1), (1, 1)]);
-    }
-}
+mod tests;

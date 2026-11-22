@@ -10,6 +10,8 @@ mod sparse;
 
 pub use sparse::{SPARSE_TILE, SparseTiles};
 
+/// `NVN_TEXTURE_FLAGS_COMPRESSIBLE`.
+pub const FLAG_COMPRESSIBLE: u32 = 0x8;
 /// `NVN_TEXTURE_FLAGS_LINEAR`.
 pub const FLAG_LINEAR: u32 = 0x10;
 /// `NVN_TEXTURE_FLAGS_SPARSE`.

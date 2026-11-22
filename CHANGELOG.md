@@ -38,17 +38,17 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The rewriter finds Unreal console variables that Unreal Engine 4.18 registers in inlined static constructors, from a
   page base made far before the name (`base_of` of the engine's `ue_cvar.py`). OCTOPATH TRAVELER's `t.MaxFPS` and
   `nvn.SyncInterval` were not found.
-
 - `NXKIT_METAL_HUD=1` shows the Metal performance HUD. The host sets `MTL_HUD_ENABLED=1` in its own environment
   before it makes a Metal device. The `developerHUDProperties` of the window's layer alone showed nothing.
-### Fixed
-
 - Octopath Traveler: towns are sunlit and no longer red. The game streams the higher mips of a texture into a sparse
   pool: it maps the pages, then fills them with the CPU without `nvnMemoryPoolFlushMappedRange`. The host loaded the
   texture at the mapping, while the pages were still zeros, and never again. The cloud texture of the sun's light
   function was black in those mips, so the sun lit almost nothing, and the town's colour grading turned the dark scene
   red. Each mapping request now starts a watch on its physical pages, and a flush that finds them changed loads the
   textures over them again.
+- A GPU-written texture with `NVN_TEXTURE_FLAGS_COMPRESSIBLE` in compressible pool memory is not copied back into
+  guest memory at the end of the frame. On the console its bytes are compressed, so the CPU cannot read them.
+  Octopath Traveler (Unreal Engine 4) copied back about 105 MB of render targets in each frame, 2.3 ms of GPU time.
 
 ## 0.15.0 - 2026-11-22
 
