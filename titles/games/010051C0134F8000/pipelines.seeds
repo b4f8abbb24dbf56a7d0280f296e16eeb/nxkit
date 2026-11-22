@@ -1,0 +1,503 @@
+nxkit-pipeline-seeds 1
+# Imported by nxb-seeds from the old engine at 131bd01328d9: dm/games/010051C0134F8000/pso_manifest.tsv, shader_seen.tsv and game.tsv.
+# Left out: 0 rows of merged passes, 0 with a target format the host has no name for, 0 that do not parse.
+D	zero
+C	024850415d7e7472
+C	d6b7f802397d4e71
+C	8f41ad1743d804f9
+S	b3e4fda191c6a350
+R	4be8ae850f98c5a6	c2c304b723273cd6	1	0	Rgba16Float:f:-,Rgba16Float:f:-,Rgba16Float:f:-,Rgba16Float:f:-,Rgba16Float:f:-,Rgba16Float:f:-	0:16:0:0,1:16:8:0	0:16:0
+R	4be8ae850f98c5a6	576912fe797d8e94	1	0	Rgba16Float:f:-,Rgba16Float:f:-	0:16:0:0,1:16:8:0	0:16:0
+R	f8718446c422d093	953131a057896e9e	1	0	Rg11B10Float:0:-	0:2e:0:0	0:16:0
+R	7f20816ec762c66f	9e312cae7c744742	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	7f20816ec762c66f	5fa37fb9fd6bbed5	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	73abb5c9411e52ad	ee4f022899ce17ac	1	0	Rgba32Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	4be8ae850f98c5a6	20e87950cd7b97d4	1	0	Rgb10A2Unorm:f:-	0:16:0:0,1:16:8:0	0:16:0
+R	1275da4622fd370f	5684ed5cb7308fd5	1	0	Bgra8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	0eaa16f581f2e4db	af7cc7fe873e8e4c	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	88b83fe3679e6d9e	f28046026774ae45	1	0	Bgra8Unorm:f:-	0:25:0:0,1:16:0:1	0:4:1,1:8:0
+R	320e4a500977e78a	9654edb08c2e3e02	1	0	Rgba8Unorm:f:5.6.1.2.6.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	7a08f166e8d24802	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	ded6d955562a313a	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	320e4a500977e78a	688298f8bb85339b	1	0	Rgba8Unorm:f:5.6.1.2.6.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	de452cb6ecab997b	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	320e4a500977e78a	5fa0fbcf3c6f2940	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	b613934d0c2520b3	fc9736f39625bca7	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,4:29:0:3	0:12:0,1:8:0,3:8:0
+R	49974681c973c87d	fc9736f39625bca7	1	0	-	0:22:0:0	0:12:0
+R	49974681c973c87d	dd1a7f13b8280a5b	1	0	-	0:22:0:0	0:12:0
+R	b884ed8491371584	5ffb643309f880b7	1	0	-	0:22:0:0	0:12:0
+R	b884ed8491371584	fc9736f39625bca7	1	0	-	0:22:0:0	0:12:0
+R	b095b336c4a59cb1	-	1	0	-	0:22:0:0	0:12:0
+R	f162c7abe040feef	-	1	0	-	0:2e:0:0	0:16:0
+R	85636b5046d2ea8e	29308421ce5b2f55	1	0	-	0:22:0:0	0:12:0
+R	f022140943c6d0fc	fc9736f39625bca7	1	0	-	0:22:0:0	0:12:0
+R	5e3e5628c7da125b	7a13fa104d502853	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	22136886d10f9805	17bf60cf488ede70	1	0	-	0:22:0:0	0:12:0
+R	773c397f73578f6c	3a6d9d27e634da0f	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	edc2955954bb75e7	5ede1a580999e3c4	1	0	-	0:2e:0:0	0:16:0
+R	ea2d9acedc0f7dbe	5c01c1b22ab4cf57	1	0	-	0:22:0:0	0:12:0
+R	edc2955954bb75e7	e5f146ed1efe2d63	1	0	-	0:2e:0:0	0:16:0
+R	5e3e5628c7da125b	bae8d3f4ae1909de	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	0f2084c2756adc8e	528632ae6be43282	1	0	-	0:22:0:0	0:12:0
+R	5e3e5628c7da125b	33b6d092b1bf9111	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	b884ed8491371584	871694caaa519418	1	0	-	0:22:0:0	0:12:0
+R	5e3e5628c7da125b	d6327e24d37da9df	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	a4d0c0d62b33de9b	5c450f846770baa0	1	0	-	0:22:0:0	0:12:0
+R	b0c74a79e7affd46	be669037d29308ee	1	0	-	0:22:0:0	0:12:0
+R	b21aa40f96295cdd	5c450f846770baa0	1	0	-	0:22:0:0	0:12:0
+R	5e3e5628c7da125b	7d4d42f0603be66a	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	5e3e5628c7da125b	e0b4065ff0501831	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	901cf5ebfe1fdd05	07c528249dd8603a	1	0	-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	b21aa40f96295cdd	5c01c1b22ab4cf57	1	0	-	0:22:0:0	0:12:0
+R	24f673eba6fd1738	-	1	0	-	0:22:0:0	0:12:0
+R	550c57450fdc3936	d6327e24d37da9df	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	550c57450fdc3936	e0b4065ff0501831	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	550c57450fdc3936	7d4d42f0603be66a	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	550c57450fdc3936	33b6d092b1bf9111	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	550c57450fdc3936	bae8d3f4ae1909de	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	550c57450fdc3936	7a13fa104d502853	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	1233579c968a0450	7701ac47fd4ca58f	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:4:0,4:16:0
+R	6017d73ce4c7f8e4	3a6d9d27e634da0f	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	04b70bd45dafc996	-	1	0	-	0:22:0:0	0:12:0
+R	1c606108f6d1d905	be669037d29308ee	1	0	-	0:22:0:0	0:12:0
+R	53360e5285866031	29308421ce5b2f55	1	0	-	0:22:0:0	0:12:0
+R	a59e2375a1f2479f	59f48dc6d115149f	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	c3a4a05155ca6edd	f9bee2f266d4e1fc	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	d4c3e0444d21802b	e3adf260fd0eb667	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	f89d28da9314eb92	4bab0e1838410e50	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	364ee317447d40c9	f99beb7dba93d510	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	f605791068ac857b	2554fc1b0d47f92d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	f89d28da9314eb92	3d7e96150548096b	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	1c883dc6cdd6847f	1d0510d29c20e476	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	f89d28da9314eb92	0431b3b252f899e1	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	5e6771cda8a6911a	486ba1e56d5a6885	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	dfee8ad813a282da	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	f89d28da9314eb92	5f0dc911bed7c721	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	1c883dc6cdd6847f	3540a99fa780bcc0	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	2a33468533c6f53e	66d30665299cf2d0	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	f89d28da9314eb92	432c5d627bf2d514	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	e9d0aef748f5c669	5336c487960d1845	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	e035601c7f31c927	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	f89d28da9314eb92	c3e7e8926df75985	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	c44f886f118388e4	1815ed86fb0a0be3	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	c44f886f118388e4	e24f43313866b804	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	c44f886f118388e4	7aff18b0133bb070	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	af8e5d4e1eb1b176	c9d964d340d921ae	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	9cfdf20c0b960b63	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	5e6771cda8a6911a	2bb6a1327c92638b	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	b8ba7fe885e493a3	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	e3b5db3d64fa63a8	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	c44f886f118388e4	6ffb9543668e3e12	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	c44f886f118388e4	d47e63edeafcfc21	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	c44f886f118388e4	cbab16743f3f3efc	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	cc150159ec42dfe8	b8ba7fe885e493a3	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,4:29:0:3	0:12:0,1:8:0,3:8:0
+R	5e6771cda8a6911a	35644633fedf342d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	87ed8eabadf05582	8224042e13dfd265	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	c5cd67da011060b2	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	691891da51d66c86	d3ebe37c7715d971	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	87ed8eabadf05582	db80b3fadff19e9f	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	0532f708f2db38be	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	b5bfbfe23367ceb2	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	87ed8eabadf05582	7c18488a98ae4330	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	88e463b5afbae044	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	0b8bda19953e87dd	ee7eb1525ad5461c	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5eb836efe1a46160	78d38e2eb07b699d	1	0	Bgra8Unorm:3:2.2.4.2.1.1	0:2e:0:0	0:16:0
+R	5eb836efe1a46160	65d6027935950b0f	1	0	Bgra8Unorm:3:5.6.1.2.1.1	0:2e:0:0	0:16:0
+R	4be8ae850f98c5a6	3e592585b9e698fc	1	0	Rgba16Float:f:2.2.1.2.2.1,Rgba16Float:7:2.2.1.2.2.1	0:16:0:0,1:16:8:0	0:16:0
+R	ed884b761402f575	115ef59883593fe7	1	0	Rg11B10Float:f:2.2.1.2.2.1,Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	73abb5c9411e52ad	860cd89d3fa42b79	1	0	Rg11B10Float:f:5.6.1.1.2.1	0:2e:0:0,1:16:16:0	0:32:0
+R	1a555378de946f07	89ec331f9d29fe51	1	0	Rg11B10Float:7:2.5.1.2.1.1	0:16:0:0	0:8:0
+R	fbe87dafc4f4b86a	6a839fa53cfdc616	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	73abb5c9411e52ad	c40a509ceb8c6a8d	1	0	Rg11B10Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	9c65990e80c6ecc8	9fff92503008dc01	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+R	9c65990e80c6ecc8	ea34256740b0c769	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+S	f4a50a9906e9014f
+S	a0555308795e648b
+S	deb1e3bf7bf2ff5c
+S	f2f378466b8f6708
+S	872d53c57c3d54ba
+S	1ecadb659ddeef6b
+S	a77b58705fced86a
+S	6ae1dcdb7f41cf3b
+S	d79779a5f03d0e4b
+S	5ab5f638b4165f88
+S	ba836675681e8676
+S	43b8183e1a4c03c4
+S	858e860e11524d4d
+S	81a796f868d0fdb2
+S	211ff03db6d7e129
+S	555462aee7affc10
+S	0c242bff22df6a95
+R	111913fa098acede	f3f938edfaf21eaa	1	0	Rg11B10Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	52a33b2c19a501c0	3a2e06dad74352e9	1	0	Rg11B10Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	825d5726d83f2629	4a97ca87b9d88b3f	1	0	Rg11B10Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	825d5726d83f2629	7d80e25c47c2b782	1	0	Rg11B10Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	0eaa16f581f2e4db	af7cc7fe873e8e4c	1	0	Bgra8Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	9a1ecdb6b1418ad9	03fd15bbd90bdbfb	1	0	Rgba8Unorm:f:-	0:2e:0:0	0:32:0
+R	2f4c75938aaa01d9	8d142ca993052ffc	1	0	Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	2f4c75938aaa01d9	99d821e7d4ab6554	1	0	Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	73abb5c9411e52ad	f3cfacadef7d64d2	1	0	Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	2f4c75938aaa01d9	953131a057896e9e	1	0	Rgba16Float:f:1.7.1.1.2.1	0:2e:0:0,1:16:16:0	0:32:0
+R	2f4c75938aaa01d9	8f8e79ade6389c4d	1	0	Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	2f4c75938aaa01d9	500a35b4f8da5238	1	0	Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	2f4c75938aaa01d9	514e8992dbe3af7c	1	0	Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	2f4c75938aaa01d9	64f98d3231a3503c	1	0	Rgba16Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	3dc26404903fb9b2	b146c111d2d650a2	1	0	Rgba8Unorm:f:-	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+S	2ea07895efab3bdf
+S	f2f65856e6a4649d
+S	be739337d5dcf1a0
+S	c93db2a0f21bb6e8
+S	a9b8c91616ff943b
+S	a380952975b9f80d
+R	e5ec8d541d7008cf	b93d1761a5be89ba	1	0	-	0:22:0:0	0:12:0
+R	1149f72a4a82e04e	b93d1761a5be89ba	1	0	-	0:22:0:0	0:12:0
+R	1c883dc6cdd6847f	78a5ebede96c184f	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	9fee6429bc3d0a6a	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	364ee317447d40c9	6cb2d3edb969a81c	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	08b465fb14cc79f5	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	c3a4a05155ca6edd	ad5630f6e0fd648d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	d4c3e0444d21802b	fe41e3297509f1cc	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	f0d3346c9d92a987	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	2a33468533c6f53e	d804b0b5083b7f0d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	c2d943a292dcf6ce	01fe8d493b025d99	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	2a4e6493f756bbfb	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	f605791068ac857b	35cee13a77511484	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	1c883dc6cdd6847f	bffee20d70b01dd5	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	cc150159ec42dfe8	dfa683c6e9092c33	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,4:29:0:3	0:12:0,1:8:0,3:8:0
+R	5e6771cda8a6911a	4baaed6788db7742	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	d5708e6afad67513	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	5e6771cda8a6911a	ab9a251449977e2b	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	5150f3bb560e7f8f	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	c44f886f118388e4	f49789ecdd1bb083	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	87ed8eabadf05582	e0d41b245fd31aa3	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	87ed8eabadf05582	81680dd7ddc1b9c3	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	1a44ac6e553dd1bb	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	87ed8eabadf05582	56150f33b3419588	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	11a4bc72542e397b	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	af8e5d4e1eb1b176	373ad7977cfb8829	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	691891da51d66c86	ab4c346414ae71e9	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	0d87f0315d181a9d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c44f886f118388e4	f1fccceae2699b4b	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	c44f886f118388e4	a394ed7150386813	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	5e6771cda8a6911a	0e56406cd3a3aab8	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	dfa683c6e9092c33	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	5e6771cda8a6911a	ed4002b93d231bda	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	7f20816ec762c66f	2f1f0a24fd82ed76	1	0	Rg11B10Float:7:2.2.1.2.1.1	0:2e:0:0	0:32:0
+R	9c65990e80c6ecc8	2c8cb42cf5f930e2	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+R	9c65990e80c6ecc8	620df1588767ec9f	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+R	f655232ee6936e11	bcebea5e5662a2c5	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	2d7a44fb052ffca7	212a1bbdf9c72ed7	1	0	Rg11B10Float:f:2.2.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	f10dd7f09693fcd7	df957f67d6a02ef4	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	3dc26404903fb9b2	f3b3aef58f6e306c	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	24a15285bdc75dcf	7701ac47fd4ca58f	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:4:0,4:16:0
+R	89135c439dad2680	bd5d28f838d011e1	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:4:0,4:16:0
+R	3dc26404903fb9b2	3653b7a0b79d8ec9	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	1bf219dba0ff4b8b	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	71c1934e9636afa1	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	f04819d31ef4eaaa	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+S	959cfb8622179cf1
+S	929005307f2cd07f
+S	44b2446d0f0b0a8e
+S	31808ff2bfc3018d
+S	7283ac59b44cde23
+R	3dc26404903fb9b2	c554070273ff36c8	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	cbcf82c426bc699d	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	eb3acdce09eee202	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	32e3780fdd269fb4	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	320e4a500977e78a	ea03e995fd5dbf79	1	0	Bgra8UnormSrgb:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	320e4a500977e78a	9ecca1e1d0686fe2	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	c2a348abe1b7a854	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+C	ebeb2ca96124f81d
+C	b720aaed479a26a4
+C	67d960d8cb91adea
+R	0eaa16f581f2e4db	af7cc7fe873e8e4c	1	0	Rgb10A2Unorm:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	3dc26404903fb9b2	983e1b11259122c3	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	e51a8cfcae6321a5	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+S	b6af62f940907432
+S	6ce60dbcb140e4e4
+S	840ba9a617f4cc23
+S	f768ecb0d17a1d50
+S	b039e9b9373eb187
+S	dd7201ddf49a1511
+S	14af29933b807683
+S	94c47e420f7cdccb
+S	6116898acc7eb447
+S	0128db27e0a3534c
+S	c1adbb6b51ce17aa
+S	7c860e7409e2dc79
+S	12befe47f6d648bc
+S	97a5631097b8c714
+S	52663d78acd03bf6
+S	83a456f329be574f
+S	9c19f1f4976d522e
+S	4072bb3688f104df
+S	d594dc1f0d39f8b5
+S	5800fc002b042a0d
+S	b91819fa689befb0
+S	5d8a9a243facf6c6
+S	2086c95bb63b469c
+S	959c19ff72570188
+S	a2d649081144a97c
+S	0236ced05ed5b6f2
+S	5ffc926b839eed09
+S	572f98e27d7f824b
+S	1b2b47d036d4b569
+S	8d3ddfac1734be34
+S	e245e338e01302d4
+R	3dc26404903fb9b2	fa6d59a40f645394	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	1bd490ea17853b9b	e753eae6ed9a3abb	1	0	Rgba32Float:f:-,Rgba16Float:f:-	0:16:0:0	0:8:0
+R	b884ed8491371584	37a6979375c36b6b	1	0	-	0:22:0:0	0:12:0
+R	b21aa40f96295cdd	6d30d0dc8a225be3	1	0	-	0:22:0:0	0:12:0
+R	fb2a9b52c12da335	-	1	0	-	0:22:0:0	0:12:0
+R	0597b57c32285b19	37a6979375c36b6b	1	0	-	0:22:0:0	0:12:0
+R	016a8710c66ef948	5c450f846770baa0	1	0	-	0:22:0:0	0:12:0
+R	5ac0bd1c1c5539f7	6d30d0dc8a225be3	1	0	-	0:22:0:0	0:12:0
+R	5ac0bd1c1c5539f7	5c450f846770baa0	1	0	-	0:22:0:0	0:12:0
+R	d2ec4d65f22df5a9	-	1	0	-	0:22:0:0,2:26:4:1	0:12:0,1:8:0
+R	e61243e8ba69a479	9a7bec973b98eb67	1	0	-	0:22:0:0	0:12:0
+R	2afab5dd69495932	e1dfd28830bd51b2	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	f87a1e944855439b	96ab2b83284a70b9	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	f87a1e944855439b	e3ea220ec702f9da	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	14f0755cffae581b	957465caf9b30446	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	edc33bc50e9a3157	c4b106176c9fafa2	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	43d7a6ae64c5652d	0dea64bede9b908c	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	14f0755cffae581b	108659a00c54ec9d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	14f0755cffae581b	5d4d7f9e92690849	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	14f0755cffae581b	01cbce552774573f	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	937e559a7e263fa9	2fae975f7084641b	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	14f0755cffae581b	bad5010a2883c8a7	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	5e6771cda8a6911a	9479112d4b5826d5	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	cc150159ec42dfe8	93c20d00ff0d68a1	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,4:29:0:3	0:12:0,1:8:0,3:8:0
+R	5e6771cda8a6911a	b9ae600fef962f26	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	f87a1e944855439b	0e7aa2a7352a82f9	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	cc150159ec42dfe8	067629462878aadb	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0,1:26:0:1,2:26:4:1,4:29:0:3	0:12:0,1:8:0,3:8:0
+R	b8424b25198ee353	8c516dc8a01b06cc	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	f655232ee6936e11	906c10c4c0c876f0	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+S	4a3763f98dbeff62
+S	9fbcc1ee208f7f46
+S	44ddc36ec3df87c4
+R	f5655d1db7d00eab	63a57247bc89dbaa	1	0	Rgba16Float:7:2.2.1.2.1.1	-	-
+R	73abb5c9411e52ad	00563caf7fd80867	1	0	Rg11B10Float:7:2.2.1.2.1.1	0:2e:0:0,1:16:16:0	0:32:0
+R	73abb5c9411e52ad	0bd1ada8733d9920	1	0	Rg11B10Float:7:2.2.1.2.1.1	0:2e:0:0,1:16:16:0	0:32:0
+R	3dc26404903fb9b2	966e3c647fba26bf	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	1a597353fd716ee3	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	f14ec75cba7cd52a	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	9a36c00c1785e0d1	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	7450455ee20a598d	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	6be26dd2e343d995	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	ae65cc9a0391d44c	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	a9e209185222ff4f	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	6f30308e375b70dc	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	1c883dc6cdd6847f	06d4cacbf7bf7a98	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	d4c3e0444d21802b	d23bff6f21aba4d6	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	c3a4a05155ca6edd	8930465b57127670	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	3664961de0d55e53	3606254c62dc372e	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	2d7a44fb052ffca7	bb5d61cee2eb66b4	1	0	Rg11B10Float:f:2.2.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	f10dd7f09693fcd7	ec168400ffcd5ed3	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+S	c2b3045b260eb30c
+S	212fb8e48e0f7dc9
+R	3dc26404903fb9b2	da417805403e295b	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	1bd490ea17853b9b	84af55138906bd78	1	0	Rgba32Float:f:-,Rgba16Float:f:-	0:16:0:0	0:8:0
+R	cbc3746e64af3bb5	4d5ded10e65b151c	1	0	Rgba32Float:f:-,Rgba16Float:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0,1:2e:16:0,2:2e:32:0,3:2e:48:0,4:16:64:0,5:16:0:1	0:72:1,1:8:0
+R	3dc26404903fb9b2	8ceab5b0440f0e9c	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	84a4417b9690b0a7	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	3205c844b5b4bae4	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	bcfa3b9d906ad5b7	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	ca5797a02ee28726	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	320e4a500977e78a	ea03e995fd5dbf79	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	773c397f73578f6c	d65d20efedb5d322	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	f7cceb1b61182cfb	0597862907c94ea9	1	0	-	0:16:0:0	0:8:0
+R	5e3e5628c7da125b	0e02b104c2a747cc	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	773c397f73578f6c	1aeb08022109eaa9	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	39538b632e370322	72d26fcfd62f1a74	1	0	-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	550c57450fdc3936	0e02b104c2a747cc	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	6017d73ce4c7f8e4	d65d20efedb5d322	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	6017d73ce4c7f8e4	1aeb08022109eaa9	1	0	-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	f24d42d055624bdb	a7c6c3030b66cc25	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:16:0:0	0:8:0
+R	a59e2375a1f2479f	86bc7ab913207576	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	1939e14d66c146a9	b5c050a49d845a4c	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	f89d28da9314eb92	f4160e7942aea922	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,13:25:0:3,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,3:4:0,4:16:0
+R	a59e2375a1f2479f	0ed9462d8090d221	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0,1:26:0:1,2:26:4:1,3:27:0:4,4:25:8:4,5:11:0:2,6:11:4:2,7:11:8:2,8:11:12:2,14:27:4:4,15:25:12:4	0:12:0,1:8:0,2:16:0,4:16:0
+R	14f0755cffae581b	b0eb588433cc51ef	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	87ed8eabadf05582	f217d6f1882099cd	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	14f0755cffae581b	145f5fc4b8d84062	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	14f0755cffae581b	7fc85abd0d0ae0d2	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	14f0755cffae581b	507c6ed2ebc78b5d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	14f0755cffae581b	0271572c6db2f50e	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	0ccd2f2793530a2b	2a1010bb3c6248ab	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	a6ca6b682b65028b	f6a091a3a236a55f	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:0:1,2:12:0,3:8:0,5:4:0
+R	a6ca6b682b65028b	467d735982c04169	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	a6ca6b682b65028b	a36e1555fd7a4752	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:4:0
+R	d69580fed42ec6ac	8e6b85b65f1748a3	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,3:25:0:4,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,13:2e:0:1,14:2e:0:0	0:96:1,1:0:1,2:12:0,3:8:0,4:0:0,5:8:0
+R	f655232ee6936e11	d8205648fc1c4647	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	0136ffba2d5ac931	07c23d5215162e5c	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,12:16:88:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:4:0
+R	cdc5bd23eba7c8fd	e5892099cd91f313	1	0	Bgra8Unorm:f:2.2.1.2.2.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	73abb5c9411e52ad	f03fb36851aa37f4	1	0	Rg11B10Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	73abb5c9411e52ad	9cd65ad5fce22fce	1	0	Rg11B10Float:f:-	0:2e:0:0,1:16:16:0	0:32:0
+R	43d7a6ae64c5652d	4a3410836c215310	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	14f0755cffae581b	c26b26f47cb2e3c5	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	3dc26404903fb9b2	0940e66db4c80fcd	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	f64d85a3b1e084fd	29308421ce5b2f55	1	0	-	0:22:0:0	0:12:0
+R	85636b5046d2ea8e	292c5f87a67f4d49	1	0	-	0:22:0:0	0:12:0
+R	ad1358f315afd209	9a7bec973b98eb67	1	0	-	0:22:0:0	0:12:0
+R	0a2476a3d4ed1246	298a1e562e9cb3b3	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	a4fb64ca166a0e1b	d17a1eae0b955934	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	691891da51d66c86	4b1223dd5b5d19c9	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:0	0:12:0
+R	63eed914217b8bfa	6c3295064ac44fa1	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	0136ffba2d5ac931	423cd8a3fb1ff475	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,12:16:88:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:4:0
+R	db1cdb15b6bda0e2	0867b6e57150e861	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:0,1:22:16:0,2:2e:32:0,3:2e:64:0,4:2e:48:0,5:2e:0:1	0:80:0,1:16:0
+R	db1cdb15b6bda0e2	c201b31f09114cbd	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:0,1:22:16:0,2:2e:32:0,3:2e:64:0,4:2e:48:0,5:2e:0:1	0:80:0,1:16:0
+R	84ebc8250294395f	46be537b0d0e97c6	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,5:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:4:0
+R	88be7573e4b90823	0ef766efcf430ce4	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+S	221b2168f1af3724
+S	de7839ccdef9749d
+S	fbbfa50f238f4ef3
+S	ddbef520886e17b7
+S	ecaac68289abea64
+S	d5073776dc103440
+S	5f53d16d26adb264
+S	987c0d79ccb222da
+S	e553019b047b6d69
+S	d00e3d5775fc00ab
+S	5547230a846edb1d
+R	320e4a500977e78a	688298f8bb85339b	1	0	Bgra8UnormSrgb:f:5.6.1.2.6.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	9c3797728fad188b	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	7c5db31800f84749	732c6a8a90f53cb7	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:12:0
+R	e2b68008836807e6	2f70ba731ce7274b	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	f99290046692d59e	dcc122111d88d3fc	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	ef9b231774752533	7445fa954ac9bce3	1	0	Rg11B10Float:f:2.2.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	2f4c75938aaa01d9	72a483d3611e46e3	1	0	-	0:2e:0:0,1:16:16:0	0:32:0
+R	f8718446c422d093	953131a057896e9e	1	0	Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	f8718446c422d093	953131a057896e9e	1	0	Rgba16Float:f:-	0:2e:0:0	0:16:0
+R	f99290046692d59e	dcc122111d88d3fc	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	ef9b231774752533	7445fa954ac9bce3	1	0	Rgba16Float:f:2.2.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	73abb5c9411e52ad	177c921978ec7d5d	1	0	Rg11B10Float:f:5.6.1.2.2.1	0:2e:0:0,1:16:16:0	0:32:0
+R	18aff83deaff0c07	73469c6f3f2ee651	1	0	Rg11B10Float:f:2.2.1.2.2.1	0:2e:0:0	0:16:0
+R	f24d42d055624bdb	55f801c6fcf43fa7	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	f24d42d055624bdb	55f801c6fcf43fa7	1	0	Rgba16Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	118fd42094355b5d	864085af8eca9e86	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:0,1:22:16:0,2:2e:32:0,3:2e:64:0,4:2e:48:0	0:80:0
+R	63eed914217b8bfa	6c3295064ac44fa1	1	0	Rgba16Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	f655232ee6936e11	bcebea5e5662a2c5	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	3dc26404903fb9b2	43c81ebfdcddc42b	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	a6ca6b682b65028b	f6a091a3a236a55f	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	a6ca6b682b65028b	f6a091a3a236a55f	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	0e040cdabb91b563	feb5c25cd05d2302	1	0	-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	8c0b60eb39fea97c	a70827efe1ba9971	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	915c9171999b1140	92e138057898a325	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	9dc53f779bbed141	2e467eada5942e61	1	0	Bgra8Unorm:f:2.2.1.2.2.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	1183a86ff79b948c	69ea47522a159f97	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+R	901cf5ebfe1fdd05	defe39d0c5b31e7a	1	0	-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	2a33468533c6f53e	13298fe78a5b7630	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	14f0755cffae581b	301abd4e8f994c5d	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	a6ca6b682b65028b	e75d36c961221a0b	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:12:0
+R	f10dd7f09693fcd7	bb5632c80addda80	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	a6ca6b682b65028b	f338ac801e0d1ffb	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:4:0
+R	95d15e03a23be933	00bd5923d6b77fdb	1	0	Bgra8Unorm:f:2.2.1.2.2.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	51e6ac4dfd6405b8	69996e6b5582d9dc	1	0	-	0:22:0:0	0:12:0
+S	18caf00541e1dc16
+S	501bb0df93bb3257
+R	b8424b25198ee353	f3e3ebf673803e56	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	3664961de0d55e53	7e13f0fcea9ec67a	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	41fb9cce5091df18	eb3e137ae1236b5f	1	0	Bgra8Unorm:f:2.2.1.2.2.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	79deaa35782d4cdf	-	1	0	-	0:22:0:2,8:2e:16:0,9:2e:32:0,10:2e:48:0	0:96:1,2:12:0
+R	1939e14d66c146a9	f0e160fdbf610251	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:4:0
+S	a1b9252bf237c05c
+S	40f46e6277722268
+R	3f4508cdbba5bd67	a6b49db4e9119d17	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+R	046fadb03f700386	44b505a392b527a8	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0,1:26:0:1,2:26:4:1,4:29:0:3	0:12:0,1:8:0,3:8:0
+R	3f4508cdbba5bd67	f2e8772cc0e3b076	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:0	0:12:0
+R	63eed914217b8bfa	16d20aa9a4544984	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	b8424b25198ee353	75459b6ff123de00	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	c9ac89e883799129	fbeb004b938e8aa6	1	0	-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	f99290046692d59e	bfd63e0674315faa	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	44308710feaaf385	fa3243948ab6f392	1	0	-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	f7cceb1b61182cfb	be36f3be87239542	1	0	-	0:16:0:0	0:8:0
+R	99d934005c629fcb	5eda1934cb1a1400	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	f24d42d055624bdb	3e317a01e43f59b8	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:16:0:0	0:8:0
+R	63eed914217b8bfa	c3bcf4f8cab61fb2	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	f10dd7f09693fcd7	5c2bada742bfe4b7	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	f10dd7f09693fcd7	d8205648fc1c4647	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	95d15e03a23be933	4d7749cf3d5a4ab2	1	0	Bgra8Unorm:f:2.2.1.2.2.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+S	51b27138075012e5
+S	f68c3bfd8c421c3a
+S	6d119c84d7504bbd
+R	c93b61331f90bc25	baf0d4420b1df7f6	1	0	-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	c93b61331f90bc25	2cadaf095e3b7068	1	0	-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	c93b61331f90bc25	2fa4e2a41ba9fcdc	1	0	-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	d4f27fcc7345905b	09785dcd3683cf27	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	d4f27fcc7345905b	6ef7990d477b9269	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	63eed914217b8bfa	1e91ee483106108a	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	a6ca6b682b65028b	d6228d2ec8341329	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	0e781751ba5b2dc8	bcf733deea5255f5	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:4:0
+R	0e781751ba5b2dc8	bcf733deea5255f5	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	a6ca6b682b65028b	5cc1c7647fd88da7	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	0e781751ba5b2dc8	bcf733deea5255f5	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	e2b68008836807e6	2f70ba731ce7274b	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	b8424b25198ee353	391e146cdb4840e6	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	f10dd7f09693fcd7	e147bf277610fb47	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	b8424b25198ee353	391e146cdb4840e6	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	f10dd7f09693fcd7	e147bf277610fb47	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	95d15e03a23be933	1c5276d7d0ae8aa1	1	0	Bgra8Unorm:f:2.2.1.2.2.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	14f0755cffae581b	798cf937aa607674	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:2e:0:0	0:16:0
+R	a6ca6b682b65028b	e3b507a412abc798	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	f99290046692d59e	cd84fe9e69f9dca1	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	cdc5bd23eba7c8fd	ecefe1e8872c55f1	1	0	Bgra8Unorm:f:2.2.1.2.2.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	b8424b25198ee353	5d3d0a75eb4cfff9	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	78ffc4bc77db9f28	0646265e4f006f90	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	0e781751ba5b2dc8	0f93df7edaa5c4c3	1	0	Bgra8Unorm:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:12:0
+R	f10dd7f09693fcd7	22892669e92c853d	1	0	Bgra8Unorm:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:12:0
+R	0e781751ba5b2dc8	0f93df7edaa5c4c3	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:12:0
+R	78ffc4bc77db9f28	0646265e4f006f90	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	f10dd7f09693fcd7	22892669e92c853d	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:12:0
+R	a7c62a920a2e91bd	1e22ef6c7a341ecc	1	0	Bgra8Unorm:f:5.6.1.1.6.1	0:2e:0:0,1:22:16:0,2:2e:32:0,3:2e:64:0,4:2e:48:0	0:80:0
+R	a7c62a920a2e91bd	89c8443889fbde26	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:0,1:22:16:0,2:2e:32:0,3:2e:64:0,4:2e:48:0	0:80:0
+R	a6ca6b682b65028b	00a33713ad9c3205	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	a6ca6b682b65028b	00a33713ad9c3205	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	257a7649b00030ff	406b4c50916f1a40	1	0	-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	257a7649b00030ff	406b4c50916f1a40	1	0	-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:12:0
+R	74dc0a804b74cf4b	9c114c7c90533eea	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:12:0
+R	74dc0a804b74cf4b	9c114c7c90533eea	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,11:2d:80:0,12:16:88:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+S	949ee779deafeb5b
+S	e847c8d211b79079
+R	a6ca6b682b65028b	21b7af9f1e2a16e2	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	3dc26404903fb9b2	4c152fc2b0b115b9	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	3dc26404903fb9b2	f0ae1240f2136d5c	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	2d7a44fb052ffca7	d509f8a710ed3d3b	1	0	Rgba16Float:f:2.2.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	3dc26404903fb9b2	2ec69aa301fd4b04	1	0	Rgba8Unorm:f:2.2.1.2.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	2a33468533c6f53e	77e69acd52ba5e6c	1	0	Rg11B10Float:f:2.2.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	2a33468533c6f53e	82b1b78b7987d7f1	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	2a33468533c6f53e	a25c4b7fb774997e	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:12:0
+R	f10dd7f09693fcd7	7e01f4d5904dee53	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	f10dd7f09693fcd7	7e01f4d5904dee53	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	3dc26404903fb9b2	eac45a0c4e8f8075	1	0	Rgba8Unorm:f:5.6.1.8.2.1	0:2e:0:0,1:16:16:0,2:16:24:0,3:25:32:0	0:40:0
+R	2a33468533c6f53e	42dacf8c7431b82f	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:4:0
+R	9a1ecdb6b1418ad9	0409fd0b978c4802	1	0	Rg11B10Float:f:-	0:2e:0:0	0:32:0
+R	f10dd7f09693fcd7	1ec0dd6f3aea76a4	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	2d7a44fb052ffca7	bb5d61cee2eb66b4	1	0	Rgba16Float:f:2.2.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0	0:8:0,1:64:1
+R	901cf5ebfe1fdd05	defe39d0c5b31e7a	1	0	-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:4:0
+R	0ac361ed3e875d71	79d5207a14917239	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,3:25:0:4,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,4:4:0,5:8:0
+R	0ac361ed3e875d71	e3b27c7737ea9340	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,3:25:0:4,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,4:4:0,5:8:0
+R	0ac361ed3e875d71	79d5207a14917239	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,3:25:0:4,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,4:4:0,5:8:0
+R	0ac361ed3e875d71	e3b27c7737ea9340	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,3:25:0:4,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,4:4:0,5:8:0
+R	3bb478f2f8cefff7	8b4a4ee190ded867	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,3:25:0:4,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,4:4:0,5:4:0
+R	3bb478f2f8cefff7	08f317ea60980721	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,3:25:0:4,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,4:4:0,5:4:0
+R	63eed914217b8bfa	f396c47101a61bc1	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	63eed914217b8bfa	f396c47101a61bc1	1	0	Rgba16Float:f:5.6.1.1.6.1	0:16:0:0	0:8:0
+R	18aff83deaff0c07	52ffa7189dd66a58	1	0	Rg11B10Float:f:2.2.1.2.2.1	0:2e:0:0	0:16:0
+R	4be8ae850f98c5a6	1aebe8671954cb23	1	0	Rgba16Float:7:2.2.1.1.2.1,Rgba16Float:7:2.2.1.1.2.1	0:16:0:0,1:16:8:0	0:16:0
+R	ad4caad774ecc0d7	960401cb1d874e98	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	ad4caad774ecc0d7	960401cb1d874e98	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	118fd42094355b5d	ed9cc050b7642300	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:0,1:22:16:0,2:2e:32:0,3:2e:64:0,4:2e:48:0	0:80:0
+R	118fd42094355b5d	ed9cc050b7642300	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:0,1:22:16:0,2:2e:32:0,3:2e:64:0,4:2e:48:0	0:80:0
+R	4b21f0a23bb35ffe	89ad1a70013962c4	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	f10dd7f09693fcd7	861dfc38a4021f92	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	3664961de0d55e53	afff62351f25d13e	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	4b21f0a23bb35ffe	89ad1a70013962c4	1	0	Rgba16Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:0:1
+R	f10dd7f09693fcd7	861dfc38a4021f92	1	0	Rgba16Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	41fb9cce5091df18	e4f89f8e0fcd9650	1	0	Bgra8Unorm:f:2.2.1.2.2.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1
+R	a73479acdec568b7	59f3511b5ad47cc7	1	0	Rg11B10Float:f:2.2.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	a73479acdec568b7	71e950288f28d400	1	0	Rg11B10Float:f:2.2.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	2a33468533c6f53e	ef2ec5700d9cc5ed	1	0	Rg11B10Float:f:-,Rgb10A2Unorm:f:-,Bgra8Unorm:f:-,Bgra8UnormSrgb:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-,Bgra8Unorm:f:-	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,13:2e:0:1,14:2e:0:0	0:96:1,1:16:1,2:12:0,3:8:0,5:8:0
+R	1939e14d66c146a9	6e0c49ae1a6c76fe	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0,14:2e:0:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	800ee9d7095e14b9	071fac2517a87393	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:22:0:2,1:26:0:3,2:26:4:3,4:11:0:5,8:2e:16:0,9:2e:32:0,10:2e:48:0	0:96:1,2:12:0,3:8:0,5:8:0
+R	3664961de0d55e53	7080b1320f1d94b4	1	0	Rg11B10Float:f:5.6.1.1.6.1	0:2e:0:1,1:2e:16:1,2:2e:32:1,3:2e:48:1,4:16:0:0,5:2e:0:2	0:8:0,1:64:1,2:16:1

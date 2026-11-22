@@ -16,8 +16,8 @@
 //! when `main` imports `ScalableFontEngineHelper::Decode`, and nobody checked the imports of this game.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -118,6 +118,15 @@ impl RuntimeHooks for Splatraiders {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Splatraiders {
     fn id(&self) -> TitleId {
         TitleId(0x0400_3800_2005_6000)
@@ -128,8 +137,12 @@ impl Title for Splatraiders {
     }
 
     /// The engine tree names the engine: Nintendo EPD (sead / agl / gsys).
-    fn family(&self) -> Option<&'static str> {
-        Some("agl")
+    fn engine(&self) -> &'static str {
+        "agl"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

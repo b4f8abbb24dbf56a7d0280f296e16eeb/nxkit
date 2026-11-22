@@ -5,6 +5,7 @@
 | `check.sh` | all quality gates. `tools/check.sh clippy` runs one step. CI runs the steps in parallel jobs |
 | `no-game-data.sh` | fails on big files, game or toolchain files, private paths, attribution lines and key patterns |
 | `ste_check.py` | finds candidates for Simplified Technical English problems in a text file |
+| `gen_title_registry.py` | writes the registry of the title layer from the folders `titles/engines`, `titles/graphics` and `titles/games`: the workspace dependencies, the features of `nxtitles` and the lists of its `catalog()`. Run `python3 tools/gen_title_registry.py .` after adding a family or a title module |
 | `front/` | scripts for the own front end (`airc`): corpus checks, IR and library equality, speed, GPU machine code comparison. They need inputs that you provide |
 | `gpudiff/` | the GPU differential harness (Swift and Metal with Python glue). See `docs/gpu-differential-testing.md` |
 | `hmma-precision/` | `run.sh` shows how the GPU of this Mac sums a half `simdgroup_matrix` product. See `docs/analysis/oot-open-issues.md` |

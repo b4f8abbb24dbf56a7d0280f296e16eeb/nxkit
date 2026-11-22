@@ -1,8 +1,8 @@
 //! The title module of NieR:Automata The End of YoRHa Edition for Nintendo Switch (`010056B015FE8000`).
 //!
 //! The game is update 1.0.3 (v131072) on SDK 12.3.9, graphics NVN. The engine tree names its engine: PlatinumGames'
-//! engine. No engine family of nxkit holds it. The modules are `main`, `subsdk0` and `sdk`. This module holds what the
-//! engine tree knows of the game.
+//! engine. The engine family is `platinum` (PlatinumGames' engine). The modules are `main`, `subsdk0` and `sdk`. This
+//! module holds what the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v131072, the
 //! shader split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is
@@ -17,8 +17,8 @@
 //! when `main` imports `ScalableFontEngineHelper::Decode`, and nobody checked the imports of this game.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -106,6 +106,15 @@ impl RuntimeHooks for Nier {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Nier {
     fn id(&self) -> TitleId {
         TitleId(0x0100_56B0_15FE_8000)
@@ -115,8 +124,12 @@ impl Title for Nier {
         "NieR:Automata The End of YoRHa Edition"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "platinum"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

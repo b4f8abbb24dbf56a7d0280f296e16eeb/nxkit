@@ -13,23 +13,120 @@ in_v = false
 
 [features]
 default = [
-    "agl", "unreal", "oot", "botw", "acnh", "mtf", "smbw", "smo", "pkbd", "aaic", "mpr", "silksong", "snbz", "mk8d", "swheist",
-    "ryza", "mp4", "diablo3", "pkarceus", "ragingloop", "animalwell", "okami", "sm3dwbf", "nfshp", "ghosttrick", "hwaoc",
-    "celeste", "baba", "sshd", "cotl", "aw12", "mrsoh", "smbbr", "obradinn", "trvdx", "dbspz", "tgaac", "bastion",
-    "fftic", "dq3hd", "sentinels", "blasphemous2", "dqb2", "subnautica", "sentinelsjp", "bayo3", "dsr", "kirbyfl",
-    "mt2", "octo0", "hades", "unicornasia", "fe3h", "nier", "octo", "p5r", "yoshicw", "ffres", "oribf", "bba", "p4g",
+    "engine-4a", "engine-agl", "engine-arcadix", "engine-atlus", "engine-baseengine", "engine-basso", "engine-bezel",
+    "engine-blizzard", "engine-blizzard-d2r", "engine-camelot", "engine-clover", "engine-criterion",
+    "engine-digital-eclipse", "engine-ea", "engine-falcom", "engine-firaxis", "engine-fna", "engine-fromsoftware",
+    "engine-frostbite", "engine-fusion", "engine-fuzz", "engine-gamefreak", "engine-gamemaker", "engine-gfd",
+    "engine-giants", "engine-grezzo", "engine-hagi", "engine-hal", "engine-heaps", "engine-hedgehog", "engine-idtech4",
+    "engine-inti", "engine-intsys", "engine-ktgl", "engine-larian", "engine-love", "engine-m2", "engine-mercurysteam",
+    "engine-monogame", "engine-monolith", "engine-mt-framework", "engine-mvgl", "engine-next-level", "engine-nicalis",
+    "engine-nintendo-2d", "engine-nintendo-wii", "engine-onyx", "engine-phx", "engine-phyre", "engine-platinum",
+    "engine-rage", "engine-re-engine", "engine-redengine", "engine-renderdragon", "engine-retro", "engine-shinen",
+    "engine-snes-online", "engine-snowdrop", "engine-sora", "engine-source", "engine-square-enix", "engine-steamworld",
+    "engine-sumo", "engine-supergiant", "engine-team-bondi", "engine-telltale", "engine-the-forge", "engine-traveller",
+    "engine-trinity", "engine-typemoon", "engine-ubiart", "engine-unity", "engine-unreal", "engine-unreal3",
+    "engine-vanillaware", "engine-vrender", "engine-wube", "graphics-nvn", "graphics-opengl", "graphics-vulkan", "oot",
+    "botw", "acnh", "mtf", "smbw", "smo", "pkbd", "aaic", "mpr", "silksong", "snbz", "mk8d", "swheist", "ryza", "mp4",
+    "diablo3", "pkarceus", "ragingloop", "animalwell", "okami", "sm3dwbf", "nfshp", "ghosttrick", "hwaoc", "celeste",
+    "baba", "sshd", "cotl", "aw12", "mrsoh", "smbbr", "obradinn", "trvdx", "dbspz", "tgaac", "bastion", "fftic",
+    "dq3hd", "sentinels", "blasphemous2", "dqb2", "subnautica", "sentinelsjp", "bayo3", "dsr", "kirbyfl", "mt2",
+    "octo0", "hades", "unicornasia", "fe3h", "nier", "octo", "p5r", "yoshicw", "ffres", "oribf", "bba", "p4g",
     "hollowknight", "srwy", "deadcells", "mrkb", "unicorn", "blasphemous", "smt5v", "ssbu", "zla", "dq11s", "mlbs",
     "mps", "aisni", "d2r", "astral", "xc3", "bayo", "rdr", "bayo2", "peach", "portal", "kirbysa", "ballxpit", "ais",
     "swheist2", "steinsgate", "seaofstars", "zeow", "sentinelsasia", "rpop", "pkshield", "oriwotw", "pkviolet",
     "sonicss", "tsr", "swdig", "dread", "smpj", "davediver", "isaac", "toad", "dkcrhd", "hades2", "octo2", "pmok",
     "pkscarlet", "cuphead", "feengage", "mcd2", "absolum", "dq7r", "portal2", "pksword", "batmanak", "hwde", "mhrise",
-    "pikmin4", "ffresasia", "nierasia", "mvdk", "cvbc", "smrpg", "ffx", "catherine", "dkctf", "rotk8", "fc27", "swdig2",
-    "tristrat", "ffcc", "silverpines", "dq12hd", "rhgroove", "tunic", "lm3", "parabox", "stardew", "xc2", "sor4",
-    "pmttyd", "rotk14", "totk", "pkza", "bmta", "xcde", "yoshimb", "splatraiders", "hwaoi", "dkbananza", "kirbyar",
-    "fefw", "nssr", "pkpokopia", "mkw", "pragmata", "starfox",
+    "pikmin4", "ffresasia", "nierasia", "mvdk", "cvbc", "smrpg", "ffx", "catherine", "dkctf", "rotk8", "fc27",
+    "swdig2", "tristrat", "ffcc", "silverpines", "dq12hd", "rhgroove", "tunic", "lm3", "parabox", "stardew", "xc2",
+    "sor4", "pmttyd", "rotk14", "totk", "pkza", "bmta", "xcde", "yoshimb", "splatraiders", "hwaoi", "dkbananza",
+    "kirbyar", "fefw", "nssr", "pkpokopia", "mkw", "pragmata", "starfox", "digimoncs", "fifa23", "welldweller",
+    "slaythespire", "dos2", "doom3", "mmlc", "factorio", "legosw", "civ6", "xcx", "bscotm2", "bscotm", "re1", "dbzk",
+    "tsukihime", "raymanl", "borderlands", "fateha", "cozyland", "trailssky2", "p5s", "lanoire", "p5t", "ff8",
+    "snesnc", "spfbw", "unmetal", "spsot", "smg", "witcher3", "kirbydb", "ff6", "ff5", "bsrotn", "civ7",
+    "chainedechoes", "mgsr", "whsurvivors", "twelvemin", "balatro", "fs26", "metro2033", "sammax3", "minecraft",
+    "rezero", "burnout", "ff12", "overcooked", "smg2", "smbw2", "orbitals", "fastfusion", "re4", "welcometour",
+    "sonicfd",
 ]
-agl = ["dep:nxfamily-agl"]
-unreal = ["dep:nxfamily-unreal"]
+engine-4a = ["dep:nxengine-4a"]
+engine-agl = ["dep:nxengine-agl"]
+engine-arcadix = ["dep:nxengine-arcadix"]
+engine-atlus = ["dep:nxengine-atlus"]
+engine-baseengine = ["dep:nxengine-baseengine"]
+engine-basso = ["dep:nxengine-basso"]
+engine-bezel = ["dep:nxengine-bezel"]
+engine-blizzard = ["dep:nxengine-blizzard"]
+engine-blizzard-d2r = ["dep:nxengine-blizzard-d2r"]
+engine-camelot = ["dep:nxengine-camelot"]
+engine-clover = ["dep:nxengine-clover"]
+engine-criterion = ["dep:nxengine-criterion"]
+engine-digital-eclipse = ["dep:nxengine-digital-eclipse"]
+engine-ea = ["dep:nxengine-ea"]
+engine-falcom = ["dep:nxengine-falcom"]
+engine-firaxis = ["dep:nxengine-firaxis"]
+engine-fna = ["dep:nxengine-fna"]
+engine-fromsoftware = ["dep:nxengine-fromsoftware"]
+engine-frostbite = ["dep:nxengine-frostbite"]
+engine-fusion = ["dep:nxengine-fusion"]
+engine-fuzz = ["dep:nxengine-fuzz"]
+engine-gamefreak = ["dep:nxengine-gamefreak"]
+engine-gamemaker = ["dep:nxengine-gamemaker"]
+engine-gfd = ["dep:nxengine-gfd"]
+engine-giants = ["dep:nxengine-giants"]
+engine-grezzo = ["dep:nxengine-grezzo"]
+engine-hagi = ["dep:nxengine-hagi"]
+engine-hal = ["dep:nxengine-hal"]
+engine-heaps = ["dep:nxengine-heaps"]
+engine-hedgehog = ["dep:nxengine-hedgehog"]
+engine-idtech4 = ["dep:nxengine-idtech4"]
+engine-inti = ["dep:nxengine-inti"]
+engine-intsys = ["dep:nxengine-intsys"]
+engine-ktgl = ["dep:nxengine-ktgl"]
+engine-larian = ["dep:nxengine-larian"]
+engine-love = ["dep:nxengine-love"]
+engine-m2 = ["dep:nxengine-m2"]
+engine-mercurysteam = ["dep:nxengine-mercurysteam"]
+engine-monogame = ["dep:nxengine-monogame"]
+engine-monolith = ["dep:nxengine-monolith"]
+engine-mt-framework = ["dep:nxengine-mt-framework"]
+engine-mvgl = ["dep:nxengine-mvgl"]
+engine-next-level = ["dep:nxengine-next-level"]
+engine-nicalis = ["dep:nxengine-nicalis"]
+engine-nintendo-2d = ["dep:nxengine-nintendo-2d"]
+engine-nintendo-wii = ["dep:nxengine-nintendo-wii"]
+engine-onyx = ["dep:nxengine-onyx"]
+engine-phx = ["dep:nxengine-phx"]
+engine-phyre = ["dep:nxengine-phyre"]
+engine-platinum = ["dep:nxengine-platinum"]
+engine-rage = ["dep:nxengine-rage"]
+engine-re-engine = ["dep:nxengine-re-engine"]
+engine-redengine = ["dep:nxengine-redengine"]
+engine-renderdragon = ["dep:nxengine-renderdragon"]
+engine-retro = ["dep:nxengine-retro"]
+engine-shinen = ["dep:nxengine-shinen"]
+engine-snes-online = ["dep:nxengine-snes-online"]
+engine-snowdrop = ["dep:nxengine-snowdrop"]
+engine-sora = ["dep:nxengine-sora"]
+engine-source = ["dep:nxengine-source"]
+engine-square-enix = ["dep:nxengine-square-enix"]
+engine-steamworld = ["dep:nxengine-steamworld"]
+engine-sumo = ["dep:nxengine-sumo"]
+engine-supergiant = ["dep:nxengine-supergiant"]
+engine-team-bondi = ["dep:nxengine-team-bondi"]
+engine-telltale = ["dep:nxengine-telltale"]
+engine-the-forge = ["dep:nxengine-the-forge"]
+engine-traveller = ["dep:nxengine-traveller"]
+engine-trinity = ["dep:nxengine-trinity"]
+engine-typemoon = ["dep:nxengine-typemoon"]
+engine-ubiart = ["dep:nxengine-ubiart"]
+engine-unity = ["dep:nxengine-unity"]
+engine-unreal = ["dep:nxengine-unreal"]
+engine-unreal3 = ["dep:nxengine-unreal3"]
+engine-vanillaware = ["dep:nxengine-vanillaware"]
+engine-vrender = ["dep:nxengine-vrender"]
+engine-wube = ["dep:nxengine-wube"]
+graphics-nvn = ["dep:nxgraphics-nvn"]
+graphics-opengl = ["dep:nxgraphics-opengl"]
+graphics-vulkan = ["dep:nxgraphics-vulkan"]
 oot = ["dep:nxgame-oot"]
 botw = ["dep:nxgame-botw"]
 acnh = ["dep:nxgame-acnh"]
@@ -185,11 +282,145 @@ pkpokopia = ["dep:nxgame-pkpokopia"]
 mkw = ["dep:nxgame-mkw"]
 pragmata = ["dep:nxgame-pragmata"]
 starfox = ["dep:nxgame-starfox"]
+digimoncs = ["dep:nxgame-digimoncs"]
+fifa23 = ["dep:nxgame-fifa23"]
+welldweller = ["dep:nxgame-welldweller"]
+slaythespire = ["dep:nxgame-slaythespire"]
+dos2 = ["dep:nxgame-dos2"]
+doom3 = ["dep:nxgame-doom3"]
+mmlc = ["dep:nxgame-mmlc"]
+factorio = ["dep:nxgame-factorio"]
+legosw = ["dep:nxgame-legosw"]
+civ6 = ["dep:nxgame-civ6"]
+xcx = ["dep:nxgame-xcx"]
+bscotm2 = ["dep:nxgame-bscotm2"]
+bscotm = ["dep:nxgame-bscotm"]
+re1 = ["dep:nxgame-re1"]
+dbzk = ["dep:nxgame-dbzk"]
+tsukihime = ["dep:nxgame-tsukihime"]
+raymanl = ["dep:nxgame-raymanl"]
+borderlands = ["dep:nxgame-borderlands"]
+fateha = ["dep:nxgame-fateha"]
+cozyland = ["dep:nxgame-cozyland"]
+trailssky2 = ["dep:nxgame-trailssky2"]
+p5s = ["dep:nxgame-p5s"]
+lanoire = ["dep:nxgame-lanoire"]
+p5t = ["dep:nxgame-p5t"]
+ff8 = ["dep:nxgame-ff8"]
+snesnc = ["dep:nxgame-snesnc"]
+spfbw = ["dep:nxgame-spfbw"]
+unmetal = ["dep:nxgame-unmetal"]
+spsot = ["dep:nxgame-spsot"]
+smg = ["dep:nxgame-smg"]
+witcher3 = ["dep:nxgame-witcher3"]
+kirbydb = ["dep:nxgame-kirbydb"]
+ff6 = ["dep:nxgame-ff6"]
+ff5 = ["dep:nxgame-ff5"]
+bsrotn = ["dep:nxgame-bsrotn"]
+civ7 = ["dep:nxgame-civ7"]
+chainedechoes = ["dep:nxgame-chainedechoes"]
+mgsr = ["dep:nxgame-mgsr"]
+whsurvivors = ["dep:nxgame-whsurvivors"]
+twelvemin = ["dep:nxgame-twelvemin"]
+balatro = ["dep:nxgame-balatro"]
+fs26 = ["dep:nxgame-fs26"]
+metro2033 = ["dep:nxgame-metro2033"]
+sammax3 = ["dep:nxgame-sammax3"]
+minecraft = ["dep:nxgame-minecraft"]
+rezero = ["dep:nxgame-rezero"]
+burnout = ["dep:nxgame-burnout"]
+ff12 = ["dep:nxgame-ff12"]
+overcooked = ["dep:nxgame-overcooked"]
+smg2 = ["dep:nxgame-smg2"]
+smbw2 = ["dep:nxgame-smbw2"]
+orbitals = ["dep:nxgame-orbitals"]
+fastfusion = ["dep:nxgame-fastfusion"]
+re4 = ["dep:nxgame-re4"]
+welcometour = ["dep:nxgame-welcometour"]
+sonicfd = ["dep:nxgame-sonicfd"]
 
 [dependencies]
 nxtitle.workspace = true
-nxfamily-agl = { workspace = true, optional = true }
-nxfamily-unreal = { workspace = true, optional = true }
+nxengine-4a = { workspace = true, optional = true }
+nxengine-agl = { workspace = true, optional = true }
+nxengine-arcadix = { workspace = true, optional = true }
+nxengine-atlus = { workspace = true, optional = true }
+nxengine-baseengine = { workspace = true, optional = true }
+nxengine-basso = { workspace = true, optional = true }
+nxengine-bezel = { workspace = true, optional = true }
+nxengine-blizzard = { workspace = true, optional = true }
+nxengine-blizzard-d2r = { workspace = true, optional = true }
+nxengine-camelot = { workspace = true, optional = true }
+nxengine-clover = { workspace = true, optional = true }
+nxengine-criterion = { workspace = true, optional = true }
+nxengine-digital-eclipse = { workspace = true, optional = true }
+nxengine-ea = { workspace = true, optional = true }
+nxengine-falcom = { workspace = true, optional = true }
+nxengine-firaxis = { workspace = true, optional = true }
+nxengine-fna = { workspace = true, optional = true }
+nxengine-fromsoftware = { workspace = true, optional = true }
+nxengine-frostbite = { workspace = true, optional = true }
+nxengine-fusion = { workspace = true, optional = true }
+nxengine-fuzz = { workspace = true, optional = true }
+nxengine-gamefreak = { workspace = true, optional = true }
+nxengine-gamemaker = { workspace = true, optional = true }
+nxengine-gfd = { workspace = true, optional = true }
+nxengine-giants = { workspace = true, optional = true }
+nxengine-grezzo = { workspace = true, optional = true }
+nxengine-hagi = { workspace = true, optional = true }
+nxengine-hal = { workspace = true, optional = true }
+nxengine-heaps = { workspace = true, optional = true }
+nxengine-hedgehog = { workspace = true, optional = true }
+nxengine-idtech4 = { workspace = true, optional = true }
+nxengine-inti = { workspace = true, optional = true }
+nxengine-intsys = { workspace = true, optional = true }
+nxengine-ktgl = { workspace = true, optional = true }
+nxengine-larian = { workspace = true, optional = true }
+nxengine-love = { workspace = true, optional = true }
+nxengine-m2 = { workspace = true, optional = true }
+nxengine-mercurysteam = { workspace = true, optional = true }
+nxengine-monogame = { workspace = true, optional = true }
+nxengine-monolith = { workspace = true, optional = true }
+nxengine-mt-framework = { workspace = true, optional = true }
+nxengine-mvgl = { workspace = true, optional = true }
+nxengine-next-level = { workspace = true, optional = true }
+nxengine-nicalis = { workspace = true, optional = true }
+nxengine-nintendo-2d = { workspace = true, optional = true }
+nxengine-nintendo-wii = { workspace = true, optional = true }
+nxengine-onyx = { workspace = true, optional = true }
+nxengine-phx = { workspace = true, optional = true }
+nxengine-phyre = { workspace = true, optional = true }
+nxengine-platinum = { workspace = true, optional = true }
+nxengine-rage = { workspace = true, optional = true }
+nxengine-re-engine = { workspace = true, optional = true }
+nxengine-redengine = { workspace = true, optional = true }
+nxengine-renderdragon = { workspace = true, optional = true }
+nxengine-retro = { workspace = true, optional = true }
+nxengine-shinen = { workspace = true, optional = true }
+nxengine-snes-online = { workspace = true, optional = true }
+nxengine-snowdrop = { workspace = true, optional = true }
+nxengine-sora = { workspace = true, optional = true }
+nxengine-source = { workspace = true, optional = true }
+nxengine-square-enix = { workspace = true, optional = true }
+nxengine-steamworld = { workspace = true, optional = true }
+nxengine-sumo = { workspace = true, optional = true }
+nxengine-supergiant = { workspace = true, optional = true }
+nxengine-team-bondi = { workspace = true, optional = true }
+nxengine-telltale = { workspace = true, optional = true }
+nxengine-the-forge = { workspace = true, optional = true }
+nxengine-traveller = { workspace = true, optional = true }
+nxengine-trinity = { workspace = true, optional = true }
+nxengine-typemoon = { workspace = true, optional = true }
+nxengine-ubiart = { workspace = true, optional = true }
+nxengine-unity = { workspace = true, optional = true }
+nxengine-unreal = { workspace = true, optional = true }
+nxengine-unreal3 = { workspace = true, optional = true }
+nxengine-vanillaware = { workspace = true, optional = true }
+nxengine-vrender = { workspace = true, optional = true }
+nxengine-wube = { workspace = true, optional = true }
+nxgraphics-nvn = { workspace = true, optional = true }
+nxgraphics-opengl = { workspace = true, optional = true }
+nxgraphics-vulkan = { workspace = true, optional = true }
 nxgame-oot = { workspace = true, optional = true }
 nxgame-botw = { workspace = true, optional = true }
 nxgame-acnh = { workspace = true, optional = true }
@@ -345,6 +576,62 @@ nxgame-pkpokopia = { workspace = true, optional = true }
 nxgame-mkw = { workspace = true, optional = true }
 nxgame-pragmata = { workspace = true, optional = true }
 nxgame-starfox = { workspace = true, optional = true }
+nxgame-digimoncs = { workspace = true, optional = true }
+nxgame-fifa23 = { workspace = true, optional = true }
+nxgame-welldweller = { workspace = true, optional = true }
+nxgame-slaythespire = { workspace = true, optional = true }
+nxgame-dos2 = { workspace = true, optional = true }
+nxgame-doom3 = { workspace = true, optional = true }
+nxgame-mmlc = { workspace = true, optional = true }
+nxgame-factorio = { workspace = true, optional = true }
+nxgame-legosw = { workspace = true, optional = true }
+nxgame-civ6 = { workspace = true, optional = true }
+nxgame-xcx = { workspace = true, optional = true }
+nxgame-bscotm2 = { workspace = true, optional = true }
+nxgame-bscotm = { workspace = true, optional = true }
+nxgame-re1 = { workspace = true, optional = true }
+nxgame-dbzk = { workspace = true, optional = true }
+nxgame-tsukihime = { workspace = true, optional = true }
+nxgame-raymanl = { workspace = true, optional = true }
+nxgame-borderlands = { workspace = true, optional = true }
+nxgame-fateha = { workspace = true, optional = true }
+nxgame-cozyland = { workspace = true, optional = true }
+nxgame-trailssky2 = { workspace = true, optional = true }
+nxgame-p5s = { workspace = true, optional = true }
+nxgame-lanoire = { workspace = true, optional = true }
+nxgame-p5t = { workspace = true, optional = true }
+nxgame-ff8 = { workspace = true, optional = true }
+nxgame-snesnc = { workspace = true, optional = true }
+nxgame-spfbw = { workspace = true, optional = true }
+nxgame-unmetal = { workspace = true, optional = true }
+nxgame-spsot = { workspace = true, optional = true }
+nxgame-smg = { workspace = true, optional = true }
+nxgame-witcher3 = { workspace = true, optional = true }
+nxgame-kirbydb = { workspace = true, optional = true }
+nxgame-ff6 = { workspace = true, optional = true }
+nxgame-ff5 = { workspace = true, optional = true }
+nxgame-bsrotn = { workspace = true, optional = true }
+nxgame-civ7 = { workspace = true, optional = true }
+nxgame-chainedechoes = { workspace = true, optional = true }
+nxgame-mgsr = { workspace = true, optional = true }
+nxgame-whsurvivors = { workspace = true, optional = true }
+nxgame-twelvemin = { workspace = true, optional = true }
+nxgame-balatro = { workspace = true, optional = true }
+nxgame-fs26 = { workspace = true, optional = true }
+nxgame-metro2033 = { workspace = true, optional = true }
+nxgame-sammax3 = { workspace = true, optional = true }
+nxgame-minecraft = { workspace = true, optional = true }
+nxgame-rezero = { workspace = true, optional = true }
+nxgame-burnout = { workspace = true, optional = true }
+nxgame-ff12 = { workspace = true, optional = true }
+nxgame-overcooked = { workspace = true, optional = true }
+nxgame-smg2 = { workspace = true, optional = true }
+nxgame-smbw2 = { workspace = true, optional = true }
+nxgame-orbitals = { workspace = true, optional = true }
+nxgame-fastfusion = { workspace = true, optional = true }
+nxgame-re4 = { workspace = true, optional = true }
+nxgame-welcometour = { workspace = true, optional = true }
+nxgame-sonicfd = { workspace = true, optional = true }
 
 [lints]
 workspace = true

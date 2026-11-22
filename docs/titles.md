@@ -1,10 +1,17 @@
 # Title layer
 
-Three layers decide how one game is built and run.
+Four layers decide how one game is built and run.
 
-- The core is the rest of the workspace. It knows no game and no engine.
-- An engine family holds what is true for every game of one engine. The family `agl` is Nintendo EPD's engine on sead, agl and gsys.
+- The core is the rest of the workspace. It knows no game, no engine and no graphics API of a game.
+- A graphics family holds what is true for every game on one graphics API: `nvn` (NVN and NVN2), `vulkan` or `opengl`.
+- An engine family holds what is true for every game of one engine, for example `agl` (Nintendo EPD's engine on sead,
+  agl and gsys) or `unity`.
 - A title module holds what is true for one game only.
+
+Every title module names its engine family (`Title::engine`) and its graphics API (`Title::graphics`), also a game on
+an engine no other game shares. The graphics family is the one of the API. So an engine or API fact always has its
+place, and nobody has to remember to make one. A family depends on no other family and on no title. A title depends on
+no family.
 
 The API is the crate `nxtitle`. The crate `nxtitles` lists the built-in families and title modules.
 
@@ -14,16 +21,19 @@ The API is the crate `nxtitle`. The crate `nxtitles` lists the built-in families
 titles/
   nxtitle/              the API: traits, hooks, evidence, the catalog
   nxtitles/             the registry, one cargo feature per module
-  families/<id>/        crate nxfamily-<id>
+  engines/<id>/         crate nxengine-<id>, an engine family
+  graphics/<id>/        crate nxgraphics-<id>, a graphics family (the id is the API's, `GraphicsApi::id`)
   games/<title id>/     crate nxgame-<short name>, with the game's profile.toml
 ```
 
 ## Who answers a question
 
-A family and a title answer questions through hooks. `None` means no opinion.
+Families and a title answer questions through hooks. `None` means no opinion.
 
-- A single answer comes from the title first, then the family, then the core default.
-- A list adds up. The family's entries come first, then the title's.
+- A single answer comes from the title first, then the engine family, then the graphics family, then the core default.
+- A list adds up the other way round: the graphics family's entries, then the engine family's, then the title's.
+- The rewrite rules of a family have the family's id as their scope. `nxb build` gives the rewriter the title's file and
+  the families' files, and the rewriter searches the families' scopes after the title's (`Options::layers`).
 
 | hook | trait | answer |
 |---|---|---|
@@ -71,21 +81,47 @@ The core can refuse an unverified answer, for example in a release build.
 
 ## Rules for a module
 
+Each fact has one place. Use this table to find it.
+
+| The fact is true for | It goes into | Example |
+|---|---|---|
+| every game | the core (`crates/`) | the NVN layer of the host, the shader split, the SDK-wide rewrite rules |
+| every game on one graphics API | the graphics family (`titles/graphics/<api>`) | Vulkan: the host supplies the SDK's loader and driver |
+| every game on one engine | the engine family (`titles/engines/<id>`) | Unreal Engine 4 and 5: the frame limit `t.MaxFPS` |
+| one version of an engine | the engine family, if the fact matches only that version, else the title module | Unity 2018: the `ThreadedStreamBuffer` rule, matched by fingerprint |
+| one game | the title module (`titles/games/<title id>`) | the build IDs, the memory layout, the byte cuts of one build |
+
 1. A title module does not work around a core bug. A fix that helps more than one game goes into the core.
-2. A fact about engine code goes into the family, even when one game showed it. Its evidence names that game.
-3. A fact about one game's content stays in the title module.
-4. A title names its family by id. It does not depend on the family crate. Without the family, the title still works with the core defaults.
-5. Only `nxtitles` depends on family and title crates. The core depends on `nxtitle` and `nxtitles`. `cargo run -p xtask -- layers` checks this.
-6. The committed part of a game's profile (design 2.11) is `profile.toml` in the title module's folder. Keys that a capability check decides are not in it. A family or title states them as needs.
+2. A fact about engine code goes into the engine family, also when only one game showed it. Its evidence names that
+   game. Do not keep it in the title module to move it later.
+3. A fact about a graphics API goes into the graphics family. A fact about the content of one game stays in the title
+   module.
+4. Every title module names its engine family (`Title::engine`) and its graphics API (`Title::graphics`). An engine
+   that only one game uses also gets a family. The tests of `nxtitles` fail when a title names a family that does not
+   exist, or when no title names a family.
+5. The core knows no game, no engine and no API of a game. Core code does not test a title id, a family id or an
+   engine name. It asks the hooks of `nxtitle`.
+6. A title names its families by id. It does not depend on a family crate. A family does not depend on another family
+   or on a title, and it does not name a title. Without a family, the title works with the next layer.
+7. Only `nxtitles` depends on family and title crates. The core depends on `nxtitle` and `nxtitles`. `cargo run -p
+   xtask -- layers` checks rules 6 and 7.
+8. The committed part of a game's profile (design 2.11) is `profile.toml` in the title module's folder. Keys that a
+   capability check decides are not in it. A family or title states them as needs.
 
 ## Adding a game
 
 1. Make `titles/games/<title id>/` with a crate `nxgame-<short name>` of layer `T`.
-2. Implement `Title`, `BuildHooks` and `RuntimeHooks`. Leave every hook without an answer at its default.
+2. Implement `Title`, `BuildHooks` and `RuntimeHooks`. `Title::engine` names the engine family, `Title::graphics` the
+   API. Leave every hook without an answer at its default.
 3. Add `profile.toml` with `title_id` and `[declared] title`. A test parses it with `nxb-profile` and expects no problems.
-4. Add the crate to `[workspace.dependencies]` and add a feature for it in `titles/nxtitles/Cargo.toml` and `catalog()`.
+4. If the engine has no family yet, make one (below).
+5. Run `python3 tools/gen_title_registry.py .`: it writes `[workspace.dependencies]`, the features of
+   `titles/nxtitles/Cargo.toml` and the lists of `catalog()` from the folders.
 
-A new family follows the same steps in `titles/families/<id>/` with `Family` in place of `Title`.
+A new family follows the same steps in `titles/engines/<id>/` (crate `nxengine-<id>`, feature `engine-<id>`) or
+`titles/graphics/<id>/` (crate `nxgraphics-<id>`, feature `graphics-<id>`) with `Family` in place of `Title` and
+`Family::layer` set. The static is `ENGINE` or `GRAPHICS`. A test of `nxtitles` checks that every title finds both of
+its families and that every family is named by a title.
 
 ## The Legend of Zelda: Ocarina of Time (`0400486024DEC000`)
 
@@ -187,30 +223,51 @@ has the same parts:
 - `rules/<title id>.toml`: the package's build row, the byte cuts (`CUTS`) and capabilities of `patches.py` for the
   builds of that row, the byte cuts of `sdk_patches.py` for an sdk build of the row, the function-matched rules of
   `patches.py` (`MATCH_CUTS`), the engine's SDK-wide rules for `sdk` (node area 62 MB, regions aligned to 2 MB; one
-  `[[rule]]` per reviewed implementation, so 12 in all) and, for a Unity 2018 game, the engine-wide rule of
-  `engine_patches.py`. Each rule names its source in `evidence`. A frame step stub (`FRAME_STEP`, `MATCH_FRAME_STEP`)
+  `[[rule]]` per reviewed implementation, so 12 in all, and 15 in the modules of the second import below). The engine-wide
+  rule of Unity 2018 from `engine_patches.py` is in the engine family `unity`, not in the title files. Each rule names its source in `evidence`. A frame step stub (`FRAME_STEP`, `MATCH_FRAME_STEP`)
   and code stubs (`STUBS`) are not byte cuts and are left out. A game whose `fps_target` needs the left-out stub gets
   `fps_target 0`, as the engine gives a build without its stub.
 - All nine services run on nxkit (unverified: no game ran on nxkit yet).
 - `shared_font_decode`: `false` on SDK 10 and older (the engine's rule), the value of `shared_font`, or `false` where the
   README says that `main` does not import `ScalableFontEngineHelper::Decode`. On SDK 11 and later without a record the
   module gives no answer, and the core default (the TTF itself) holds.
-- The family is `agl` when the engine column names sead and agl. A family holds facts that every game of an engine
-  shares.
+- Every module names its engine family and its graphics API. The engine is the one of the games table's engine column:
+  one family per engine (77 in all), also for an engine that only one game uses, and `agl` when the column names sead
+  and agl. Unity, Unreal Engine 4 and 5, PlatinumGames' engine and Unreal Engine 3 are each one family, whatever the
+  version. Unreal Engine 3 is a family of its own (`unreal3`), not `unreal`. Where the column names no engine, the family
+  is named after the developer (`basso`, `typemoon`, `nicalis`). The graphics family is `nvn` (NVN and NVN2), `vulkan`
+  or `opengl`, after the column `Graphics`.
 - The family `unreal` holds Unreal Engine 4 and 5. Its fact is the frame limit: a `LimitRule` row on the console
   variable `t.MaxFPS`, found by the rewriter by its registered name in any build (`UE_CVAR:t.MaxFPS` in the fixups of
   `main`). The object holds at `+0x10` the pointer to the value, a float for the game thread and one for the render
-  thread (`dm/host/hle_fpslock.c` and `dm/host/hle_uecvar.c` at `034e91a8`, read 2026-11-22). OCTOPATH TRAVELER names
-  the family. The other Unreal titles name none yet: each needs a run that shows its speed at the written limit.
+  thread (`dm/host/hle_fpslock.c` and `dm/host/hle_uecvar.c` at `034e91a8`, read 2026-11-22). Every Unreal Engine 4 and
+  5 title names the family. Only OCTOPATH TRAVELER was run at the written limit. For the others the limit is the
+  family's fact, unchecked on that game.
 - The family `unreal` also names the program arguments of the render size, `-ResX={w} -ResY={h}` (R71). The engine's
   Switch platform code reads them in `nninitStartup`, 1280x720 when absent.
 - Unreal Engine 4 on NVN calls `nvnDeviceSetDepthMode(NEAR_IS_ZERO)` (seen in OCTOPATH TRAVELER, 4.18). The depth
   mode is a capability, not a profile key: the host follows the call, and the build learns it from the recorded pipeline
-  list. It is a candidate fact for the family `unreal` once a second Unreal title names the family.
+  list. It is a candidate fact for the family `unreal` once a run of a second Unreal title shows it.
 - OCTOPATH TRAVELER sets `spatial_audio` in its run settings: CRIWARE ADX2 mixes its buses into a six-channel AudioOut
   in the SDK's order (L R C LFE Ls Rs, `criNcVoice_InterleavePcmFloat32toInt16`), so the game gains from 5.1 played as
   spatial audio. The setting is the default of the launch option `NXKIT_SPATIAL_AUDIO`; the player's choice wins.
 - `shader_facts.tsv` is the folder's `shader_facts_manual.tsv`, where it has one.
+
+### The second import (`131bd013`)
+
+The engine tree at `131bd013` (read 2026-11-22) has 215 game folders, 52 more than at `034e91a8`. 56 folders got a module
+now: the 51 new ones that hold a `game.tsv`, and the five that were left out before for their graphics API (Digimon
+Story Cyber Sleuth, Well Dweller, Balatro, Super Mario Galaxy and Galaxy 2 are now modules of the graphics families
+`opengl` and `vulkan`). They are made as above, with three differences:
+
+- The SDK-wide rules are those of `sdk_patches.py` at `131bd013`: 15 rules, with the older VammManager's 64 MB node area
+  and 32 MB alignment (SDK 3.5.1 and 4.4.0) and the node area of SDK 21.4.
+- An OpenGL game builds no app: `nxb build` stops with a note that nxkit has no OpenGL layer. Super Mario Galaxy, Galaxy
+  2, Minecraft and Re:ZERO are on Vulkan, and the engine added parts to its Vulkan layer for them that nxkit's does not
+  have. Each module names them.
+- The pipeline seeds of the 19 new titles that have recorded rows in `pso_manifest.tsv` were imported by `nxb-seeds
+  import --ref 131bd013 --only <title id>`. The other titles have none in the engine tree: its `pso_manifest.tsv` is
+  empty until someone records the game on the Mac.
 
 The tests of each module parse its profile and its rules with `nxb-rewrite` and count the rules. The rules of Pokémon
 Scarlet were run through the rewriter on the extracted v0: both SDK-wide rules match its sdk once. `nxb build
@@ -220,162 +277,222 @@ Notes: "frame step stub" means that `rules` leave a frame step stub out, "`fps_t
 "code stubs" that `STUBS` are left out, "`snowdrop_pools`" that the build places Snowdrop's pools with the defaults
 (the game's are 2048, 512 and 512 MB), and "NROs (unchecked)" that the game loads NRO modules through `nn::ro`.
 
-| Title ID | Game | Feature | Family | Version | Rules | Notes |
-|---|---|---|---|---|---|---|
-| `0100000000010000` | Super Mario Odyssey | `smo` | agl | 1.4.1 (v393216) | 12 | - |
-| `0100000011D90000` | Pokémon Brilliant Diamond | `pkbd` | - | 1.3.0 (v393216) | 12 | - |
-| `010005501E68C000` | Ace Attorney Investigations Collection | `aaic` | - | 1.0.0.2 (v131072) | 12 | - |
-| `010012101468C000` | Metroid Prime Remastered | `mpr` | - | 1.0.0 (v0) | 12 | - |
-| `010013C00E930000` | Hollow Knight: Silksong | `silksong` | - | 1.0.30000 (v655360) | 12 | - |
-| `010014C011146000` | Subnautica: Below Zero | `snbz` | - | 1.23.55063 (v655360) | 12 | - |
-| `0100152000022000` | Mario Kart 8 Deluxe | `mk8d` | agl | 4.0.1 (v1507328) | 12 | - |
-| `010016100A186000` | SteamWorld Heist: Ultimate Edition | `swheist` | - | 2.2.1 (v65536) | 12 | - |
-| `0100199023B2E000` | Atelier Ryza: Ever Darkness & the Secret Hideout DX | `ryza` | - | 1.2.0 (v65536) | 12 | - |
-| `010019A01E2F2000` | Metroid Prime 4: Beyond | `mp4` | - | 1.1.0 (v131072) | 12 | - |
-| `01001B300B9BE000` | Diablo III: Eternal Collection | `diablo3` | - | 2.7.7.92380 (v1441792) | 12 | - |
-| `01001F5010DFA000` | Pokémon Legends: Arceus | `pkarceus` | - | 1.1.1 (v262144) | 13 | - |
-| `010020400E1C2000` | Raging Loop | `ragingloop` | - | 1.0.0 (v0) | 13 | - |
-| `010020D01AD24000` | ANIMAL WELL | `animalwell` | - | 1.0.10 (v655360) | 12 | - |
-| `0100276009872000` | ŌKAMI HD | `okami` | - | 1.0.0 (v0) | 12 | - |
-| `010028600EBDA000` | Super Mario 3D World + Bowser's Fury | `sm3dwbf` | agl | 1.2.2 (v262144) | 12 | - |
-| `010029B0118E8000` | Need for Speed: Hot Pursuit Remastered | `nfshp` | - | 1.0.3 (v196608) | 13 | - |
-| `010029B018432000` | Ghost Trick: Phantom Detective | `ghosttrick` | - | 1.0.0 (v0) | 12 | - |
-| `01002B00111A2000` | Hyrule Warriors: Age of Calamity | `hwaoc` | - | 1.3.0 (v327680) | 12 | frame step stub, `fps_target` 0 |
-| `01002B30028F6000` | Celeste | `celeste` | - | 1.4.1.1 (v589824) | 12 | - |
-| `01002CD00A51C000` | Baba Is You | `baba` | - | 1.0.12 (v786432) | 12 | - |
-| `01002DA013484000` | The Legend of Zelda: Skyward Sword HD | `sshd` | - | 1.0.1 (v65536) | 12 | - |
-| `01002E7016C46000` | Cult of the Lamb | `cotl` | - | 1.5.28 (v1966080) | 12 | - |
-| `0100300012F2A000` | Advance Wars 1+2: Re-Boot Camp | `aw12` | - | 1.0.0 (v0) | 12 | - |
-| `0100317013770000` | Mario + Rabbids Sparks of Hope | `mrsoh` | - | 1.6.2225577 (v393216) | 13 | - |
-| `010031F019294000` | Super Monkey Ball Banana Rumble | `smbbr` | - | 2.20 (v458752) | 12 | - |
-| `010032E00E6E2000` | Return of the Obra Dinn | `obradinn` | - | 1.0.1 (v65536) | 12 | - |
-| `0100346017304000` | Taiko Risshiden V DX | `trvdx` | - | 1.1.1 (v131072) | 15 | - |
-| `010035F022078000` | DRAGON BALL: Sparking! ZERO | `dbspz` | - | 2.0.76 (v327680) | 12 | - |
-| `010036E00FB20000` | The Great Ace Attorney Chronicles | `tgaac` | - | 1.0.0 (v0) | 12 | - |
-| `010038600B27E000` | Bastion | `bastion` | - | 1.0.0 (v0) | 12 | - |
-| `010038B015560000` | FINAL FANTASY TACTICS - The Ivalice Chronicles | `fftic` | - | 1.4.0 (v393216) | 14 | - |
-| `01003E601E324000` | DRAGON QUEST III HD-2D Remake | `dq3hd` | - | 1.1.2 (v262144) | 12 | - |
-| `01003FC01670C000` | 13 Sentinels: Aegis Rim | `sentinels` | - | 1.10 (v65536) | 12 | - |
-| `010040801A4C8000` | Blasphemous 2 | `blasphemous2` | - | 1.0.8 (v524288) | 12 | - |
-| `010042000A986000` | DRAGON QUEST BUILDERS 2 | `dqb2` | - | 1.7.3d (v393216) | 12 | - |
-| `0100429011144000` | Subnautica | `subnautica` | - | 1.23.83358 (v458752) | 12 | - |
-| `010045C014650000` | 13 Sentinels: Aegis Rim, Japanese release | `sentinelsjp` | - | 1.00 (v0) | 12 | - |
-| `01004A4010FEA000` | Bayonetta 3 | `bayo3` | - | 1.2.0 (v131072) | 12 | - |
-| `01004AB00A260000` | DARK SOULS: REMASTERED | `dsr` | - | 1.0.3 (v196608) | 14 | - |
-| `01004D300C5AE000` | Kirby and the Forgotten Land | `kirbyfl` | - | 1.1.0 (v65536) | 12 | - |
-| `010051701FB46000` | Monster Train 2 | `mt2` | - | 1.1.1 (v131072) | 12 | - |
-| `01005270232F2000` | Octopath Traveler 0 | `octo0` | - | 1.0.5 (v327680) | 12 | - |
-| `010054B01AD92000` | Unicorn Overlord, Asian release | `unicornasia` | - | 1.05 (v262144) | 12 | - |
-| `010055D009F78000` | Fire Emblem: Three Houses | `fe3h` | - | 1.2.0 (v327680) | 19 | - |
-| `010056B015FE8000` | NieR:Automata The End of YoRHa Edition | `nier` | - | 1.0.3 (v131072) | 21 | - |
-| `010057D006492000` | OCTOPATH TRAVELER | `octo` | - | 1.0.5 (v327680) | 12 | - |
-| `01005CA01580E000` | Persona 5 Royal | `p5r` | - | 1.0.2 (v65536) | 12 | - |
-| `01006000040C2000` | Yoshi's Crafted World | `yoshicw` | - | 1.0.1 (v65536) | 12 | - |
-| `0100606026F12000` | FINAL FANTASY RESONANCE | `ffres` | - | 1.0.1 (v65536) | 12 | - |
-| `010061D00DB74000` | Ori and the Blind Forest: Definitive Edition | `oribf` | - | 1.0.2 (v131072) | 13 | - |
-| `0100620012D6E000` | Big Brain Academy: Brain vs. Brain | `bba` | - | 1.2.0 (v131072) | 12 | - |
-| `010062B01525C000` | Persona 4 Golden | `p4g` | - | 1.0.2 (v131072) | 12 | - |
-| `0100633007D48000` | Hollow Knight | `hollowknight` | - | 1.5.12620 (v589824) | 12 | - |
-| `010063301BD50000` | SUPER ROBOT WARS Y | `srwy` | - | 1.4.1 (v720896) | 12 | - |
-| `0100646009FBE000` | Dead Cells | `deadcells` | - | 1.25.0 (v3014656) | 12 | - |
-| `010067300059A000` | Mario + Rabbids Kingdom Battle | `mrkb` | - | 1.9.589692 (v589824) | 15 | `snowdrop_pools` |
-| `010069401ADB8000` | Unicorn Overlord | `unicorn` | - | 1.05 (v262144) | 12 | - |
-| `0100698009C6E000` | Blasphemous | `blasphemous` | - | 1.0.8 (v524288) | 12 | - |
-| `010069C01AB82000` | SHIN MEGAMI TENSEI V: Vengeance | `smt5v` | - | 1.0.3 (v196608) | 12 | - |
-| `01006A800016E000` | Super Smash Bros. Ultimate | `ssbu` | - | 13.0.5 (v2031616) | 24 | NROs (unchecked) |
-| `01006BB00C6F0000` | The Legend of Zelda: Link's Awakening | `zla` | - | 1.1.0 (v131072) | 13 | - |
-| `01006C300E9F0000` | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `dq11s` | - | 1.0.4 (v262144) | 12 | - |
-| `01006D0017F7A000` | Mario & Luigi: Brothership | `mlbs` | - | 1.0.0 (v0) | 12 | - |
-| `01006FE013472000` | Mario Party Superstars | `mps` | - | 1.1.1 (v131072) | 12 | NROs (unchecked) |
-| `0100713016CCC000` | AI: THE SOMNIUM FILES - nirvanA Initiative | `aisni` | - | 1.0.2 (v131072) | 12 | - |
-| `0100726014352000` | Diablo II: Resurrected | `d2r` | - | 1.0.34.0 (v2228224) | 15 | - |
-| `01007300020FA000` | ASTRAL CHAIN | `astral` | - | 1.0.1 (v65536) | 12 | frame step stub, `fps_target` 0 |
-| `010074F013262000` | Xenoblade Chronicles 3 | `xc3` | - | 2.2.1 (v720896) | 18 | - |
-| `010076F0049A2000` | Bayonetta | `bayo` | - | 1.1 (v65536) | 12 | - |
-| `01007820196A6000` | Red Dead Redemption | `rdr` | - | 1.0.7 (v458752) | 12 | - |
-| `01007960049A0000` | Bayonetta 2 | `bayo2` | - | 1.2 (v131072) | 12 | - |
-| `01007A3009184000` | Princess Peach: Showtime! | `peach` | - | 1.0.0 (v0) | 12 | - |
-| `01007BB017812000` | Portal | `portal` | - | 1.0.3 (v196608) | 12 | NROs (unchecked) |
-| `01007E3006DDA000` | Kirby Star Allies | `kirbysa` | - | 4.0.0a (v393216) | 12 | - |
-| `010086A022444000` | BALL x PIT | `ballxpit` | - | 1.293 (v393216) | 12 | - |
-| `010089B00D09C000` | AI: THE SOMNIUM FILES | `ais` | - | 1.0.1 (v65536) | 12 | - |
-| `010089C01E9CA000` | SteamWorld Heist II | `swheist2` | - | 1.5.1 (v262144) | 12 | - |
-| `01008BC024FDE000` | STEINS;GATE RE:BOOT | `steinsgate` | - | 1.0.3 (v131072) | 12 | - |
-| `01008C0016544000` | Sea of Stars | `seaofstars` | - | 2.0.59001 (v786432) | 12 | - |
-| `01008CF01BAAC000` | The Legend of Zelda: Echoes of Wisdom | `zeow` | - | 1.1.0 (v196608) | 12 | - |
-| `01008D7016438000` | 13 Sentinels: Aegis Rim, Asian release | `sentinelsasia` | - | 1.00 (v0) | 12 | - |
-| `01008D9022462000` | The Rogue Prince of Persia | `rpop` | - | 1.1.0 (v262144) | 12 | - |
-| `01008DB008C2C000` | Pokémon Shield | `pkshield` | - | 1.3.2 (v458752) | 12 | - |
-| `01008DD013200000` | Ori and the Will of the Wisps | `oriwotw` | - | 1.2.1 (v196608) | 13 | code stubs |
-| `01008F6008C5E000` | Pokémon Violet | `pkviolet` | - | 1.0.0 (v0) | 12 | - |
-| `01008F701C074000` | Sonic Superstars | `sonicss` | - | 1.1.8 (v327680) | 12 | - |
-| `010092B0091D0000` | Team Sonic Racing | `tsr` | - | 1.0.3 (v131072) | 12 | - |
-| `01009320084A4000` | SteamWorld Dig | `swdig` | - | 1.12.0 (v65536) | 12 | - |
-| `010093801237C000` | Metroid Dread | `dread` | - | 2.1.0 (v327680) | 12 | - |
-| `0100965017338000` | Super Mario Party Jamboree | `smpj` | - | 2.3.0 (v458752) | 12 | NROs (unchecked) |
-| `010097F018538000` | DAVE THE DIVER | `davediver` | - | v1.0.6.1267 (v3080192) | 12 | - |
-| `01009BC00C38A000` | The Binding of Isaac: Rebirth | `isaac` | - | 1.0 (v0) | 12 | - |
-| `01009BF0072D4000` | Captain Toad: Treasure Tracker | `toad` | agl | 1.4.2 (v393216) | 12 | - |
-| `01009D901BC56000` | Donkey Kong Country Returns HD | `dkcrhd` | - | 1.1.0 (v65536) | 12 | - |
-| `0100A00019DE0000` | Hades II | `hades2` | - | 0.0.126424 (v0) | 12 | frame step stub |
-| `0100A3501946E000` | OCTOPATH TRAVELER II | `octo2` | - | 1.1.1 (v131072) | 12 | - |
-| `0100A3900C3E2000` | Paper Mario: The Origami King | `pmok` | - | 1.0.1 (v65536) | 12 | - |
-| `0100A3D008C5C000` | Pokémon Scarlet | `pkscarlet` | - | 1.0.0 (v0) | 12 | - |
-| `0100A5C00D162000` | Cuphead | `cuphead` | - | 1.3.7 (v655360) | 12 | - |
-| `0100A6301214E000` | Fire Emblem Engage | `feengage` | - | 2.0.0 (v327680) | 12 | - |
-| `0100A7C01B792000` | Minecraft Dungeons II | `mcd2` | - | 1.1.3.0 (v131072) | 12 | - |
-| `0100A83022A22000` | Absolum | `absolum` | - | 1.1.2 (v458752) | 12 | - |
-| `0100A9D01C446000` | DRAGON QUEST VII Reimagined | `dq7r` | - | 1.2.0 (v131072) | 12 | - |
-| `0100ABD01785C000` | Portal 2 | `portal2` | - | 1.0.3 (v196608) | 12 | NROs (unchecked) |
-| `0100ABF008968000` | Pokémon Sword | `pksword` | - | 1.3.2 (v458752) | 12 | - |
-| `0100ACD0163D0000` | Batman: Arkham Knight | `batmanak` | - | 1.0.5 (v327680) | 20 | - |
-| `0100AE00096EA000` | Hyrule Warriors: Definitive Edition | `hwde` | - | 1.0.1 (v65536) | 12 | - |
-| `0100B04011742000` | Monster Hunter Rise | `mhrise` | - | 16.0.2 (v2228224) | 12 | - |
-| `0100B7C00933A000` | Pikmin 4 | `pikmin4` | - | 1.1.1 (v262144) | 12 | - |
-| `0100B8A026F14000` | FINAL FANTASY RESONANCE, Asian release | `ffresasia` | - | 1.0.1 (v65536) | 12 | - |
-| `0100B8E016F76000` | NieR:Automata The End of YoRHa Edition, Asian release | `nierasia` | - | 1.0.3 (v131072) | 21 | - |
-| `0100B99019412000` | Mario vs. Donkey Kong | `mvdk` | agl | 1.0.1 (v65536) | 12 | - |
-| `0100BA4026E94000` | Castlevania: Belmont's Curse | `cvbc` | - | 1.1.0 (v65536) | 12 | - |
-| `0100BC0018138000` | Super Mario RPG | `smrpg` | - | 1.0.1 (v65536) | 12 | - |
-| `0100BC300CB48000` | FINAL FANTASY X/X-2 HD Remaster | `ffx` | - | 1.0.0 (v0) | 12 | NROs (unchecked) |
-| `0100BF00112C0000` | Catherine: Full Body | `catherine` | - | 1.0.1a (v131072) | 12 | - |
-| `0100C1F0051B6000` | Donkey Kong Country: Tropical Freeze | `dkctf` | - | 1.0.2 (v131072) | 12 | - |
-| `0100C2A01A730000` | ROMANCE OF THE THREE KINGDOMS 8 REMAKE | `rotk8` | - | 1.1.3 (v851968) | 12 | - |
-| `0100C49025D3E000` | EA SPORTS FC 27 | `fc27` | - | 1.8d.310c (v393216) | 12 | NROs (unchecked) |
-| `0100CA9002322000` | SteamWorld Dig 2 | `swdig2` | - | 4.1.1 (v196608) | 12 | - |
-| `0100CC80140F8000` | TRIANGLE STRATEGY | `tristrat` | - | 1.1.1 (v262144) | 12 | - |
-| `0100CE4010AAC000` | FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition | `ffcc` | - | 1.0.3 (v196608) | 13 | - |
-| `0100D5B026844000` | Silver Pines | `silverpines` | - | 1.0.0 (v0) | 12 | - |
-| `0100D7C01F254000` | DRAGON QUEST I & II HD-2D Remake | `dq12hd` | - | 1.0.2 (v131072) | 12 | - |
-| `0100D9F01D474000` | Rhythm Heaven Groove | `rhgroove` | - | 1.0.0 (v0) | 12 | - |
-| `0100DA801624E000` | TUNIC | `tunic` | - | 1.0.3 (v196608) | 12 | - |
-| `0100DCA0064A6000` | Luigi's Mansion 3 | `lm3` | - | 1.4.0 (v327680) | 12 | - |
-| `0100E44016C22000` | Patrick's Parabox | `parabox` | - | 1.0.1 (v65536) | 12 | - |
-| `0100E65002BB8000` | Stardew Valley | `stardew` | - | 1.6.15.13 (v1310720) | 12 | - |
-| `0100E95004038000` | Xenoblade Chronicles 2 | `xc2` | - | 2.1.0 (v983040) | 12 | - |
-| `0100EC9010258000` | Streets of Rage 4 | `sor4` | - | 1.0.9 (v458752) | 12 | - |
-| `0100ECD018EBE000` | Paper Mario: The Thousand-Year Door | `pmttyd` | - | 1.0.1 (v65536) | 13 | frame step stub, `fps_target` 0 |
-| `0100ED7012DB2000` | ROMANCE OF THE THREE KINGDOMS XIV: Diplomacy and Strategy Expansion Pack | `rotk14` | - | 1.0.10 (v458752) | 12 | - |
-| `0100F2C0115B6000` | The Legend of Zelda: Tears of the Kingdom | `totk` | agl | 1.4.3 (v720896) | 12 | frame step stub, `fps_target` 0, NROs (unchecked) |
-| `0100F43008C44000` | Pokémon Legends: Z-A | `pkza` | - | 2.0.2 (v393216) | 12 | - |
-| `0100F5D01DA3A000` | Brain Memory Training Academy | `bmta` | - | 1.0.0 (v0) | 12 | - |
-| `0100FF500E34A000` | Xenoblade Chronicles: Definitive Edition | `xcde` | - | 1.1.2 (v196608) | 12 | - |
-| `0400245021D2C000` | Yoshi and the Mysterious Book | `yoshimb` | - | 1.0.2 (v131072) | 12 | - |
-| `0400380020056000` | Splatoon Raiders | `splatraiders` | agl | v65536 | 12 | - |
-| `04003F40232DE000` | Hyrule Warriors: Age of Imprisonment | `hwaoi` | - | v196608 | 12 | - |
-| `040074A01BF12000` | Donkey Kong Bananza | `dkbananza` | agl | v458752 | 12 | - |
-| `040077201BE50000` | Kirby Air Riders | `kirbyar` | - | 1.3.3 (v458752) | 12 | - |
-| `04007EF01F8AE000` | Fire Emblem Fortune's Weave | `fefw` | - | v131072 | 12 | - |
-| `04008E001F098000` | Nintendo Switch Sports Resort | `nssr` | agl | v65536 | 12 | - |
-| `0400A3A01EE4C000` | Pokémon Pokopia | `pkpokopia` | - | v655360 | 12 | - |
-| `0400C3F00006E000` | Mario Kart World | `mkw` | agl | v0 | 12 | frame step stub, `fps_target` 0 |
-| `0400C76024710000` | PRAGMATA | `pragmata` | - | v196608 | 12 | - |
-| `0400E88025B1A000` | Star Fox | `starfox` | - | v131072 | 12 | - |
+| Title ID | Game | Feature | Engine | Graphics | Version | Rules | Notes |
+|---|---|---|---|---|---|---|---|
+| `0100000000010000` | Super Mario Odyssey | `smo` | `agl` | `nvn` | 1.4.1 (v393216) | 12 | - |
+| `0100000011D90000` | Pokémon Brilliant Diamond | `pkbd` | `unity` | `nvn` | 1.3.0 (v393216) | 12 | - |
+| `010005501E68C000` | Ace Attorney Investigations Collection | `aaic` | `unity` | `nvn` | 1.0.0.2 (v131072) | 12 | - |
+| `010012101468C000` | Metroid Prime Remastered | `mpr` | `retro` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `010013C00E930000` | Hollow Knight: Silksong | `silksong` | `unity` | `nvn` | 1.0.30000 (v655360) | 12 | - |
+| `010014C011146000` | Subnautica: Below Zero | `snbz` | `unity` | `nvn` | 1.23.55063 (v655360) | 12 | - |
+| `010014E00DB56000` | Digimon Story Cyber Sleuth: Complete Edition | `digimoncs` | `mvgl` | `opengl` | 1.0.3 (v196608) | 15 | no OpenGL layer |
+| `010015100B514000` | Super Mario Bros. Wonder | `smbw` | `agl` | `nvn` | 1.2.1 (v327680) | 2 | own section above |
+| `0100152000022000` | Mario Kart 8 Deluxe | `mk8d` | `agl` | `nvn` | 4.0.1 (v1507328) | 12 | - |
+| `010016100A186000` | SteamWorld Heist: Ultimate Edition | `swheist` | `steamworld` | `nvn` | 2.2.1 (v65536) | 12 | - |
+| `0100199023B2E000` | Atelier Ryza: Ever Darkness & the Secret Hideout DX | `ryza` | `ktgl` | `nvn` | 1.2.0 (v65536) | 12 | - |
+| `010019A01E2F2000` | Metroid Prime 4: Beyond | `mp4` | `retro` | `nvn` | 1.1.0 (v131072) | 12 | - |
+| `01001B300B9BE000` | Diablo III: Eternal Collection | `diablo3` | `blizzard` | `nvn` | 2.7.7.92380 (v1441792) | 12 | - |
+| `01001C8016B4E000` | FIFA 23 Legacy Edition | `fifa23` | `ea` | `nvn` | 1.0.3 (v196608) | 15 | - |
+| `01001F5010DFA000` | Pokémon Legends: Arceus | `pkarceus` | `gamefreak` | `nvn` | 1.1.1 (v262144) | 13 | - |
+| `010020400E1C2000` | Raging Loop | `ragingloop` | `unity` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `010020D01AD24000` | ANIMAL WELL | `animalwell` | `basso` | `nvn` | 1.0.10 (v655360) | 12 | - |
+| `0100217023F6C000` | Well Dweller | `welldweller` | `gamemaker` | `opengl` | 1.0.0 (v0) | 15 | no OpenGL layer |
+| `010026300BA4A000` | Slay the Spire | `slaythespire` | `monogame` | `opengl` | 1.0 (v0) | 15 | no OpenGL layer |
+| `010027400CDC6000` | Divinity: Original Sin 2 - Definitive Edition | `dos2` | `larian` | `nvn` | 1.0.12 (v786432) | 15 | - |
+| `0100276009872000` | ŌKAMI HD | `okami` | `clover` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `010028600EBDA000` | Super Mario 3D World + Bowser's Fury | `sm3dwbf` | `agl` | `nvn` | 1.2.2 (v262144) | 12 | - |
+| `010029B0118E8000` | Need for Speed: Hot Pursuit Remastered | `nfshp` | `criterion` | `nvn` | 1.0.3 (v196608) | 13 | - |
+| `010029B018432000` | Ghost Trick: Phantom Detective | `ghosttrick` | `re-engine` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `010029D00E740000` | DOOM 3 | `doom3` | `idtech4` | `opengl` | 1.0.5 (v327680) | 15 | no OpenGL layer |
+| `01002B00111A2000` | Hyrule Warriors: Age of Calamity | `hwaoc` | `ktgl` | `nvn` | 1.3.0 (v327680) | 12 | frame step stub, `fps_target` 0 |
+| `01002B30028F6000` | Celeste | `celeste` | `monogame` | `nvn` | 1.4.1.1 (v589824) | 12 | - |
+| `01002CD00A51C000` | Baba Is You | `baba` | `fusion` | `nvn` | 1.0.12 (v786432) | 12 | - |
+| `01002D4007AE0000` | Mega Man Legacy Collection | `mmlc` | `digital-eclipse` | `opengl` | 1.0.3 (v196608) | 15 | no OpenGL layer |
+| `01002DA013484000` | The Legend of Zelda: Skyward Sword HD | `sshd` | `nintendo-wii` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `01002E7016C46000` | Cult of the Lamb | `cotl` | `unity` | `nvn` | 1.5.28 (v1966080) | 12 | - |
+| `0100300012F2A000` | Advance Wars 1+2: Re-Boot Camp | `aw12` | `unity` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `0100317013770000` | Mario + Rabbids Sparks of Hope | `mrsoh` | `snowdrop` | `nvn` | 1.6.2225577 (v393216) | 13 | - |
+| `010031F019294000` | Super Monkey Ball Banana Rumble | `smbbr` | `unity` | `nvn` | 2.20 (v458752) | 12 | - |
+| `010032E00E6E2000` | Return of the Obra Dinn | `obradinn` | `unity` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `0100346017304000` | Taiko Risshiden V DX | `trvdx` | `ktgl` | `nvn` | 1.1.1 (v131072) | 15 | - |
+| `010035F022078000` | DRAGON BALL: Sparking! ZERO | `dbspz` | `unreal` | `nvn` | 2.0.76 (v327680) | 12 | - |
+| `010036E00FB20000` | The Great Ace Attorney Chronicles | `tgaac` | `mt-framework` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `010038600B27E000` | Bastion | `bastion` | `monogame` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `010038B015560000` | FINAL FANTASY TACTICS - The Ivalice Chronicles | `fftic` | `square-enix` | `nvn` | 1.4.0 (v393216) | 14 | - |
+| `01003E601E324000` | DRAGON QUEST III HD-2D Remake | `dq3hd` | `unreal` | `nvn` | 1.1.2 (v262144) | 12 | - |
+| `01003FC01670C000` | 13 Sentinels: Aegis Rim | `sentinels` | `vanillaware` | `nvn` | 1.10 (v65536) | 12 | - |
+| `010040801A4C8000` | Blasphemous 2 | `blasphemous2` | `unity` | `nvn` | 1.0.8 (v524288) | 12 | - |
+| `010042000A986000` | DRAGON QUEST BUILDERS 2 | `dqb2` | `ktgl` | `nvn` | 1.7.3d (v393216) | 12 | - |
+| `01004200189F4000` | Factorio | `factorio` | `wube` | `opengl` | 2.0.76 (v2031616) | 15 | no OpenGL layer |
+| `0100429011144000` | Subnautica | `subnautica` | `unity` | `nvn` | 1.23.83358 (v458752) | 12 | - |
+| `010042D00D900000` | LEGO Star Wars: The Skywalker Saga | `legosw` | `traveller` | `nvn` | 1.10.0 (v589824) | 15 | - |
+| `010044500C182000` | Sid Meier's Civilization VI | `civ6` | `firaxis` | `nvn` | 1.2.19 (v1638400) | 15 | - |
+| `0100453019AA8000` | Xenoblade Chronicles X: Definitive Edition | `xcx` | `monolith` | `nvn` | 1.0.1 (v65536) | 22 | code stubs |
+| `010045C014650000` | 13 Sentinels: Aegis Rim, Japanese release | `sentinelsjp` | `vanillaware` | `nvn` | 1.00 (v0) | 12 | - |
+| `01004680124E6000` | Bloodstained: Curse of the Moon 2 | `bscotm2` | `inti` | `nvn` | 1.3.2 (v327680) | 15 | - |
+| `01004A4010FEA000` | Bayonetta 3 | `bayo3` | `platinum` | `nvn` | 1.2.0 (v131072) | 12 | - |
+| `01004AB00A260000` | DARK SOULS: REMASTERED | `dsr` | `fromsoftware` | `nvn` | 1.0.3 (v196608) | 14 | - |
+| `01004B800AF5A000` | Bloodstained: Curse of the Moon | `bscotm` | `inti` | `nvn` | 1.1.1 (v131072) | 15 | - |
+| `01004D300C5AE000` | Kirby and the Forgotten Land | `kirbyfl` | `hal` | `nvn` | 1.1.0 (v65536) | 12 | - |
+| `010050F00BC1A000` | Resident Evil | `re1` | `mt-framework` | `nvn` | 1.0.0 (v0) | 15 | - |
+| `010051701FB46000` | Monster Train 2 | `mt2` | `unity` | `nvn` | 1.1.1 (v131072) | 12 | - |
+| `010051C0134F8000` | DRAGON BALL Z: KAKAROT + A NEW POWER AWAKENS SET | `dbzk` | `unreal` | `nvn` | 1.70 (v1048576) | 15 | - |
+| `01005270232F2000` | Octopath Traveler 0 | `octo0` | `unreal` | `nvn` | 1.0.5 (v327680) | 12 | - |
+| `0100535012974000` | Hades | `hades` | `supergiant` | `vulkan` | 1.0.38233 (v589824) | 12 | own section above |
+| `010054B01AD92000` | Unicorn Overlord, Asian release | `unicornasia` | `vanillaware` | `nvn` | 1.05 (v262144) | 12 | - |
+| `010055D009F78000` | Fire Emblem: Three Houses | `fe3h` | `ktgl` | `nvn` | 1.2.0 (v327680) | 19 | - |
+| `010056B015FE8000` | NieR:Automata The End of YoRHa Edition | `nier` | `platinum` | `nvn` | 1.0.3 (v131072) | 21 | - |
+| `010057A01E4D4000` | TSUKIHIME A piece of blue glass moon | `tsukihime` | `typemoon` | `nvn` | 1.0.2 (v131072) | 15 | - |
+| `010057D006492000` | OCTOPATH TRAVELER | `octo` | `unreal` | `nvn` | 1.0.5 (v327680) | 12 | - |
+| `01005CA01580E000` | Persona 5 Royal | `p5r` | `gfd` | `nvn` | 1.0.2 (v65536) | 12 | - |
+| `01005FF002E2A000` | Rayman Legends: Definitive Edition | `raymanl` | `ubiart` | `nvn` | 1.2 (v131072) | 15 | - |
+| `01006000040C2000` | Yoshi's Crafted World | `yoshicw` | `unreal` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `0100606026F12000` | FINAL FANTASY RESONANCE | `ffres` | `unreal` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `010061D00DB74000` | Ori and the Blind Forest: Definitive Edition | `oribf` | `unity` | `nvn` | 1.0.2 (v131072) | 12 | - |
+| `0100620012D6E000` | Big Brain Academy: Brain vs. Brain | `bba` | `bezel` | `nvn` | 1.2.0 (v131072) | 12 | - |
+| `010062B01525C000` | Persona 4 Golden | `p4g` | `atlus` | `nvn` | 1.0.2 (v131072) | 12 | - |
+| `0100633007D48000` | Hollow Knight | `hollowknight` | `unity` | `nvn` | 1.5.12620 (v589824) | 12 | - |
+| `010063301BD50000` | SUPER ROBOT WARS Y | `srwy` | `unity` | `nvn` | 1.4.1 (v720896) | 12 | - |
+| `0100646009FBE000` | Dead Cells | `deadcells` | `heaps` | `nvn` | 1.25.0 (v3014656) | 12 | - |
+| `010064800F66A000` | Borderlands: Game of the Year Edition | `borderlands` | `unreal3` | `nvn` | 1.0.2 (v131072) | 15 | - |
+| `010067300059A000` | Mario + Rabbids Kingdom Battle | `mrkb` | `snowdrop` | `nvn` | 1.9.589692 (v589824) | 15 | `snowdrop_pools` |
+| `010069401ADB8000` | Unicorn Overlord | `unicorn` | `vanillaware` | `nvn` | 1.05 (v262144) | 12 | - |
+| `0100698009C6E000` | Blasphemous | `blasphemous` | `unity` | `nvn` | 1.0.8 (v524288) | 12 | - |
+| `010069C01AB82000` | SHIN MEGAMI TENSEI V: Vengeance | `smt5v` | `unreal` | `nvn` | 1.0.3 (v196608) | 12 | - |
+| `01006A800016E000` | Super Smash Bros. Ultimate | `ssbu` | `sora` | `nvn` | 13.0.5 (v2031616) | 24 | NROs (unchecked) |
+| `01006BB00C6F0000` | The Legend of Zelda: Link's Awakening | `zla` | `grezzo` | `nvn` | 1.1.0 (v131072) | 13 | - |
+| `01006C300E9F0000` | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `dq11s` | `unreal` | `nvn` | 1.0.4 (v262144) | 12 | - |
+| `01006D0017F7A000` | Mario & Luigi: Brothership | `mlbs` | `unreal` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `01006F8002326000` | Animal Crossing: New Horizons | `acnh` | `agl` | `nvn` | 3.0.3 (v2228224) | 12 | own section above |
+| `01006FE013472000` | Mario Party Superstars | `mps` | `bezel` | `nvn` | 1.1.1 (v131072) | 12 | NROs (unchecked) |
+| `010070E022546000` | Fate/hollow ataraxia REMASTERED | `fateha` | `fuzz` | `opengl` | 1.0.2 b723 (v131072) | 15 | no OpenGL layer |
+| `0100713016CCC000` | AI: THE SOMNIUM FILES - nirvanA Initiative | `aisni` | `unity` | `nvn` | 1.0.2 (v131072) | 12 | - |
+| `0100726014352000` | Diablo II: Resurrected | `d2r` | `blizzard-d2r` | `nvn` | 1.0.34.0 (v2228224) | 15 | - |
+| `01007300020FA000` | ASTRAL CHAIN | `astral` | `platinum` | `nvn` | 1.0.1 (v65536) | 12 | frame step stub, `fps_target` 0 |
+| `010074F013262000` | Xenoblade Chronicles 3 | `xc3` | `monolith` | `nvn` | 2.2.1 (v720896) | 18 | - |
+| `010076F0049A2000` | Bayonetta | `bayo` | `platinum` | `nvn` | 1.1 (v65536) | 12 | - |
+| `0100777022394000` | Cozy Land | `cozyland` | `unity` | `nvn` | 1.0.0 (v0) | 15 | - |
+| `01007820196A6000` | Red Dead Redemption | `rdr` | `rage` | `nvn` | 1.0.7 (v458752) | 12 | - |
+| `01007960049A0000` | Bayonetta 2 | `bayo2` | `platinum` | `nvn` | 1.2 (v131072) | 12 | - |
+| `01007A2027548000` | Trails in the Sky 2nd Chapter | `trailssky2` | `falcom` | `nvn` | 1.0.4 (v393216) | 15 | - |
+| `01007A3009184000` | Princess Peach: Showtime! | `peach` | `unreal` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `01007BB017812000` | Portal | `portal` | `source` | `nvn` | 1.0.3 (v196608) | 12 | NROs (unchecked) |
+| `01007E3006DDA000` | Kirby Star Allies | `kirbysa` | `hal` | `nvn` | 4.0.0a (v393216) | 12 | - |
+| `01007EF00011E000` | The Legend of Zelda: Breath of the Wild | `botw` | `agl` | `nvn` | 1.9.0 (v1114112) | 8 | own section above |
+| `0100801011C3E000` | Persona 5 Strikers | `p5s` | `ktgl` | `nvn` | 1.0.0 (v0) | 16 | - |
+| `0100830004FB6000` | L.A. Noire | `lanoire` | `team-bondi` | `nvn` | 1.2 (v131072) | 15 | - |
+| `010086A022444000` | BALL x PIT | `ballxpit` | `unity` | `nvn` | 1.293 (v393216) | 12 | - |
+| `010087701B092000` | Persona 5 Tactica | `p5t` | `unity` | `nvn` | 1.1.0 (v262144) | 15 | - |
+| `010089B00D09C000` | AI: THE SOMNIUM FILES | `ais` | `unity` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `010089C01E9CA000` | SteamWorld Heist II | `swheist2` | `steamworld` | `nvn` | 1.5.1 (v262144) | 12 | - |
+| `01008B900DC0A000` | FINAL FANTASY VIII Remastered | `ff8` | `baseengine` | `opengl` | 1.0.1_5 (v196608) | 15 | no OpenGL layer |
+| `01008BC024FDE000` | STEINS;GATE RE:BOOT | `steinsgate` | `m2` | `nvn` | 1.0.3 (v131072) | 12 | - |
+| `01008C0016544000` | Sea of Stars | `seaofstars` | `unity` | `nvn` | 2.0.59001 (v786432) | 12 | - |
+| `01008CF01BAAC000` | The Legend of Zelda: Echoes of Wisdom | `zeow` | `grezzo` | `nvn` | 1.1.0 (v196608) | 12 | - |
+| `01008D300C50C000` | Super Nintendo Entertainment System – Nintendo Classics | `snesnc` | `snes-online` | `nvn` | 6.0.0 (v1966080) | 15 | - |
+| `01008D7016438000` | 13 Sentinels: Aegis Rim, Asian release | `sentinelsasia` | `vanillaware` | `nvn` | 1.00 (v0) | 12 | - |
+| `01008D9022462000` | The Rogue Prince of Persia | `rpop` | `unity` | `nvn` | 1.1.0 (v262144) | 12 | - |
+| `01008DB008C2C000` | Pokémon Shield | `pkshield` | `trinity` | `nvn` | 1.3.2 (v458752) | 12 | - |
+| `01008DD013200000` | Ori and the Will of the Wisps | `oriwotw` | `unity` | `nvn` | 1.2.1 (v196608) | 12 | code stubs |
+| `01008F2005154000` | South Park: The Fractured But Whole | `spfbw` | `snowdrop` | `nvn` | 1.05 (v327680) | 16 | - |
+| `01008F4014A74000` | UnMetal | `unmetal` | `arcadix` | `opengl` | 1.2.0 (v262144) | 15 | no OpenGL layer |
+| `01008F6008C5E000` | Pokémon Violet | `pkviolet` | `trinity` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `01008F701C074000` | Sonic Superstars | `sonicss` | `unity` | `nvn` | 1.1.8 (v327680) | 12 | - |
+| `010092B0091D0000` | Team Sonic Racing | `tsr` | `sumo` | `nvn` | 1.0.3 (v131072) | 12 | - |
+| `01009320084A4000` | SteamWorld Dig | `swdig` | `steamworld` | `nvn` | 1.12.0 (v65536) | 12 | - |
+| `010093801237C000` | Metroid Dread | `dread` | `mercurysteam` | `nvn` | 2.1.0 (v327680) | 12 | - |
+| `010095300B6A4000` | South Park: The Stick of Truth | `spsot` | `onyx` | `nvn` | 1.01 (v65536) | 16 | - |
+| `0100965017338000` | Super Mario Party Jamboree | `smpj` | `bezel` | `nvn` | 2.3.0 (v458752) | 12 | NROs (unchecked) |
+| `010097F018538000` | DAVE THE DIVER | `davediver` | `unity` | `nvn` | v1.0.6.1267 (v3080192) | 12 | - |
+| `010099C022B96000` | Super Mario Galaxy | `smg` | `hagi` | `vulkan` | 1.3.1 (v327680) | 15 | Vulkan layer parts missing |
+| `01009BC00C38A000` | The Binding of Isaac: Rebirth | `isaac` | `nicalis` | `nvn` | 1.0 (v0) | 12 | - |
+| `01009BF0072D4000` | Captain Toad: Treasure Tracker | `toad` | `agl` | `nvn` | 1.4.2 (v393216) | 12 | - |
+| `01009D901BC56000` | Donkey Kong Country Returns HD | `dkcrhd` | `unity` | `nvn` | 1.1.0 (v65536) | 12 | - |
+| `0100A00019DE0000` | Hades II | `hades2` | `supergiant` | `nvn` | 0.0.126424 (v0) | 12 | frame step stub |
+| `0100A0800E9C4000` | The Witcher 3: Wild Hunt — Complete Edition | `witcher3` | `redengine` | `nvn` | 4.04b (v458752) | 15 | - |
+| `0100A3501946E000` | OCTOPATH TRAVELER II | `octo2` | `unreal` | `nvn` | 1.1.1 (v131072) | 12 | - |
+| `0100A3900C3E2000` | Paper Mario: The Origami King | `pmok` | `intsys` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `0100A3D008C5C000` | Pokémon Scarlet | `pkscarlet` | `trinity` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `0100A5C00D162000` | Cuphead | `cuphead` | `unity` | `nvn` | 1.3.7 (v655360) | 12 | - |
+| `0100A6301214E000` | Fire Emblem Engage | `feengage` | `unity` | `nvn` | 2.0.0 (v327680) | 12 | - |
+| `0100A7C01B792000` | Minecraft Dungeons II | `mcd2` | `unreal` | `nvn` | 1.1.3.0 (v131072) | 12 | - |
+| `0100A83022A22000` | Absolum | `absolum` | `fna` | `nvn` | 1.1.2 (v458752) | 12 | - |
+| `0100A8E016236000` | Kirby's Dream Buffet | `kirbydb` | `hal` | `nvn` | 1.0.0 (v0) | 15 | code stubs |
+| `0100A9D01C446000` | DRAGON QUEST VII Reimagined | `dq7r` | `unreal` | `nvn` | 1.2.0 (v131072) | 12 | - |
+| `0100AA001415E000` | FINAL FANTASY VI | `ff6` | `unity` | `nvn` | 1.2.1_5 (v458752) | 15 | - |
+| `0100AA201415C000` | FINAL FANTASY V | `ff5` | `unity` | `nvn` | 1.2.0_5 (v393216) | 15 | - |
+| `0100ABD01785C000` | Portal 2 | `portal2` | `source` | `nvn` | 1.0.3 (v196608) | 12 | NROs (unchecked) |
+| `0100ABF008968000` | Pokémon Sword | `pksword` | `trinity` | `nvn` | 1.3.2 (v458752) | 12 | - |
+| `0100ACD0163D0000` | Batman: Arkham Knight | `batmanak` | `unreal3` | `nvn` | 1.0.5 (v327680) | 20 | - |
+| `0100AE00096EA000` | Hyrule Warriors: Definitive Edition | `hwde` | `ktgl` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `0100B04011742000` | Monster Hunter Rise | `mhrise` | `re-engine` | `nvn` | 16.0.2 (v2228224) | 12 | - |
+| `0100B7C00933A000` | Pikmin 4 | `pikmin4` | `unreal` | `nvn` | 1.1.1 (v262144) | 12 | - |
+| `0100B8A026F14000` | FINAL FANTASY RESONANCE, Asian release | `ffresasia` | `unreal` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `0100B8E016F76000` | NieR:Automata The End of YoRHa Edition, Asian release | `nierasia` | `platinum` | `nvn` | 1.0.3 (v131072) | 21 | - |
+| `0100B99019412000` | Mario vs. Donkey Kong | `mvdk` | `agl` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `0100BA4026E94000` | Castlevania: Belmont's Curse | `cvbc` | `unity` | `nvn` | 1.1.0 (v65536) | 12 | - |
+| `0100BC0018138000` | Super Mario RPG | `smrpg` | `unity` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `0100BC300CB48000` | FINAL FANTASY X/X-2 HD Remaster | `ffx` | `phyre` | `nvn` | 1.0.0 (v0) | 12 | NROs (unchecked) |
+| `0100BF00112C0000` | Catherine: Full Body | `catherine` | `gfd` | `nvn` | 1.0.1a (v131072) | 12 | - |
+| `0100BF500207C000` | Bloodstained: Ritual of the Night | `bsrotn` | `unreal` | `nvn` | 1.60 (v851968) | 15 | - |
+| `0100C1F0051B6000` | Donkey Kong Country: Tropical Freeze | `dkctf` | `retro` | `nvn` | 1.0.2 (v131072) | 12 | - |
+| `0100C2A01A730000` | ROMANCE OF THE THREE KINGDOMS 8 REMAKE | `rotk8` | `ktgl` | `nvn` | 1.1.3 (v851968) | 12 | - |
+| `0100C3601518C000` | Sid Meier's Civilization VII | `civ7` | `firaxis` | `nvn` | 1.5.0.1 (v1638400) | 15 | - |
+| `0100C49025D3E000` | EA SPORTS FC 27 | `fc27` | `frostbite` | `nvn` | 1.8d.310c (v393216) | 12 | NROs (unchecked) |
+| `0100C510166F0000` | Chained Echoes | `chainedechoes` | `unity` | `nvn` | 1.1.1 (v131072) | 15 | - |
+| `0100C9C00E25C000` | Mario Golf: Super Rush | `mgsr` | `camelot` | `nvn` | 4.0.0 (v262144) | 15 | - |
+| `0100CA9002322000` | SteamWorld Dig 2 | `swdig2` | `steamworld` | `nvn` | 4.1.1 (v196608) | 12 | - |
+| `0100CAA026246000` | Warhammer Survivors | `whsurvivors` | `unity` | `nvn` | 1.0.0 (v0) | 15 | - |
+| `0100CC80140F8000` | TRIANGLE STRATEGY | `tristrat` | `unreal` | `nvn` | 1.1.1 (v262144) | 12 | - |
+| `0100CD701434C000` | Twelve Minutes | `twelvemin` | `unity` | `nvn` | 1.0.1 (v0) | 15 | - |
+| `0100CD801CE5E000` | Balatro | `balatro` | `love` | `opengl` | 1.1.3 (v851968) | 15 | no OpenGL layer |
+| `0100CE4010AAC000` | FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition | `ffcc` | `unity` | `nvn` | 1.0.3 (v196608) | 12 | - |
+| `0100D440269E8000` | Farming Simulator 26: Nintendo Switch Edition | `fs26` | `giants` | `nvn` | 1.0.1.0 (v65536) | 15 | - |
+| `0100D4900E82C000` | Metro 2033 Redux | `metro2033` | `4a` | `nvn` | 1.0.0 (v0) | 15 | - |
+| `0100D5501857E000` | Sam & Max: The Devil's Playhouse | `sammax3` | `telltale` | `nvn` | 1.8.0 (v524288) | 15 | - |
+| `0100D5B026844000` | Silver Pines | `silverpines` | `unity` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `0100D71004694000` | Minecraft for Nintendo Switch | `minecraft` | `renderdragon` | `vulkan` | 1.26.62 (v10747904) | 15 | Vulkan layer parts missing |
+| `0100D7C01F254000` | DRAGON QUEST I & II HD-2D Remake | `dq12hd` | `unreal` | `nvn` | 1.0.2 (v131072) | 12 | - |
+| `0100D800117F4000` | Re:ZERO -Starting Life in Another World- The Prophecy of the Throne | `rezero` | `the-forge` | `vulkan` | 1.0.2 (v131072) | 15 | Vulkan layer parts missing |
+| `0100D9F01D474000` | Rhythm Heaven Groove | `rhgroove` | `nintendo-2d` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `0100DA801624E000` | TUNIC | `tunic` | `unity` | `nvn` | 1.0.3 (v196608) | 12 | - |
+| `0100DBF01000A000` | Burnout Paradise Remastered | `burnout` | `criterion` | `nvn` | 1.0.0 (v0) | 15 | - |
+| `0100DCA0064A6000` | Luigi's Mansion 3 | `lm3` | `next-level` | `nvn` | 1.4.0 (v327680) | 12 | - |
+| `0100E44016C22000` | Patrick's Parabox | `parabox` | `unity` | `nvn` | 1.0.1 (v65536) | 12 | - |
+| `0100E65002BB8000` | Stardew Valley | `stardew` | `monogame` | `nvn` | 1.6.15.13 (v1310720) | 12 | - |
+| `0100E95004038000` | Xenoblade Chronicles 2 | `xc2` | `monolith` | `nvn` | 2.1.0 (v983040) | 12 | - |
+| `0100EB100AB42000` | FINAL FANTASY XII THE ZODIAC AGE | `ff12` | `phyre` | `nvn` | 1.1.0 (v65536) | 15 | - |
+| `0100EC9010258000` | Streets of Rage 4 | `sor4` | `monogame` | `nvn` | 1.0.9 (v458752) | 12 | - |
+| `0100ECD018EBE000` | Paper Mario: The Thousand-Year Door | `pmttyd` | `intsys` | `nvn` | 1.0.1 (v65536) | 13 | frame step stub, `fps_target` 0 |
+| `0100ED7012DB2000` | ROMANCE OF THE THREE KINGDOMS XIV: Diplomacy and Strategy Expansion Pack | `rotk14` | `ktgl` | `nvn` | 1.0.10 (v458752) | 12 | - |
+| `0100F28011892000` | Overcooked! All You Can Eat | `overcooked` | `unity` | `nvn` | 1.0.12 (v786432) | 15 | - |
+| `0100F2C0115B6000` | The Legend of Zelda: Tears of the Kingdom | `totk` | `agl` | `nvn` | 1.4.3 (v720896) | 12 | frame step stub, `fps_target` 0, NROs (unchecked) |
+| `0100F43008C44000` | Pokémon Legends: Z-A | `pkza` | `trinity` | `nvn` | 2.0.2 (v393216) | 12 | - |
+| `0100F5D01DA3A000` | Brain Memory Training Academy | `bmta` | `unity` | `nvn` | 1.0.0 (v0) | 12 | - |
+| `0100FD8022DAA000` | Super Mario Galaxy 2 | `smg2` | `hagi` | `vulkan` | 1.4.0 (v393216) | 15 | Vulkan layer parts missing |
+| `0100FF500E34A000` | Xenoblade Chronicles: Definitive Edition | `xcde` | `monolith` | `nvn` | 1.1.2 (v196608) | 12 | - |
+| `040015100B514001` | Super Mario Bros. Wonder – Nintendo Switch 2 Edition + Meetup in Bellabel Park | `smbw2` | `agl` | `nvn` | 1.2.1 (v0) | 15 | - |
+| `0400245021D2C000` | Yoshi and the Mysterious Book | `yoshimb` | `unreal` | `nvn` | 1.0.2 (v131072) | 12 | - |
+| `040032B023CA4000` | Orbitals | `orbitals` | `unreal` | `nvn` | 1.1.2.0 (v327680) | 15 | - |
+| `0400380020056000` | Splatoon Raiders | `splatraiders` | `agl` | `nvn` | v65536 | 12 | - |
+| `04003F40232DE000` | Hyrule Warriors: Age of Imprisonment | `hwaoi` | `ktgl` | `nvn` | v196608 | 12 | - |
+| `040041E0212AE000` | Fast Fusion | `fastfusion` | `shinen` | `nvn` | v262144 | 15 | - |
+| `0400486024DEC000` | The Legend of Zelda: Ocarina of Time | `oot` | `agl` | `nvn` | v131072 | 1 | own section above |
+| `0400569027BF4000` | Resident Evil 4 | `re4` | `re-engine` | `nvn` | v131072 | 15 | - |
+| `040057C02159A000` | Nintendo Switch 2 Welcome Tour | `welcometour` | `bezel` | `nvn` | ? (v262144) | 15 | - |
+| `040074A01BF12000` | Donkey Kong Bananza | `dkbananza` | `agl` | `nvn` | v458752 | 12 | - |
+| `040077201BE50000` | Kirby Air Riders | `kirbyar` | `phx` | `nvn` | 1.3.3 (v458752) | 12 | - |
+| `04007EF01F8AE000` | Fire Emblem Fortune's Weave | `fefw` | `intsys` | `nvn` | v131072 | 12 | - |
+| `04008E001F098000` | Nintendo Switch Sports Resort | `nssr` | `agl` | `nvn` | v65536 | 12 | - |
+| `0400921025B32000` | Sonic Frontiers Definitive Edition | `sonicfd` | `hedgehog` | `nvn` | 1.0.0 (v65536) | 15 | - |
+| `0400A3A01EE4C000` | Pokémon Pokopia | `pkpokopia` | `ktgl` | `nvn` | v655360 | 12 | - |
+| `0400C3F00006E000` | Mario Kart World | `mkw` | `agl` | `nvn` | v0 | 12 | frame step stub, `fps_target` 0 |
+| `0400C76024710000` | PRAGMATA | `pragmata` | `re-engine` | `nvn` | v196608 | 12 | - |
+| `0400D4201C6EA000` | Mario Tennis Fever | `mtf` | `camelot` | `nvn` | v327680 | 12 | own section above |
+| `0400E88025B1A000` | Star Fox | `starfox` | `vrender` | `nvn` | v131072 | 12 | - |
 
 The folders without a module:
 
-- `010014E00DB56000` Digimon Story Cyber Sleuth: Complete Edition: OpenGL game (MVGL): nxkit has no OpenGL layer.
-- `0100217023F6C000` Well Dweller: OpenGL game (GameMaker runner): nxkit has no OpenGL layer.
 - `010049900F546000` Super Mario 3D All-Stars: an application of several programs (a launcher, Super Mario 64, Super
   Mario Sunshine; Galaxy is 32-bit ARM): nxb build makes one program, and Super Mario 64 runs its code through nn::jit,
   which nxkit stops.
@@ -383,8 +500,4 @@ The folders without a module:
   game of its own; it runs its code through nn::jit, which nxkit stops.
 - `010049900F546002` Super Mario 3D All-Stars: Super Mario Sunshine: a program of Super Mario 3D All-Stars (program_of),
   not a game of its own.
-- `010099C022B96000` Super Mario Galaxy: Vulkan game (recompiled PowerPC Wii layer): the Vulkan layer of nxkit does not have what the engine added for it (triangle fans, the
-  geometry viewport stage, the stride repair of `fix_strides`, wide points and lines).
-- `0100CD801CE5E000` Balatro: OpenGL game (LOVE): nxkit has no OpenGL layer.
-- `0100FD8022DAA000` Super Mario Galaxy 2: Vulkan game (recompiled PowerPC Wii layer): the Vulkan layer of nxkit does not have what the engine added for it (triangle fans, the
-  geometry viewport stage, the stride repair of `fix_strides`, wide points and lines).
+- `010037C022390000` Hitman: Absolution: the folder holds only `feral_defaults.tsv` for the packer, no `game.tsv`.

@@ -20,8 +20,8 @@
 //! `pso_manifest.tsv` in the engine tree `dm/games/0400486024DEC000/`.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Need, PaceProfile, Pacing, PresentInterval, Runtime,
-    RuntimeHooks, Service, Settings, Standalone, Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Need, PaceProfile, Pacing, PresentInterval,
+    Runtime, RuntimeHooks, Service, Settings, Standalone, Title, TitleId,
 };
 
 /// The fixed resolution scale (a resource patch at build time).
@@ -248,6 +248,15 @@ impl RuntimeHooks for Oot {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Oot {
     fn id(&self) -> TitleId {
         TitleId(0x0400_4860_24DE_C000)
@@ -257,8 +266,12 @@ impl Title for Oot {
         "The Legend of Zelda: Ocarina of Time"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        Some("agl")
+    fn engine(&self) -> &'static str {
+        "agl"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

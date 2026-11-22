@@ -60,7 +60,13 @@ const V_EXEMPT: &[(&str, &str)] = &[("nxb-model", "nxb-sys")];
 const FRONT_ENTRIES: &[&str] = &["air-front", "airc"];
 
 /// The folders that hold crates, one crate per subfolder.
-const CRATE_DIRS: &[&str] = &["crates", "titles", "titles/families", "titles/games"];
+const CRATE_DIRS: &[&str] = &[
+    "crates",
+    "titles",
+    "titles/engines",
+    "titles/graphics",
+    "titles/games",
+];
 
 /// The title API, the one crate a `T` crate may use besides `L0`.
 const TITLE_API: &str = "nxtitle";
@@ -448,17 +454,17 @@ mod tests {
                 "nxtitles",
                 "L1",
                 false,
-                &["nxtitle", "nxfamily-a", "nxgame-b"],
+                &["nxtitle", "nxengine-a", "nxgame-b"],
             ),
-            k("nxfamily-a", "T", false, &["nxtitle"]),
+            k("nxengine-a", "T", false, &["nxtitle"]),
             k("nxgame-b", "T", false, &["nxtitle", "nxb-model"]),
         ];
         assert!(check_layers(&titles).is_empty());
         let bad_titles = [
             k("nxtitle", "L1", false, &[]),
             k("nxb-store", "L2", false, &[]),
-            k("nxfamily-a", "T", false, &["nxtitle"]),
-            k("nxgame-b", "T", false, &["nxfamily-a", "nxb-store"]),
+            k("nxengine-a", "T", false, &["nxtitle"]),
+            k("nxgame-b", "T", false, &["nxengine-a", "nxb-store"]),
             k("nxb-build", "L3", false, &["nxgame-b"]),
         ];
         assert_eq!(check_layers(&bad_titles).len(), 3);

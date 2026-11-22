@@ -1,8 +1,8 @@
 //! The title module of DRAGON BALL: Sparking! ZERO for Nintendo Switch (`010035F022078000`).
 //!
 //! The game is update 2.0.76 (v327680) on SDK 14.3.0, graphics NVN. The engine tree names its engine: Unreal Engine
-//! 5.1.1, CRIWARE. No engine family of nxkit holds it. The modules are `main`, `subsdk0` and `sdk`. This module holds
-//! what the engine tree knows of the game.
+//! 5.1.1, CRIWARE. The engine family is `unreal` (Unreal Engine 4 and 5). The modules are `main`, `subsdk0` and `sdk`.
+//! This module holds what the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v327680, the
 //! shader split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is
@@ -17,8 +17,8 @@
 //! when `main` imports `ScalableFontEngineHelper::Decode`, and nobody checked the imports of this game.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -101,6 +101,15 @@ impl RuntimeHooks for Dbspz {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Dbspz {
     fn id(&self) -> TitleId {
         TitleId(0x0100_35F0_2207_8000)
@@ -110,8 +119,12 @@ impl Title for Dbspz {
         "DRAGON BALL: Sparking! ZERO"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "unreal"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

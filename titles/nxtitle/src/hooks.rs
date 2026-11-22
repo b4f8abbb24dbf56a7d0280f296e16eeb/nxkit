@@ -35,6 +35,8 @@ pub enum GraphicsApi {
     /// Vulkan 1.1: `main` imports `vk*` functions, which the SDK's loader (`subsdk0`) and NVIDIA's driver (`subsdk1`)
     /// supply on the Switch. The host answers them, so a module list leaves the two out.
     Vulkan,
+    /// OpenGL (ES) through the SDK's EGL and GL driver. nxkit has no OpenGL layer: the build refuses such a game.
+    OpenGl,
 }
 
 impl GraphicsApi {
@@ -43,6 +45,7 @@ impl GraphicsApi {
         match self {
             GraphicsApi::Nvn => "nvn",
             GraphicsApi::Vulkan => "vulkan",
+            GraphicsApi::OpenGl => "opengl",
         }
     }
 }
@@ -268,10 +271,6 @@ pub struct Standalone {
 pub trait BuildHooks: Sync {
     /// What a build without the engine needs. `None`: the title still builds through the engine.
     fn standalone(&self) -> Option<Standalone> {
-        None
-    }
-    /// The graphics API the game renders with. `None`: the next layer, then [`GraphicsApi::Nvn`].
-    fn graphics_api(&self) -> Option<Fact<GraphicsApi>> {
         None
     }
     /// The role of a shader, when this layer knows it.

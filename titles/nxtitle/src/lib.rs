@@ -1,13 +1,17 @@
-//! The title layer: a core, engine families and title modules.
+//! The title layer: a core, families of two layers and title modules.
 //!
-//! - The core is the rest of the workspace. It knows no title and no engine.
-//! - A family ([`Family`]) holds what is true for every game of one engine, for example sead, agl and gsys.
+//! - The core is the rest of the workspace. It knows no title, no engine and no graphics API of a game.
+//! - An engine family ([`Family`] of [`Layer::Engine`]) holds what is true for every game of one engine, for example
+//!   sead, agl and gsys, or Unity.
+//! - A graphics family ([`Family`] of [`Layer::Graphics`]) holds what is true for every game on one graphics API:
+//!   NVN, Vulkan or OpenGL. Its id is the [`GraphicsApi::id`] of the API.
 //! - A title module ([`Title`]) holds what is true for one game only.
 //!
 //! Families and titles answer questions through hooks ([`BuildHooks`], [`RuntimeHooks`]). Every answer is a
 //! [`Fact`], a value with its [`Evidence`]. `None` means "no opinion", and the question goes one layer down:
-//! title, then family, then the core default. A title names its family by id, as data. It does not depend on the
-//! family crate, so either can be built and tested alone.
+//! title, then engine family, then graphics family, then the core default. A title names its engine by id, as data,
+//! and its graphics API as a fact ([`Title::graphics`]); the graphics family follows from the API. A title does not depend on a family
+//! crate, and no family depends on another, so each can be built and tested alone.
 //!
 //! The [`Catalog`] composes families and titles for one game ([`Catalog::resolve`]). The crate `nxtitles` builds
 //! the catalog from the modules that are switched on by cargo features. The core uses this crate and the catalog
@@ -29,7 +33,7 @@ mod settings;
 mod temporal;
 pub mod threads;
 
-pub use catalog::{Catalog, FamilyFrom, Resolved};
+pub use catalog::{Catalog, EngineFrom, Resolved};
 pub use console::{
     ConfigKey, ConsoleFiles, ConsoleSettings, ConsoleVar, RomfsEntry, RomfsRead, merge_config_keys,
     merge_console_vars,
@@ -48,12 +52,23 @@ pub use runtime::{Runtime, Service};
 pub use settings::{Memory, Settings};
 pub use temporal::{DrawSlot, SourceDraw, TemporalDraws, TemporalView, UboStage, VelocityCode};
 
-/// An engine family: the facts and hooks that hold for every game of one engine.
+/// The layer of a family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layer {
+    /// An engine: a title names it with [`Title::engine`].
+    Engine,
+    /// A graphics API: the family of the title's [`GraphicsApi`], with its id.
+    Graphics,
+}
+
+/// A family: the facts and hooks that hold for every game of one engine or of one graphics API.
 pub trait Family: BuildHooks + RuntimeHooks {
-    /// The stable id that titles name (`agl`).
+    /// The stable id: the one titles name for an engine (`agl`), the [`GraphicsApi::id`] for a graphics API (`nvn`).
     fn id(&self) -> &'static str;
     /// A readable name.
     fn name(&self) -> &'static str;
+    /// The layer of the family.
+    fn layer(&self) -> Layer;
     /// Whether a game belongs to this family, from facts the core read. [`Match::Unknown`] when the facts are
     /// not enough.
     fn detect(&self, facts: &TitleFacts) -> Match;
@@ -65,8 +80,13 @@ pub trait Title: BuildHooks + RuntimeHooks {
     fn id(&self) -> TitleId;
     /// The game's name.
     fn name(&self) -> &'static str;
-    /// The id of the game's family, or `None` when it has none.
-    fn family(&self) -> Option<&'static str>;
+    /// The id of the game's engine family. Every title module names one, also a game on an engine no other game
+    /// shares, so an engine fact always has its place. A build without that family's feature still works, with the
+    /// next layer in its place.
+    fn engine(&self) -> &'static str;
+    /// The graphics API the game renders with. Every title module answers it: an engine can run on more than one API,
+    /// so it is a fact of the game. The graphics family of the game is the one of this API.
+    fn graphics(&self) -> Fact<GraphicsApi>;
     /// The committed part of the game's `profile.toml` (design 2.11): `title_id`, `[declared]` and `[rules]`.
     fn profile(&self) -> Option<&'static str> {
         None

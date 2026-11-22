@@ -132,6 +132,9 @@ impl Family for Fam {
     fn name(&self) -> &'static str {
         "Family"
     }
+    fn layer(&self) -> Layer {
+        Layer::Engine
+    }
     fn detect(&self, f: &TitleFacts) -> Match {
         if f.has_library("famlib") {
             Match::Yes
@@ -141,7 +144,34 @@ impl Family for Fam {
     }
 }
 
-struct Game(u64, Option<&'static str>);
+/// The graphics family of Vulkan.
+struct Gfx;
+impl BuildHooks for Gfx {
+    fn rewrite_rules(&self) -> Option<&'static str> {
+        Some("vulkan")
+    }
+}
+impl RuntimeHooks for Gfx {
+    fn pacing(&self) -> Option<Fact<Pacing>> {
+        Some(Fact::new(Pacing::Fixed { hz: 30 }, REC))
+    }
+}
+impl Family for Gfx {
+    fn id(&self) -> &'static str {
+        "vulkan"
+    }
+    fn name(&self) -> &'static str {
+        "Vulkan"
+    }
+    fn layer(&self) -> Layer {
+        Layer::Graphics
+    }
+    fn detect(&self, _: &TitleFacts) -> Match {
+        Match::Yes
+    }
+}
+
+struct Game(u64, &'static str);
 impl BuildHooks for Game {
     fn console_vars(&self) -> &'static [Fact<ConsoleVar>] {
         const V: &[Fact<ConsoleVar>] = &[
@@ -182,9 +212,6 @@ impl BuildHooks for Game {
             ),
         ];
         K
-    }
-    fn graphics_api(&self) -> Option<Fact<GraphicsApi>> {
-        (self.0 == 2).then_some(Fact::new(GraphicsApi::Vulkan, REC))
     }
     fn pipeline_seeds(&self) -> Option<&'static str> {
         Some("t")
@@ -248,25 +275,35 @@ impl Title for Game {
     fn name(&self) -> &'static str {
         "Game"
     }
-    fn family(&self) -> Option<&'static str> {
+    fn engine(&self) -> &'static str {
         self.1
+    }
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        let api = if self.0 == 2 {
+            GraphicsApi::Vulkan
+        } else {
+            GraphicsApi::Nvn
+        };
+        Fact::new(api, REC)
     }
 }
 
 static FAM: Fam = Fam;
-static GAME: Game = Game(1, Some("fam"));
-static LONE: Game = Game(2, None);
-static ORPHAN: Game = Game(3, Some("gone"));
+static GFX: Gfx = Gfx;
+static GAME: Game = Game(1, "fam");
+static LONE: Game = Game(2, "lone");
+static ORPHAN: Game = Game(3, "gone");
 
 fn catalog() -> Catalog {
-    Catalog::new(vec![&FAM], vec![&GAME, &LONE, &ORPHAN]).unwrap()
+    Catalog::new(vec![&FAM, &GFX], vec![&GAME, &LONE, &ORPHAN]).unwrap()
 }
 
 #[test]
 fn title_wins_then_family_then_core() {
     let c = catalog();
     let r = c.resolve(&TitleFacts::new(TitleId(1)));
-    assert_eq!(r.family_from, FamilyFrom::Declared);
+    assert_eq!(r.engine_from, EngineFrom::Declared);
+    assert!(r.graphics.is_none());
     assert_eq!(r.upscaler().map(|f| f.value), Some(Upscaler::Native));
     assert_eq!(r.pacing().map(|f| f.value), Some(Pacing::Display));
     assert_eq!(r.pace_profile().map(|f| f.value.fps_target), Some(30));
@@ -318,32 +355,53 @@ fn the_graphics_api_is_the_titles_or_nvn() {
 }
 
 #[test]
-fn family_by_detection_or_none() {
+fn the_graphics_family_follows_the_api_and_comes_after_the_engine() {
     let c = catalog();
-    let mut facts = TitleFacts::new(TitleId(2));
-    assert_eq!(c.resolve(&facts).family_from, FamilyFrom::None);
-    assert!(c.resolve(&facts).pacing().is_none());
-    assert!(c.resolve(&facts).pace_profile().is_none());
-    facts.libraries.push("famlib".into());
-    let r = c.resolve(&facts);
-    assert_eq!(r.family_from, FamilyFrom::Detected);
-    assert_eq!(r.upscaler().map(|f| f.value), Some(Upscaler::Native));
-    let unknown = c.resolve(&TitleFacts::new(TitleId(9)));
-    assert!(unknown.title.is_none() && unknown.family.is_none());
+    let r = c.resolve(&TitleFacts::new(TitleId(2)));
+    assert_eq!(r.graphics.map(|f| f.id()), Some("vulkan"));
+    assert_eq!(r.engine_from, EngineFrom::None);
+    assert_eq!(r.graphics_api(), GraphicsApi::Vulkan);
+    assert_eq!(r.rewrite_rules(), ["vulkan"]);
+    assert_eq!(r.pacing().map(|f| f.value), Some(Pacing::Fixed { hz: 30 }));
 }
 
 #[test]
-fn a_missing_family_falls_back_to_the_core() {
+fn an_engine_by_detection_only_without_a_title_module() {
+    let c = catalog();
+    let mut facts = TitleFacts::new(TitleId(9));
+    assert_eq!(c.resolve(&facts).engine_from, EngineFrom::None);
+    assert!(c.resolve(&facts).upscaler().is_none());
+    facts.libraries.push("famlib".into());
+    let r = c.resolve(&facts);
+    assert!(r.title.is_none());
+    assert_eq!(r.engine_from, EngineFrom::Detected);
+    assert_eq!(r.upscaler().map(|f| f.value), Some(Upscaler::MetalFx));
+    // a title module names its engine: detection does not override it
+    let mut lone = TitleFacts::new(TitleId(2));
+    lone.libraries.push("famlib".into());
+    assert_eq!(c.resolve(&lone).engine_from, EngineFrom::None);
+}
+
+#[test]
+fn a_missing_family_falls_back_to_the_next_layer() {
     let c = catalog();
     let r = c.resolve(&TitleFacts::new(TitleId(3)));
-    assert_eq!(r.family_from, FamilyFrom::None);
+    assert_eq!(r.engine_from, EngineFrom::None);
     assert_eq!(r.pacing(), None);
     let missing: Vec<_> = c
         .missing_families()
         .iter()
-        .map(|(t, f)| (t.id(), *f))
+        .map(|(t, l, f)| (t.id(), *l, *f))
         .collect();
-    assert_eq!(missing, [(TitleId(3), "gone")]);
+    assert_eq!(
+        missing,
+        [
+            (TitleId(1), Layer::Graphics, "nvn"),
+            (TitleId(2), Layer::Engine, "lone"),
+            (TitleId(3), Layer::Engine, "gone"),
+            (TitleId(3), Layer::Graphics, "nvn"),
+        ]
+    );
 }
 
 #[test]

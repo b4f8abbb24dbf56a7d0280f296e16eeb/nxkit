@@ -1,0 +1,18 @@
+[package]
+name = "nxengine-basso"
+description = "The engine family of games on Billy Basso's engine (ANIMAL WELL)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[lints]
+workspace = true

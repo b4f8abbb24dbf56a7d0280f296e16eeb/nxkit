@@ -1,0 +1,10 @@
+nxkit-pipeline-seeds 1
+# Imported by nxb-seeds from the old engine at 131bd01328d9: dm/games/01008D300C50C000/pso_manifest.tsv, shader_seen.tsv and game.tsv.
+# Left out: 0 rows of merged passes, 0 with a target format the host has no name for, 0 that do not parse.
+R	aa14b7f84810d173	4aff0ac25a352bd7	1	0	Rgba8UnormSrgb:f:5.6.1.5.6.1	0:16:0:0,1:16:8:0,2:2e:16:0	0:32:0
+R	3954dbdb73d4ab7d	e44b62fcabf18acd	1	0	Rgba8UnormSrgb:f:5.6.1.5.6.1	0:16:0:0,1:16:8:0,2:2e:16:0	0:32:0
+R	1d369d3afc8a100b	02fa3038c355821d	1	0	Rgba8UnormSrgb:f:5.6.1.5.6.1	0:16:0:0,1:16:8:0,2:2e:16:0	0:32:0
+R	450d682f1763a113	a7f14c659ebeef74	1	0	Rgba8UnormSrgb:f:5.6.1.5.6.1	0:16:0:0,1:16:8:0,2:2e:16:0	0:32:0
+R	3a24b5ced1f9e727	a6f3e7c3df94928c	1	0	Rgba8UnormSrgb:f:5.6.1.5.6.1	0:16:0:0,1:16:8:0,2:2e:16:0	0:32:0
+R	3a24b5ced1f9e727	a6f3e7c3df94928c	1	0	Rgba8UnormSrgb:f:2.6.1.2.6.1	0:16:0:0,1:16:8:0,2:2e:16:0	0:32:0
+R	2d58d2e82e4991dd	10f69b818a880085	1	0	Rgba8UnormSrgb:f:5.6.1.5.6.1	0:16:0:0,1:16:8:0,2:2e:16:0	0:32:0

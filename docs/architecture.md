@@ -27,7 +27,7 @@ flowchart TD
   L2["L2 build runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-xlate, nxb-spirv, nxb-codec, nxb-a64, nxb-romfs, nxb-font, nxb-rewrite, nxb-split, nxtitle, nxtitles"]
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (unsafe code)"]
-  LT["T families and titles: nxfamily-agl, nxgame-* (only nxtitles uses them)"]
+  LT["T families and titles: nxengine-*, nxgraphics-*, nxgame-* (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
   L3 --> L1 --> L0
@@ -61,7 +61,7 @@ The rules:
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `nxb-xlatedev`, `nxb-profile`, `xtask`) are dev-dependencies only.
 8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.
-9. Layer T holds the families and title modules. A `T` crate uses only `nxtitle` and L0. Only `nxtitles` uses a `T` crate.
+9. Layer T holds the engine families, the graphics families and the title modules. A `T` crate uses only `nxtitle` and L0, never another `T` crate. Only `nxtitles` uses a `T` crate.
 10. A runtime crate (R0 to R4) uses only lower runtime layers, listed sideways edges and the build foundation L0 (`nxb-model` for the identifiers and the one SHA-256). A build crate uses only the runtime contract R0, and only from L2 or L3: the build writes what the host reads (the shard index of `nxkit-abi`).
 11. R1 binds an Apple framework and knows nothing of the game. R2 holds one subsystem each, with its state in its own objects. R3 adapts the subsystems to a caller: `nxkit-rt` to the guest's C calls, `nxkit-gpu` to the `Backend` of the NVN front end. R4 is the one composition root: only `nxkit-host` creates the parts, reads the settings and wires the parts together (refer to "The runtime: composition and context").
 12. Inside a crate the top-level modules form layers too. `xtask modules` makes sure that their cycles only shrink (W24, refer to "Module layers inside a crate").
@@ -141,9 +141,10 @@ The runtime world has no sideways edges. Its layers order every edge (W25).
 | nxkit-vk | R2 | no | impl | the Vulkan front end of the nxkit host (R64): the device the game sees (Tegra X1, Vulkan 1.1), formats, handles and objects, descriptor sets, typed recorded commands and the `Backend` seam for `nxkit-vk-gpu`. Pure Rust, no Metal, no C ABI |
 | nxkit-gpu | R3 | no | impl | the frame encoder of the nxkit host, macOS only: it turns a held `nxkit-nvn` frame into Metal 4 work with ICBs for reused recordings, bindless textures, barriers where data flows, tile memory and parallel encoding. No `unsafe` code. Refer to [nxkit-gpu.md](nxkit-gpu.md) |
 | nxkit-vk-gpu | R3 | no | impl | the Vulkan backend of the nxkit host, macOS only: `nxkit_vk::Backend` on `nxkit-metal`. Device memory below `1 << 39` as no-copy buffers, textures, pipelines from `vk_shaders.metallib` and its `vk_table` rows, one command buffer per submit, and the swapchain images through the `Pacer` as a `TickSink`. No `unsafe` code |
-| nxtitle | L1 | no | impl | the title API: `Family`, `Title`, the hooks, `Fact` and `Evidence`, the `Catalog` that composes them. Refer to [titles.md](titles.md) |
+| nxtitle | L1 | no | impl | the title API: `Family` (of the layer `Engine` or `Graphics`), `Title`, the hooks, `Fact` and `Evidence`, the `Catalog` that composes title, engine family and graphics family. Refer to [titles.md](titles.md) |
 | nxtitles | L1 | no | impl | the registry: one cargo feature per family and title module |
-| nxfamily-agl | T | no | impl | the family of Nintendo EPD games on sead, agl and gsys |
+| nxengine-* | T | no | impl | the engine families, one per engine (`nxengine-agl`: Nintendo EPD games on sead, agl and gsys; `nxengine-unity`, `nxengine-unreal`, ...) |
+| nxgraphics-* | T | no | impl | the graphics families: `nxgraphics-nvn`, `nxgraphics-vulkan`, `nxgraphics-opengl` |
 | nxgame-oot | T | no | impl | The Legend of Zelda: Ocarina of Time for Nintendo Switch 2 (`0400486024DEC000`) |
 | nxb-testkit, nxb-xlatedev, xtask | dev | no | impl | seeded generators, the corpus tool of the Rust translator (`xlate-corpus`), the checks of the workspace (layers, sizes, module cycles, the settings source, the statics of the runtime) |
 | msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck | F | no | impl | the own front end. Refer to [frontend.md](frontend.md). |

@@ -12,6 +12,9 @@ pub struct Options {
     pub patch_front: Option<u64>,
     /// The game profile folder name (`DM_GAME`'s base name), or empty.
     pub profile: String,
+    /// The scopes of the families' rule files (the engine family's id, then the graphics family's), whose
+    /// function-matched rules apply after the profile's. Empty: the profile's rules only.
+    pub layers: Vec<String>,
     /// `(SHA-256, path relative to dm/tools)` of the rewriter and patch files, for `build_src.sha256`.
     pub source_hashes: Vec<(String, String)>,
     /// The profile's `snowdrop_pools` words (the large, 512 KB and 64 KB ranges in MB), empty for the default.

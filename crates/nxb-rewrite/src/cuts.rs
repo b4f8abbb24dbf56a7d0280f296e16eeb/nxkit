@@ -6,8 +6,22 @@ use std::fmt::Write;
 use crate::error::RewriteError;
 use crate::matchfn::{CutRow, Outcome, resolve};
 use crate::options::Options;
-use crate::patches::{Cut, PatchTable};
+use crate::patches::{Cut, PatchTable, Rule};
 use crate::rw::{R, Rw};
+
+/// The function-matched rules of a module from the given scopes, in their order.
+fn scoped_rules<'a>(
+    patches: &PatchTable,
+    scopes: impl IntoIterator<Item = &'a str>,
+    module: &str,
+) -> Vec<Rule> {
+    scopes
+        .into_iter()
+        .filter_map(|scope| patches.rules.get(scope).and_then(|m| m.get(module)))
+        .flatten()
+        .cloned()
+        .collect()
+}
 
 pub(crate) fn cuts_for(
     rw: &Rw,
@@ -51,11 +65,10 @@ pub(crate) fn cuts_for(
     }
     let (mut outcomes, mut sdk_outcomes): (Vec<Outcome>, Vec<Outcome>) = (Vec::new(), Vec::new());
     let empty = Vec::new();
-    let prof_rules = patches
-        .rules
-        .get(profile)
-        .and_then(|m| m.get(name))
-        .unwrap_or(&empty);
+    let prof_rules = scoped_rules(patches, [profile.as_str()], name);
+    // the families' rules: a family rule that matches one version of its engine skips the others, so a skip is no
+    // [RED] line
+    let layer_rules = scoped_rules(patches, opts.layers.iter().map(String::as_str), name);
     let sdk_rules = patches
         .rules
         .get("sdk")
@@ -69,9 +82,19 @@ pub(crate) fn cuts_for(
             why,
         })
     };
-    let a = resolve(&rw.img, rw.text_end, prof_rules, log, &mut outcomes, true)
+    let a = resolve(&rw.img, rw.text_end, &prof_rules, log, &mut outcomes, true)
         .map_err(RewriteError::Failed)?;
     cuts.extend(conv(a));
+    let f = resolve(
+        &rw.img,
+        rw.text_end,
+        &layer_rules,
+        log,
+        &mut outcomes,
+        false,
+    )
+    .map_err(RewriteError::Failed)?;
+    cuts.extend(conv(f));
     let b = resolve(
         &rw.img,
         rw.text_end,
@@ -107,4 +130,39 @@ pub(crate) fn cuts_for(
         extra.push((format!("{name}.match.tsv"), s.into_bytes()));
     }
     Ok(cuts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file(scope: &str, rule: &str) -> (String, String) {
+        let text = format!(
+            "scope = \"{scope}\"\n\n[[rule]]\nbinding = \"engine\"\nkind = \"match\"\nmodule = \"main\"\nname = \"{rule}\"\n\
+             multi = false\nevidence = \"test\"\n\n[[rule.function]]\nsize = 4\nfingerprints = [\"00\"]\n\n\
+             [[rule.function.cut]]\ndelta = 0\nold = \"1f2003d5\"\nnew = \"1f2003d5\"\nwhy = \"nop\"\n"
+        );
+        (format!("{scope}.toml"), text)
+    }
+
+    #[test]
+    fn the_rules_of_a_scope_are_its_own() {
+        let t = PatchTable::from_toml(&[
+            file("0100000000010000", "title"),
+            file("unity", "engine"),
+            file("vulkan", "graphics"),
+            file("other", "not asked"),
+        ])
+        .unwrap();
+        let names = |layers: &[&str]| -> Vec<String> {
+            std::iter::once("0100000000010000")
+                .chain(layers.iter().copied())
+                .flat_map(|s| scoped_rules(&t, [s], "main"))
+                .map(|r| r.name)
+                .collect()
+        };
+        assert_eq!(names(&[]), ["title"]);
+        assert_eq!(names(&["unity", "vulkan"]), ["title", "engine", "graphics"]);
+        assert!(scoped_rules(&t, ["0100000000010000", "unity"], "sdk").is_empty());
+    }
 }

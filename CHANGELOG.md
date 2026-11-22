@@ -4,6 +4,27 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Changed
+
+- The title layer has engine families and graphics families (R75). Every title module names its engine family
+  (`Title::engine`, was the optional `Title::family`) and its graphics API (`Title::graphics`, was the optional
+  `BuildHooks::graphics_api`). The graphics family is the one of the API. 77 engine families in `titles/engines/`
+  (`nxengine-<id>`, `agl` and `unreal` moved there from `titles/families/`) and 3 graphics families in
+  `titles/graphics/` (`nxgraphics-nvn`, `nxgraphics-vulkan`, `nxgraphics-opengl`). The features of `nxtitles` are
+  `engine-<id>` and `graphics-<id>`. `tools/gen_title_registry.py` writes the registry from the folders.
+- The engine family `unity` holds the Unity 2018 `ThreadedStreamBuffer` rule, which four title rule files held each.
+  `nxb build` gives the rewriter the families' rule files, and the rewriter searches their scopes after the title's
+  (`Options::layers`).
+- Every Unreal Engine 4 and 5 title names the family `unreal`, so it gets the family's frame limit and render size
+  arguments.
+
+### Added
+
+- 56 title modules of the engine tree at `131bd013`: the 51 new game folders with a `game.tsv`, and Digimon Story Cyber
+  Sleuth, Well Dweller, Balatro, Super Mario Galaxy and Galaxy 2. The OpenGL games build no app yet: `nxb build` stops
+  with a note that nxkit has no OpenGL layer (`GraphicsApi::OpenGl`).
+- The pipeline seeds of 19 of the new titles, imported from their recorded `pso_manifest.tsv`.
+
 ## 0.15.2 - 2026-11-22
 
 ### Fixed

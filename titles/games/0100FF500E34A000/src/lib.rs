@@ -1,8 +1,8 @@
 //! The title module of Xenoblade Chronicles: Definitive Edition for Nintendo Switch (`0100FF500E34A000`).
 //!
 //! The game is update 1.1.2 (v196608) on SDK 9.3.1, graphics NVN. The engine tree names its engine: Monolith's engine.
-//! No engine family of nxkit holds it. The modules are `main`, `subsdk0` and `sdk`. This module holds what the engine
-//! tree knows of the game.
+//! The engine family is `monolith` (Monolith Soft's engine). The modules are `main`, `subsdk0` and `sdk`. This module
+//! holds what the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v196608, the
 //! shader split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is
@@ -14,8 +14,8 @@
 //! regions).
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -106,6 +106,15 @@ impl RuntimeHooks for Xcde {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Xcde {
     fn id(&self) -> TitleId {
         TitleId(0x0100_FF50_0E34_A000)
@@ -115,8 +124,12 @@ impl Title for Xcde {
         "Xenoblade Chronicles: Definitive Edition"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "monolith"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

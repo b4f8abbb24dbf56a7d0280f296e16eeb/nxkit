@@ -59,6 +59,7 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
         &order,
         "generic",
         "scope = \"generic\"",
+        &[],
         |name| {
             selected
                 .iter()

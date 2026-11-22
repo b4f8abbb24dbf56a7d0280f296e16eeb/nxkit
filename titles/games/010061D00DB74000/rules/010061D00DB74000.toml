@@ -1,9 +1,11 @@
 # nxb rewrite rules of Ori and the Blind Forest: Definitive Edition (Switch). Private data: instruction words of game
 # and SDK code.
 #
-# Made from the engine tree at 034e91a8 (read 2026-11-12): the build row of v131072, the engine's SDK-wide rules for the
-# `sdk` module (12 implementations of the node area of 62 MB and of the 2 MB alignment of large regions) and the
-# engine-wide rule of Unity 2018's ThreadedStreamBuffer for `main` (load-acquires after its store-releases).
+# Made from the engine tree at 034e91a8 (read 2026-11-12): the build row of v131072 and the engine's SDK-wide rules for
+# the `sdk` module (12 implementations of the node area of 62 MB and of the 2 MB alignment of large regions).
+#
+# The engine-wide rule of Unity 2018's ThreadedStreamBuffer for `main` (load-acquires after its store-releases) is in
+# the engine family `unity` (`titles/engines/unity/rules/unity.toml`): the build adds the family's rules after these.
 #
 # The SDK-wide rules are the engine's `MATCH_CUTS['sdk']`: each rule has one implementation per reviewed SDK, and a rule
 # cuts only when exactly one implementation matches. The engine gives them to every game's sdk build that has no byte
@@ -326,75 +328,3 @@ delta = 112
 old = "0808a052"
 new = "0804a052"
 why = "AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)"
-
-[[rule]]
-binding = "engine"
-kind = "match"
-module = "main"
-name = "Unity 2018 ThreadedStreamBuffer: load-acquires after its store-releases"
-multi = true
-evidence = "engine tree dm/tools/engine_patches.py at 034e91a8, read 2026-11-12"
-
-[[rule.function]]
-size = 528
-fingerprints = ["6b48e9a19281a61d041d534127efd9514bcfd37c971463d342ed1ffe3bde0630"]
-
-[[rule.function.cut]]
-delta = 288
-old = "080140b9"
-new = "08fddf88"
-why = "stream reader going to sleep: ldr w8,[x8] → ldar (write position after the store-release of \"reader sleeping\")"
-
-[[rule.function]]
-size = 824
-fingerprints = ["ee4b0475ad2c62eb78283eaac6b27c094b08fe8542f906fe02ad25c68944204b"]
-
-[[rule.function.cut]]
-delta = 316
-old = "080140b9"
-new = "08fddf88"
-why = "stream reader: ldr w8,[x8] → ldar (\"writer sleeping\" after the store-release of the read position)"
-
-[[rule.function.cut]]
-delta = 564
-old = "080140b9"
-new = "08fddf88"
-why = "stream reader: ldr w8,[x8] → ldar (\"writer sleeping\" after the store-release of the read position)"
-
-[[rule.function.cut]]
-delta = 696
-old = "080140b9"
-new = "08fddf88"
-why = "stream reader: ldr w8,[x8] → ldar (\"writer sleeping\" after the store-release of the read position)"
-
-[[rule.function]]
-size = 828
-fingerprints = ["e2c1c6cb95191a9a2a7694e03f0f6304a9b54058d92795c5a25b3e56d7da0a2e"]
-
-[[rule.function.cut]]
-delta = 328
-old = "080140b9"
-new = "08fddf88"
-why = "stream writer: ldr w8,[x8] → ldar (\"reader sleeping\" after the store-release of the write position)"
-
-[[rule.function.cut]]
-delta = 568
-old = "080140b9"
-new = "08fddf88"
-why = "stream writer: ldr w8,[x8] → ldar (\"reader sleeping\" after the store-release of the write position)"
-
-[[rule.function.cut]]
-delta = 700
-old = "080140b9"
-new = "08fddf88"
-why = "stream writer: ldr w8,[x8] → ldar (\"reader sleeping\" after the store-release of the write position)"
-
-[[rule.function]]
-size = 576
-fingerprints = ["aa8a3dc16b30ea6c510161b632162019a41a95b81a71ccf909d439a08691b1b6", "57a283d159be07dc3178d4158ddecd7c4ebb34e6631a7965111c38c02724b2f2", "eb41f41ceeffc7e1428740e81625bc7b8aa12aa6823cf1fd4152e50e752e2d4f"]
-
-[[rule.function.cut]]
-delta = 360
-old = "290140b9"
-new = "29fddf88"
-why = "stream writer going to sleep: ldr w9,[x9] → ldar (read position after the store-release of \"writer sleeping\")"

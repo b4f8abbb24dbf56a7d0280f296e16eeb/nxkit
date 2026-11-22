@@ -1,0 +1,36 @@
+nxkit-pipeline-seeds 1
+# Imported by nxb-seeds from the old engine at 131bd01328d9: dm/games/0100C510166F0000/pso_manifest.tsv, shader_seen.tsv and game.tsv.
+# Left out: 0 rows of merged passes, 0 with a target format the host has no name for, 0 that do not parse.
+S	d19b47f9ea5c3cfe
+S	889465df59838dc0
+S	24e4cd391d993137
+S	17b082dfef30eba9
+S	a23dda46c07f800d
+S	e46f75eec323df1d
+S	abcdb66b44f1313d
+S	bf76784f461275c7
+S	987c069874bbe974
+S	f3a2af4f812f7366
+S	552bbc8ffc2459e4
+R	99926e74549a1cf0	28d34532952383fb	1	0	Rgba8Unorm:f:-	0:22:0:0,1:16:12:0	0:20:0
+R	dbcf01ee726acd75	03eb1673a58863c2	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:12:0,2:2e:16:0	0:32:0
+R	9486f616b698059f	eb4a0b353e3958a9	1	0	Rg11B10Float:f:-	0:22:0:0,1:16:12:0	0:20:0
+R	dff0226f2ef1df68	ebba2d8bca1a44a6	1	0	Rg11B10Float:f:-	0:22:0:0,1:16:12:0	0:20:0
+R	58d0b957d3252444	ea58e7d6cf3ffcf9	1	0	Rg11B10Float:f:-	0:22:0:0,1:16:12:0	0:20:0
+R	da0c55af8d5488c4	59138faf2c56f9b1	1	0	Rg11B10Float:f:-	0:22:0:0,1:16:12:0	0:20:0
+R	f4455e57728922bb	05d5f7388b57f465	1	0	Rgba8Unorm:f:-	0:22:0:0,1:16:12:0	0:20:0
+R	c29e8c01cf21c0f4	1bfe467e08f72ee5	1	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:28:0,2:16:32:0	0:40:0
+R	c29e8c01cf21c0f4	1bfe467e08f72ee5	1	0	Rgba8Unorm:f:5.6.1.5.6.1	0:22:0:0,1:25:12:0,2:16:16:0	0:24:0
+R	926adb35aad0ac4c	6d8df17c2700f479	1	0	Rgba8Unorm:f:-	0:22:0:0,1:16:12:0	0:20:0
+R	dbcf01ee726acd75	03eb1673a58863c2	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:40:0,2:2e:44:0	0:76:0
+R	c4456577f8f42cab	7de951ab4d21dfd2	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:22:12:0,2:25:40:0,3:2e:44:0,4:2e:60:0	0:76:0
+R	b2ad7ede015483dc	3c1ed382bac5b47d	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:40:0,2:2e:44:0	0:76:0
+R	ed640b36c3a42424	cc6526ba1345f63d	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:40:0,2:2e:44:0	0:76:0
+R	b2ad7ede015483dc	3c1ed382bac5b47d	1	0	Rgba8Unorm:0:2.6.1.2.6.1	0:22:0:0,1:25:40:0,2:2e:44:0	0:76:0
+R	6a1dc0d39df4a034	a8c7606c902e48b9	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:22:12:0,2:25:40:0,3:2e:44:0,4:2e:60:0	0:76:0
+R	349c751c1039f544	82f9e92b96558e25	1	0	Rgba8Unorm:f:2.6.1.2.6.1	0:22:0:0,1:25:40:0,2:2e:44:0,3:2e:60:0	0:76:0
+S	3edf161abed722c0
+S	1320197ed7a667dc
+S	5eaaedb979b881fe
+S	41d41dd8b0c2538a
+R	ed7707f0ee1e0dd2	7b884910b9d8f18d	1	0	Rg11B10Float:f:5.6.1.5.6.1	0:22:0:0,1:25:0:1	0:28:0,1:0:0

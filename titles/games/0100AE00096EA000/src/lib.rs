@@ -1,8 +1,8 @@
 //! The title module of Hyrule Warriors: Definitive Edition for Nintendo Switch (`0100AE00096EA000`).
 //!
 //! The game is update 1.0.1 (v65536) on SDK 3.5.1, graphics NVN. The engine tree names its engine: Koei Tecmo's KTGL.
-//! No engine family of nxkit holds it. The modules are `main`, `subsdk0`, `subsdk1` and `sdk`. This module holds what
-//! the engine tree knows of the game.
+//! The engine family is `ktgl` (Koei Tecmo's KTGL). The modules are `main`, `subsdk0`, `subsdk1` and `sdk`. This module
+//! holds what the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v65536, the
 //! shader split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is
@@ -13,8 +13,8 @@
 //! for the `sdk` module (12 implementations of the node area of 62 MB and of the 2 MB alignment of large regions).
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -109,6 +109,15 @@ impl RuntimeHooks for Hwde {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Hwde {
     fn id(&self) -> TitleId {
         TitleId(0x0100_AE00_096E_A000)
@@ -118,8 +127,12 @@ impl Title for Hwde {
         "Hyrule Warriors: Definitive Edition"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "ktgl"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

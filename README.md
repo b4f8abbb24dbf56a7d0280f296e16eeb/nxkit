@@ -15,9 +15,11 @@ The current release is [0.15.2](https://github.com/v0lumehi/nxkit/releases/tag/v
 software. The apps run on Macs with Apple silicon. The libraries are built for the Mac's own macOS version, so on
 macOS 26 build the app on macOS 26. The release ZIP holds `nxb` and `nxkit-host` for macOS 26 and newer (see "Install a release"). `nxb` also builds on Windows (x86-64), where `nxb extract` runs.
 
-A game runs on the runtime when it has a title module in `titles/games/`. There are 154, one for each game of the engine
-tree. A title module holds what is specific to one game: its memory layout, thread roles, settings and code rules.
-Everything else is general. Refer to [docs/titles.md](docs/titles.md). For a game without a title module,
+A game runs on the runtime when it has a title module in `titles/games/`. There are 211, one for each game of the engine
+tree. A title module holds what is specific to one game: its memory layout, thread roles, settings and code rules. What
+every game of an engine shares is in its engine family (`titles/engines/`), and what every game on a graphics API
+shares is in its graphics family (`titles/graphics/`). Everything else is general. Refer to
+[docs/titles.md](docs/titles.md#rules-for-a-module) for where a fact goes. For a game without a title module,
 `nxb build --auto-analyze` reads the module order, build IDs and settings from the game files (experimental).
 The [CHANGELOG](CHANGELOG.md) lists every change.
 
@@ -56,7 +58,7 @@ flowchart LR
   and the in-game upscaler of some titles), `nxkit-gpu` runs own kernels, and the movie network can run on the Neural Engine
   (`nxkit-coreml`, `nxkit-ndve`, `nxkit-ndsr`). If anything does not match, the game's own dispatches run.
 - **No game knowledge in the core.** Everything that is specific to one game is data in `titles/`: engine families,
-  title modules, memory layout, thread roles and settings. Refer to [docs/titles.md](docs/titles.md).
+  graphics families, title modules, memory layout, thread roles and settings. Refer to [docs/titles.md](docs/titles.md).
 
 ## Build from source
 
@@ -141,7 +143,7 @@ explains the frame pacing, and [docs/diagnostics.md](docs/diagnostics.md) lists 
 | `crates/nxb-*` | the build tool: extract, split, rewrite, shader translator and compile, pipeline archive, bundle, signer |
 | `crates/msl-*`, `crates/air-*`, `airc`, `mslcheck` | the own MSL to AIR front end, which makes Metal libraries without Apple's `metal` |
 | `crates/nxkit-*` | the runtime: host, kernel, IPC, services, NVN, GPU, Metal 4 backend |
-| `titles/` | engine families and title modules |
+| `titles/` | the title layer: engine families (`engines/`), graphics families (`graphics/`) and title modules (`games/`) |
 | `docs/` | the documentation. The index is [docs/README.md](docs/README.md) |
 | `xtask/` | developer tools: the checks of the layers, the file sizes, the module cycles, the settings source and the statics of the runtime (`cargo run -p xtask`) |
 

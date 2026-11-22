@@ -1,0 +1,18 @@
+[package]
+name = "nxengine-atlus"
+description = "The engine family of games on Atlus' in-house engine (Persona 4 Golden)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "nxengine-hedgehog"
+description = "The engine family of games on Hedgehog Engine 2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "T"
+in_v = false
+
+[dependencies]
+nxtitle.workspace = true
+
+[lints]
+workspace = true

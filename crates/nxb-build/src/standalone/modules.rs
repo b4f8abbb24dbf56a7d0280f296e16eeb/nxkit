@@ -42,6 +42,7 @@ pub(crate) fn rewrite_all(
     st: &Standalone,
     profile: &str,
     rules: &str,
+    family_rules: &[(&str, &str)],
     say: impl FnMut(&str),
     progress: impl FnMut(u64, u64, &str),
 ) -> Result<Vec<Built>, String> {
@@ -49,6 +50,7 @@ pub(crate) fn rewrite_all(
         st.modules,
         profile,
         rules,
+        family_rules,
         |name| {
             let path = exefs.join(name);
             std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
@@ -63,12 +65,22 @@ pub(crate) fn rewrite_with_loader(
     modules: &[(&str, &str)],
     profile: &str,
     rules: &str,
+    family_rules: &[(&str, &str)],
     mut load: impl FnMut(&str) -> Result<Vec<u8>, String>,
     mut say: impl FnMut(&str),
     mut progress: impl FnMut(u64, u64, &str),
 ) -> Result<Vec<Built>, String> {
-    let table = PatchTable::from_toml(&[(format!("{profile}.toml"), rules.to_string())])
-        .map_err(|e| err("rules", e))?;
+    // the title's file, then one file per family; a family's rules have its id as their scope
+    let files: Vec<(String, String)> =
+        std::iter::once((format!("{profile}.toml"), rules.to_string()))
+            .chain(
+                family_rules
+                    .iter()
+                    .map(|(id, text)| (format!("family.{id}.toml"), text.to_string())),
+            )
+            .collect();
+    let table = PatchTable::from_toml(&files).map_err(|e| err("rules", e))?;
+    let layers: Vec<String> = family_rules.iter().map(|(id, _)| id.to_string()).collect();
     let mut out = Vec::new();
     for (index, (name, want_id)) in modules.iter().enumerate() {
         progress(index as u64, modules.len() as u64, name);
@@ -84,6 +96,7 @@ pub(crate) fn rewrite_with_loader(
         let opts = Options {
             name: (*name).to_string(),
             profile: profile.to_string(),
+            layers: layers.clone(),
             snowdrop_from: "default, no snowdrop pools".to_string(),
             ..Options::default()
         };

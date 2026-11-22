@@ -1,0 +1,5 @@
+# The committed part of the profile (design 2.11). The engine and graphics families are named in the title module, not here.
+title_id = "0100CD801CE5E000"
+
+[declared]
+title = "Balatro"

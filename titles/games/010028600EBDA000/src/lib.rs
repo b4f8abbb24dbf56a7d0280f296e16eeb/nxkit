@@ -14,8 +14,8 @@
 //! regions).
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -103,6 +103,15 @@ impl RuntimeHooks for Sm3dwbf {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Sm3dwbf {
     fn id(&self) -> TitleId {
         TitleId(0x0100_2860_0EBD_A000)
@@ -113,8 +122,12 @@ impl Title for Sm3dwbf {
     }
 
     /// The engine tree names the engine: Nintendo EPD (sead / agl, NintendoWare).
-    fn family(&self) -> Option<&'static str> {
-        Some("agl")
+    fn engine(&self) -> &'static str {
+        "agl"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

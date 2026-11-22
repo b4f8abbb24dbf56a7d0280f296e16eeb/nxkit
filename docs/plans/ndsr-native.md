@@ -612,7 +612,7 @@ taking its resampler from it.
   The library is Nintendo SDK knowledge used by agl and by `nn::ndve`, so its kernels belong with the other SDK network.
 - Detection is by content (program keys and weight hashes), as for NDVE. It needs no title fact, and `nxkit-gpu` must
   not depend on `titles/` (layers L1 vs T).
-- What the family layer `titles/families/agl` should hold: the fact that agl games use NDSR (the `ShaderRole::Upscaler`
+- What the family layer `titles/engines/agl` should hold: the fact that agl games use NDSR (the `ShaderRole::Upscaler`
   hook, with its archive match fixed to the three `.pck` names and the evidence upgraded to checked), and, if ever
   needed, a runtime hook that says which pack a title uses or turns the native path off for a title. No kernels.
 

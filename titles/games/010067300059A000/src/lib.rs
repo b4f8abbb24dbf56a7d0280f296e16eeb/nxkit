@@ -1,8 +1,8 @@
 //! The title module of Mario + Rabbids Kingdom Battle for Nintendo Switch (`010067300059A000`).
 //!
 //! The game is update 1.9.589692 (v589824) on SDK 4.4.0, graphics NVN. The engine tree names its engine: Ubisoft
-//! Snowdrop. No engine family of nxkit holds it. The modules are `main`, `subsdk0` and `sdk`. This module holds what
-//! the engine tree knows of the game.
+//! Snowdrop. The engine family is `snowdrop` (Ubisoft Snowdrop). The modules are `main`, `subsdk0` and `sdk`. This
+//! module holds what the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v589824, the
 //! shader split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is
@@ -17,8 +17,8 @@
 //! with the defaults (2048, 512 and 1280 MB).
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -112,6 +112,15 @@ impl RuntimeHooks for Mrkb {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Mrkb {
     fn id(&self) -> TitleId {
         TitleId(0x0100_6730_0059_A000)
@@ -121,8 +130,12 @@ impl Title for Mrkb {
         "Mario + Rabbids Kingdom Battle"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "snowdrop"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

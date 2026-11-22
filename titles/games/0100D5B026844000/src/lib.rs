@@ -1,8 +1,8 @@
 //! The title module of Silver Pines for Nintendo Switch (`0100D5B026844000`).
 //!
 //! The game is update 1.0.0 (v0) on SDK 21.4.7, graphics NVN. The engine tree names its engine: Unity 6000.3.15f1
-//! IL2CPP. No engine family of nxkit holds it. The modules are `main`, `subsdk0` and `sdk`. This module holds what the
-//! engine tree knows of the game.
+//! IL2CPP. The engine family is `unity` (Unity). The modules are `main`, `subsdk0` and `sdk`. This module holds what
+//! the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v0, the shader
 //! split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is not a
@@ -16,8 +16,8 @@
 //! when `main` imports `ScalableFontEngineHelper::Decode`, and nobody checked the imports of this game.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -96,6 +96,15 @@ impl RuntimeHooks for Silverpines {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Silverpines {
     fn id(&self) -> TitleId {
         TitleId(0x0100_D5B0_2684_4000)
@@ -105,8 +114,12 @@ impl Title for Silverpines {
         "Silver Pines"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "unity"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

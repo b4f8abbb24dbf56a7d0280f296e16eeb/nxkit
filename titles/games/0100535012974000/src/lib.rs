@@ -2,8 +2,8 @@
 //!
 //! The game is update 1.0.38233 (v589824) on SDK 9.3.0, Supergiant Games' engine on The Forge renderer, graphics
 //! **Vulkan**: `main` imports about 100 `vk*` functions, which `subsdk0` (the Vulkan loader) supplies on top of
-//! `subsdk1` (NVIDIA's driver). The host's Vulkan layer answers them, so the modules are `main` and `sdk` only. No
-//! engine family of nxkit holds the game.
+//! `subsdk1` (NVIDIA's driver). The host's Vulkan layer answers them, so the modules are `main` and `sdk` only. The
+//! engine family is `supergiant` (Supergiant Games' engine).
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v589824, the
 //! romfs marker and the run settings of the engine's `game.tsv`. The game has no NVN shaders: its 74 SPIR-V shaders
@@ -106,7 +106,7 @@ const NVN_FUNCTIONS: Fact<&'static str> = Fact::new(
     },
 );
 
-const VULKAN: Fact<GraphicsApi> = Fact::new(
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
     GraphicsApi::Vulkan,
     Evidence::Recorded {
         source: "engine tree dm/games/0100535012974000/README.md at 034e91a8: main imports 100 vk* functions and \
@@ -131,10 +131,6 @@ impl BuildHooks for Hades {
             romfs_marker: "/Content/EffectsForgeSwitch/Default.vert",
             settings: SETTINGS,
         })
-    }
-
-    fn graphics_api(&self) -> Option<Fact<GraphicsApi>> {
-        Some(VULKAN)
     }
 
     fn rewrite_rules(&self) -> Option<&'static str> {
@@ -165,8 +161,12 @@ impl Title for Hades {
         "Hades"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "supergiant"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {
@@ -206,10 +206,7 @@ mod tests {
 
     #[test]
     fn the_game_renders_with_vulkan() {
-        assert_eq!(
-            HADES.graphics_api().map(|f| f.value),
-            Some(GraphicsApi::Vulkan)
-        );
+        assert_eq!(Some(HADES.graphics().value), Some(GraphicsApi::Vulkan));
     }
 
     #[test]

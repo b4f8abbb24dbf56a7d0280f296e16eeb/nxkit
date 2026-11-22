@@ -1,8 +1,8 @@
 //! The title module of SteamWorld Heist II for Nintendo Switch (`010089C01E9CA000`).
 //!
 //! The game is update 1.5.1 (v262144) on SDK 17.5.6, graphics NVN. The engine tree names its engine: Thunderful's own
-//! engine (SteamWorld). No engine family of nxkit holds it. The modules are `main`, `subsdk0` and `sdk`. This module
-//! holds what the engine tree knows of the game.
+//! engine (SteamWorld). The engine family is `steamworld` (Image & Form's / Thunderful's SteamWorld engine). The
+//! modules are `main`, `subsdk0` and `sdk`. This module holds what the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v262144, the
 //! shader split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is
@@ -17,8 +17,8 @@
 //! when `main` imports `ScalableFontEngineHelper::Decode`, and nobody checked the imports of this game.
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -97,6 +97,15 @@ impl RuntimeHooks for Swheist2 {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Swheist2 {
     fn id(&self) -> TitleId {
         TitleId(0x0100_89C0_1E9C_A000)
@@ -106,8 +115,12 @@ impl Title for Swheist2 {
         "SteamWorld Heist II"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "steamworld"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

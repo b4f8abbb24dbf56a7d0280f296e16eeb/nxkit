@@ -1,8 +1,8 @@
 //! The title module of Brain Memory Training Academy for Nintendo Switch (`0100F5D01DA3A000`).
 //!
 //! The game is update 1.0.0 (v0) on SDK 16.2.4, graphics NVN. The engine tree names its engine: Unity 2022.3.5f1
-//! IL2CPP. No engine family of nxkit holds it. The modules are `main`, `subsdk0` and `sdk`. This module holds what the
-//! engine tree knows of the game.
+//! IL2CPP. The engine family is `unity` (Unity). The modules are `main`, `subsdk0` and `sdk`. This module holds what
+//! the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v0, the shader
 //! split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is not a
@@ -13,8 +13,8 @@
 //! the `sdk` module (12 implementations of the node area of 62 MB and of the 2 MB alignment of large regions).
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Runtime, RuntimeHooks, Service, Settings,
+    Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -106,6 +106,15 @@ impl RuntimeHooks for Bmta {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Bmta {
     fn id(&self) -> TitleId {
         TitleId(0x0100_F5D0_1DA3_A000)
@@ -115,8 +124,12 @@ impl Title for Bmta {
         "Brain Memory Training Academy"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "unity"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

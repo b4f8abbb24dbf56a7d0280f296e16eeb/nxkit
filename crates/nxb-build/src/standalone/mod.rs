@@ -13,6 +13,7 @@ mod extract;
 mod files;
 pub(crate) mod fonts;
 mod generic;
+mod graphics;
 mod icon;
 mod image;
 mod launcher;
@@ -94,6 +95,8 @@ struct Game {
     name: &'static str,
     st: Standalone,
     rules: &'static str,
+    /// The rewrite rules of the families as `(family id, TOML text)`. A file's scope is the family's id.
+    family_rules: Vec<(&'static str, &'static str)>,
     services: Vec<&'static str>,
     /// The graphics API the game renders with (`BuildHooks::graphics_api`).
     graphics: nxtitle::GraphicsApi,
@@ -119,6 +122,7 @@ fn module(src: &Inputs) -> Result<Option<Game>, String> {
     let (Some(st), Some(t)) = (r.standalone(), r.title) else {
         return Ok(None);
     };
+    graphics::supported(r.graphics_api(), t.name(), id)?;
     let rules = r.title_rules().ok_or_else(|| {
         format!("the title module of {id:016X} has build data and no rewrite rules")
     })?;
@@ -131,6 +135,7 @@ fn module(src: &Inputs) -> Result<Option<Game>, String> {
         name: t.name(),
         st,
         rules,
+        family_rules: r.family_rules(),
         services: r
             .nxkit_services()
             .into_iter()
@@ -385,6 +390,7 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             &t.st,
             &format!("{:016X}", t.id),
             t.rules,
+            &t.family_rules,
             |l| p.say(l),
             |done, total, name| {
                 p.set(Update {
@@ -453,6 +459,9 @@ pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
             launcher::launcher_json(t.id, &m.settings, nacp.as_deref(), t.render_args.is_some());
         put(nxkit_abi::launch::FILE, options.as_bytes())?;
         put("patches.toml", t.rules.as_bytes())?;
+        for (family, text) in &t.family_rules {
+            put(&format!("patches.{family}.toml"), text.as_bytes())?;
+        }
         put("main.npdm", &npdm_bytes)?;
         link::module_files(&run_dir, &mods, |done, total| {
             p.set(Update {

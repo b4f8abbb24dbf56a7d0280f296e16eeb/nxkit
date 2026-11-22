@@ -18,6 +18,9 @@ This file is for people who change the code. Read it before you open a pull requ
 - Only the crates and modules that rule 5 of [docs/architecture.md](docs/architecture.md#layers) names can contain `unsafe` code. Every other crate forbids it in its `Cargo.toml`.
 - Output must not depend on the order of completion or on the order of a `HashMap`.
 - Start child processes with `nxb_tool::Invocation` only.
+- A fact of a game, an engine or a graphics API goes into the title layer, not into the core. The table in
+  [docs/titles.md](docs/titles.md#rules-for-a-module) gives the one place for each fact. After you add a family or a
+  title module, run `python3 tools/gen_title_registry.py .`.
 - A change that alters output bytes must prove byte identity with the reference build. Show the comparison in the pull request.
 - Keep dependencies between layers legal. `cargo run -p xtask -- layers` checks them.
 

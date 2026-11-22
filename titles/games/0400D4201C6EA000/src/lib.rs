@@ -1,8 +1,8 @@
 //! The title module of Mario Tennis Fever for Nintendo Switch 2 (`0400D4201C6EA000`).
 //!
 //! The game is version v327680 on SDK 20.5.17 (Ounce), graphics NVN2. The engine tree names its engine: Camelot's
-//! engine, NintendoWare. No engine family of nxkit holds it. The modules are `main` and `sdk`. This module holds what
-//! the engine tree knows of the game.
+//! engine, NintendoWare. The engine family is `camelot` (Camelot's engine). The modules are `main` and `sdk`. This
+//! module holds what the engine tree knows of the game.
 //!
 //! The game builds without the engine ([`BuildHooks::standalone`]): the module holds the build IDs of v327680, the
 //! shader split settings, the romfs marker and the run settings of the engine's `game.tsv`. The NVN function list is
@@ -22,8 +22,8 @@
 //! The first fact of the module is a command buffer quirk (`vertex_stream_null_bind`).
 
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Memory, Need, Runtime, RuntimeHooks, Service, Settings, Standalone,
-    Title, TitleId,
+    BuildHooks, Evidence, Fact, GraphicsApi, Memory, Need, Runtime, RuntimeHooks, Service,
+    Settings, Standalone, Title, TitleId,
 };
 
 /// The title module.
@@ -125,6 +125,15 @@ impl RuntimeHooks for Mtf {
     }
 }
 
+/// The graphics API of the game, as the games table of the engine tree names it.
+const GRAPHICS: Fact<GraphicsApi> = Fact::new(
+    GraphicsApi::Nvn,
+    Evidence::Recorded {
+        source: "engine tree dm/games/README.md at 131bd013: the Graphics column of the games table",
+        read: "2026-11-22",
+    },
+);
+
 impl Title for Mtf {
     fn id(&self) -> TitleId {
         TitleId(0x0400_D420_1C6E_A000)
@@ -134,8 +143,12 @@ impl Title for Mtf {
         "Mario Tennis Fever"
     }
 
-    fn family(&self) -> Option<&'static str> {
-        None
+    fn engine(&self) -> &'static str {
+        "camelot"
+    }
+
+    fn graphics(&self) -> Fact<GraphicsApi> {
+        GRAPHICS
     }
 
     fn profile(&self) -> Option<&'static str> {

@@ -107,7 +107,7 @@ Left:
   variant's formats; anything else falls back.
 - Depends on package 0 only for types; can stub `nxkit-ndsr` as `native_ndve.rs` does in its tests.
 
-### D. Family layer and build facts (`titles/families/agl/src/lib.rs`, `crates/nxb-build/src/host/header.rs`)
+### D. Family layer and build facts (`titles/engines/agl/src/lib.rs`, `crates/nxb-build/src/host/header.rs`)
 
 - agl `shader_role`: match the archive names `agl_ndsr.pck`, `agl_ndsr_vr.pck`, `agl_ndsr_vr_light.pck` (the place
   strings of the shader map), evidence checked against ndsr-native.md section 2; fix the test's archive name.
