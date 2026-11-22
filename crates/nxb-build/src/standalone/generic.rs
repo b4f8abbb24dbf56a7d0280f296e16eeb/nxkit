@@ -155,6 +155,11 @@ pub(super) fn run(a: &Args, p: &Say) -> Result<(), String> {
             &bundle::info_plist(&bundle::file_name(name), &id, &game.version.to_string()),
         )?;
         put(&run, "game.json", analyzed.manifest(&game).as_bytes())?;
+        put(
+            &run,
+            nxkit_abi::launch::FILE,
+            analyzed.launcher(&game).as_bytes(),
+        )?;
         put(&run, "main.npdm", &game.npdm)?;
         for dir in &game.directories {
             let rel =

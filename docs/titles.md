@@ -101,6 +101,8 @@ A game with a title module has its engine family from `Title::engine`. A game wi
 | `unreal` | the rewriter found an engine console variable in `main` (`UE_CVAR:`), the folder `Content/Paks/` in the RomFS | the finder runs on recorded games, the folder is the engine's layout | in use |
 | `unity` | `Data/Managed/Metadata/global-metadata.dat`, `Data/globalgamemanagers`, `Data/data.unity3d` in the RomFS, `il2cpp_init` in a module | the engine's public file layout, not read from a game here | unverified |
 
+A family that gets rules or hooks gets its markers in the same commit.
+
 The other families have no marker. No trace of their engine is known that does not need a game to find it, and a guessed
 marker gives a wrong answer. Their `detect` stays `Unknown`. A family gets markers when a game of it shows a reliable
 trace. The test `engine_markers_are_unique_and_each_family_finds_itself` of `nxtitles` keeps the markers apart. The

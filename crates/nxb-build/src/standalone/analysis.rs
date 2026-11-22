@@ -184,6 +184,27 @@ pub(super) fn analyze(game: &extract::Extracted) -> Result<Analysis, String> {
 }
 
 impl Analysis {
+    /// The text of `launcher.json`: the options of the host with the default settings, and the object `build`.
+    pub(super) fn launcher(&self, game: &extract::Extracted) -> String {
+        let nacp = game
+            .files
+            .iter()
+            .find(|(n, _)| n == "control.nacp")
+            .map(|(_, b)| b.as_slice());
+        super::launcher::launcher_json_for(
+            game.title_id,
+            &self.settings,
+            nacp,
+            self.render_args.is_some(),
+            Some(&super::launcher::Build {
+                generic: true,
+                engine: self.engine,
+                graphics: self.graphics.id(),
+                evidence: self.engine_hits.clone(),
+            }),
+        )
+    }
+
     pub(super) fn manifest(&self, game: &extract::Extracted) -> String {
         manifest::game_json(&manifest::Manifest {
             title_id: game.title_id,

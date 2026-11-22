@@ -133,16 +133,45 @@ fn row(o: &Opt, game: &Game) -> Option<Value> {
     Some(Value::Object(f))
 }
 
+/// How the app was built, for a launcher: the object `build` of `launcher.json`.
+pub(crate) struct Build {
+    /// `title` for a build with a title module, `generic` for the generic path.
+    pub generic: bool,
+    /// The id of the engine family, if one is known.
+    pub engine: Option<&'static str>,
+    /// The graphics API of the game (`nxtitle::GraphicsApi::id`).
+    pub graphics: &'static str,
+    /// The short names of the markers that decided the engine (empty for a title module).
+    pub evidence: Vec<&'static str>,
+}
+
+fn build_object(b: &Build) -> Value {
+    Value::Object(vec![
+        (
+            "profile".to_string(),
+            s(if b.generic { "generic" } else { "title" }),
+        ),
+        ("engine".to_string(), b.engine.map_or(Value::Null, s)),
+        ("graphics".to_string(), s(b.graphics)),
+        (
+            "evidence".to_string(),
+            Value::List(b.evidence.iter().map(|e| s(e)).collect()),
+        ),
+    ])
+}
+
 /// The text of `launcher.json` for the title `title_id` with the run settings of its module, with the game's
 /// `control.nacp` when the extract has one. `render_size`: the title names the program arguments of its render size.
-pub(crate) fn launcher_json(
+/// `build` is the object `build` that tells a launcher how the app was made.
+pub(crate) fn launcher_json_for(
     title_id: u64,
     settings: &nxtitle::Settings,
     nacp: Option<&[u8]>,
     render_size: bool,
+    build: Option<&Build>,
 ) -> String {
     let game = Game::new(settings, nacp, render_size);
-    let v = Value::Object(vec![
+    let mut fields = vec![
         ("schema".to_string(), Value::Int(i64::from(launch::SCHEMA))),
         ("game".to_string(), s(&format!("{title_id:016X}"))),
         (
@@ -154,15 +183,77 @@ pub(crate) fn launcher_json(
                     .collect(),
             ),
         ),
-    ]);
-    let mut t = nxb_pyjson::dumps_indent(&v, 1);
+    ];
+    if let Some(b) = build {
+        fields.push(("build".to_string(), build_object(b)));
+    }
+    let mut t = nxb_pyjson::dumps_indent(&Value::Object(fields), 1);
     t.push('\n');
     t
+}
+
+/// [`launcher_json_for`] without the object `build`.
+#[cfg(test)]
+pub(crate) fn launcher_json(
+    title_id: u64,
+    settings: &nxtitle::Settings,
+    nacp: Option<&[u8]>,
+    render_size: bool,
+) -> String {
+    launcher_json_for(title_id, settings, nacp, render_size, None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_object_build_tells_a_launcher_how_the_app_was_made() {
+        let text = launcher_json_for(
+            1,
+            &nxtitle::Settings::DEFAULT,
+            None,
+            false,
+            Some(&Build {
+                generic: true,
+                engine: Some("unity"),
+                graphics: "vulkan",
+                evidence: vec!["Unity"],
+            }),
+        );
+        let v = nxb_pyjson::parse(&text).unwrap();
+        let b = v.get("build").unwrap();
+        assert_eq!(b.get("profile").and_then(Value::as_str), Some("generic"));
+        assert_eq!(b.get("engine").and_then(Value::as_str), Some("unity"));
+        assert_eq!(b.get("graphics").and_then(Value::as_str), Some("vulkan"));
+        assert_eq!(
+            b.get("evidence").and_then(Value::as_list).map(<[_]>::len),
+            Some(1)
+        );
+        let none = launcher_json_for(
+            1,
+            &nxtitle::Settings::DEFAULT,
+            None,
+            false,
+            Some(&Build {
+                generic: false,
+                engine: None,
+                graphics: "nvn",
+                evidence: vec![],
+            }),
+        );
+        let v = nxb_pyjson::parse(&none).unwrap();
+        let b = v.get("build").unwrap();
+        assert_eq!(b.get("profile").and_then(Value::as_str), Some("title"));
+        assert_eq!(b.get("engine"), Some(&Value::Null));
+        // without the object, the file is as before
+        assert!(
+            nxb_pyjson::parse(&launcher_json(1, &nxtitle::Settings::DEFAULT, None, false))
+                .unwrap()
+                .get("build")
+                .is_none()
+        );
+    }
 
     fn rows(json: &str) -> Vec<Value> {
         let v = nxb_pyjson::parse(json).unwrap();

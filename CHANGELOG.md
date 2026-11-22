@@ -39,6 +39,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   names in the RomFS, found in one pass. `Catalog::detect_engine` takes the one family that matches, or the one that
   refines the others. Only `unreal` and `unity` have markers. `game.json` of such a build has `generic` and `engine`
   (family, markers, candidates), and the host prints a line at its start.
+  `launcher.json` has the optional object `build` (`profile` title or generic, `engine`, `graphics`, `evidence`) for a
+  launcher, and the generic path writes the file too.
 
 ## 0.15.2 - 2026-11-22
 
