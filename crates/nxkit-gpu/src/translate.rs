@@ -199,7 +199,8 @@ fn wrap(nvn: u8) -> Wrap {
     }
 }
 
-fn border(c: [f32; 4]) -> Border {
+/// The border colour of Metal that stands in for `c`: transparent black for a clear colour, else white or black.
+pub(crate) fn border(c: [f32; 4]) -> Border {
     if c[3] < 0.5 {
         Border::TransparentBlack
     } else if c[0] + c[1] + c[2] > 1.5 {

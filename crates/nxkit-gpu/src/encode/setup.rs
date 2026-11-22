@@ -274,6 +274,16 @@ pub(super) fn setup(sh: &EncodeCtx<'_>, pass: &Pass) -> Result<Setup, Skip> {
         }
         let s = store(a.store, mem);
         let clear = clear_of(sh, pass, a.slot);
+        if l == MLoad::Clear && matches!(a.slot, Slot::Color(_)) && crate::diag("clear") {
+            // Process-wide (W26): a rate limit of a diagnostic has no context to live in.
+            static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if nxkit_nvn::diag::first(&SHOWN, 60) {
+                eprintln!(
+                    "DIAG clear encode colour {:?} {:?} {:?} {}x{} colour {:?} cmds {:?}",
+                    a.slot, a.tex, d.format, d.width, d.height, clear.color, pass.cmds
+                );
+            }
+        }
         if let Some(b) = block {
             blocks.push((b, l == MLoad::Load, s == MStore::Store));
         }

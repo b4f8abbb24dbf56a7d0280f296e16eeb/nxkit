@@ -375,7 +375,7 @@ impl GpuEnv {
     }
 }
 
-pub(crate) use crate::gpulive::settings::TexFilter;
+pub(crate) use crate::gpulive::settings::{FsTrace, TexFilter};
 pub use crate::gpulive::settings::{GpuLive, LIVE};
 pub(crate) use crate::gpulive::settings::{live, skip_keys};
 

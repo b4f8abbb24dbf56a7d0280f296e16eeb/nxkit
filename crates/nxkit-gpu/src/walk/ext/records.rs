@@ -193,6 +193,23 @@ impl Walker {
                 if slot < MAX_COLOR {
                     let kind = x.arg >> 8;
                     let c = |i: usize| clear_value(kind, x.word(1 + i));
+                    if crate::diag("clear") {
+                        // Process-wide (W26): a rate limit of a diagnostic has no context to live in.
+                        static SHOWN: std::sync::atomic::AtomicU32 =
+                            std::sync::atomic::AtomicU32::new(0);
+                        if nxkit_nvn::diag::first(&SHOWN, 60) {
+                            eprintln!(
+                                "DIAG clear walk colour slot {slot} kind {kind} words {:#x} {:#x} {:#x} {:#x} {:#x} values {:?} scissor {:?}",
+                                x.word(0),
+                                x.word(1),
+                                x.word(2),
+                                x.word(3),
+                                x.word(4),
+                                [c(0), c(1), c(2), c(3)],
+                                st.scissor
+                            );
+                        }
+                    }
                     self.out.clears.push(ClearDetail {
                         color: [c(0), c(1), c(2), c(3)],
                         ..ClearDetail::default()

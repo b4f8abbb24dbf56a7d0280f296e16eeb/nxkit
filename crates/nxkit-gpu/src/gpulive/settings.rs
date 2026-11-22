@@ -25,6 +25,57 @@ pub struct GpuLive {
     pub diag_watch: Vec<(u64, usize)>,
     /// `NXKIT_PASS_LIST` is set: the pass diagnostic lists every pass.
     pub pass_list: bool,
+    /// `NXKIT_BARPASS=<pass index>`: the pass whose barrier plan is traced.
+    pub bar_pass: Option<usize>,
+    /// `NXKIT_TRACE_FS=<fragment program key>[:slot,slot,..]`: the draws that are traced.
+    pub trace_fs: Option<FsTrace>,
+    /// `NXKIT_TRACE_HANDLES=<handle,..>`: the bindless handles whose resolve is traced.
+    pub trace_handles: Vec<u64>,
+}
+
+/// The draws of one fragment program that `NXKIT_TRACE_FS` traces, and the texture slots that it prints.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FsTrace {
+    /// The shader key of the fragment program.
+    pub program: String,
+    /// The fragment texture slots. Empty means every bound slot.
+    pub slots: Vec<u32>,
+}
+
+impl FsTrace {
+    /// Parses `KEY` or `KEY:slot,slot,..`. An empty key gives none. A slot that is not a number is left out.
+    pub fn parse(v: &str) -> Option<Self> {
+        let (key, slots) = v.split_once(':').unwrap_or((v, ""));
+        let program = key.trim();
+        if program.is_empty() {
+            return None;
+        }
+        Some(FsTrace {
+            program: program.to_owned(),
+            slots: slots
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect(),
+        })
+    }
+
+    /// Whether the trace prints fragment texture slot `slot`.
+    pub fn wants(&self, slot: u32) -> bool {
+        self.slots.is_empty() || self.slots.contains(&slot)
+    }
+}
+
+/// The handles of a list, comma separated, in decimal or as `0x` hex. A part that is not a number is left out.
+pub(crate) fn handle_list(v: &str) -> Vec<u64> {
+    v.split(',')
+        .filter_map(|s| {
+            let s = s.trim();
+            match s.strip_prefix("0x") {
+                Some(h) => u64::from_str_radix(h, 16).ok(),
+                None => s.parse().ok(),
+            }
+        })
+        .collect()
 }
 
 impl Default for GpuLive {
@@ -66,6 +117,18 @@ impl GpuLive {
                 .map(|v| watch_ranges(&v))
                 .unwrap_or_default(),
             pass_list: env.var_os("NXKIT_PASS_LIST").is_some(),
+            bar_pass: env
+                .var("NXKIT_BARPASS")
+                .ok()
+                .and_then(|v| v.trim().parse().ok()),
+            trace_fs: env
+                .var("NXKIT_TRACE_FS")
+                .ok()
+                .and_then(|v| FsTrace::parse(&v)),
+            trace_handles: env
+                .var("NXKIT_TRACE_HANDLES")
+                .map(|v| handle_list(&v))
+                .unwrap_or_default(),
         }
     }
 }
@@ -170,6 +233,18 @@ pub const LIVE: Section = Section {
         LiveKey {
             name: "NXKIT_PASS_LIST",
             help: "set: the pass diagnostic lists every pass",
+        },
+        LiveKey {
+            name: "NXKIT_BARPASS",
+            help: "the index of a pass whose barrier plan is traced (every 60th frame)",
+        },
+        LiveKey {
+            name: "NXKIT_TRACE_FS",
+            help: "FRAGMENT_KEY[:slot,slot,..]: traces every 300th draw of the program and its textures",
+        },
+        LiveKey {
+            name: "NXKIT_TRACE_HANDLES",
+            help: "the bindless handles whose resolve is traced, comma separated",
         },
     ],
     apply: |env| LIVE_CELL.set(GpuLive::from_env(env)),

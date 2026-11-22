@@ -309,7 +309,7 @@ fn one(
         crate::tex_skip(what)
     })?;
     let id = slot.texture;
-    if crate::diag("barr") || crate::diag("nanscan") {
+    if crate::diag::tracks_handles() {
         crate::diag::note_handle(handle, id);
     }
     if let std::collections::hash_map::Entry::Vacant(e) = textures.entry(id) {
