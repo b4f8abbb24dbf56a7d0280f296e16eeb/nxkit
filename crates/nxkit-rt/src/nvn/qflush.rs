@@ -74,13 +74,26 @@ pub(crate) fn merge(old: Option<Due>, submits: u64, sent: u64, now: Instant) -> 
 }
 
 /// The counters and the pending request of the context.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct QueueFlush {
     submitted: AtomicU64,
     sent: AtomicU64,
     due: Mutex<Option<Due>>,
     cv: Condvar,
     watcher: Once,
+}
+
+// `Once` implements `Default` only from Rust 1.100 on, and the workspace builds with 1.99.
+impl Default for QueueFlush {
+    fn default() -> Self {
+        Self {
+            submitted: AtomicU64::new(0),
+            sent: AtomicU64::new(0),
+            due: Mutex::new(None),
+            cv: Condvar::new(),
+            watcher: Once::new(),
+        }
+    }
 }
 
 impl QueueFlush {
