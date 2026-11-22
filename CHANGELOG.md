@@ -6,6 +6,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- The RGBX texture formats (0x6D to 0x78) are made as the RGBA format of the same size, and a sampling view reads
+  their alpha as one (#42). The draws that sampled one were left out. Xenoblade Chronicles 3 samples an RGBX8
+  colour grading table, and its tone mapping pass did not run.
 - The guest threads that the services start get the priority of `nn::os`, 16 (#42). They got 44, the kernel's
   default, which the kernel refused as 72. The SDK of Xenoblade Chronicles 3 aborted when the opening movie started.
 - A decoder event that a host thread asks for runs on one guest thread of the video service (#42). Each event

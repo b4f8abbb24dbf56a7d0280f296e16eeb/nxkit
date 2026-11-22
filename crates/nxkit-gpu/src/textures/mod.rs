@@ -36,7 +36,7 @@ use self::views::format_key;
 use nxkit_nvn::resource::{Residency, TexId, TextureRecord};
 use nxkit_nvn::tic::Tic;
 
-use crate::format_map::{Mapped, texture_format};
+use crate::format_map::{Mapped, sample_swizzle, texture_format};
 use crate::skip::Skip;
 use crate::stats::EncodeStats;
 

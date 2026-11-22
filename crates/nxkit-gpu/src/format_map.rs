@@ -95,6 +95,20 @@ pub(crate) fn texture_format(nvn: i32) -> Option<Mapped> {
         0x4E => exact(F::Bc(BcKind::Bc7Srgb)),
         0x4F => exact(F::Bc(BcKind::Bc6hSfloat)),
         0x50 => exact(F::Bc(BcKind::Bc6hUfloat)),
+        // RGBX: the bytes of RGBA, and a read of alpha gives one ([`sample_swizzle`]). 0x6D is checked against the
+        // 16x16x16 colour grading table of Xenoblade Chronicles 3, the other rows are unverified.
+        0x6D => exact(F::Rgba8Unorm),
+        0x6E => exact(F::Rgba8Snorm),
+        0x6F => exact(F::Rgba8Uint),
+        0x70 => exact(F::Rgba8Sint),
+        0x71 => exact(F::Rgba16Float),
+        0x72 => exact(F::Rgba16Unorm),
+        0x73 => exact(F::Rgba16Snorm),
+        0x74 => exact(F::Rgba16Uint),
+        0x75 => exact(F::Rgba16Sint),
+        0x76 => exact(F::Rgba32Float),
+        0x77 => exact(F::Rgba32Uint),
+        0x78 => exact(F::Rgba32Sint),
         0x79..=0x86 => exact(F::Astc {
             size: (nvn - 0x79) as u8,
             srgb: false,
@@ -109,6 +123,16 @@ pub(crate) fn texture_format(nvn: i32) -> Option<Mapped> {
         0x99 | 0x9A => exact(F::Bgra8Unorm),
         0x9B | 0x9C => exact(F::Bgra8UnormSrgb),
         _ => None,
+    }
+}
+
+/// The channel swizzle of a sampling view of NVN format `nvn` (0 zero, 1 one, 2 R, 3 G, 4 B, 5 A). An RGBX format
+/// (0x6D to 0x78) has no alpha in its texels, so a read of alpha gives one.
+pub(crate) fn sample_swizzle(nvn: i32, swizzle: [u8; 4]) -> [u8; 4] {
+    if (0x6D..=0x78).contains(&nvn) {
+        swizzle.map(|s| if s == 5 { 1 } else { s })
+    } else {
+        swizzle
     }
 }
 
@@ -200,6 +224,22 @@ mod tests {
                 srgb: false
             })
         );
+    }
+
+    #[test]
+    fn rgbx_formats_are_rgba_and_read_alpha_as_one() {
+        // Xenoblade Chronicles 3 samples a 16x16x16 RGBX8 colour grading table
+        assert_eq!(
+            texture_format(0x6D).map(Mapped::format),
+            Some(Format::Rgba8Unorm)
+        );
+        assert_eq!(
+            texture_format(0x76).map(Mapped::format),
+            Some(Format::Rgba32Float)
+        );
+        assert_eq!(sample_swizzle(0x6D, [2, 3, 4, 5]), [2, 3, 4, 1]);
+        assert_eq!(sample_swizzle(0x6D, [5, 5, 5, 5]), [1, 1, 1, 1]);
+        assert_eq!(sample_swizzle(0x25, [2, 3, 4, 5]), [2, 3, 4, 5]);
     }
 
     #[test]

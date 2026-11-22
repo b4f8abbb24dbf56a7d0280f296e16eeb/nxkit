@@ -198,13 +198,14 @@ impl TextureStore {
             TextureKind::CubeArray => slice_count * 6 == slices,
             _ => slice_count == slices,
         };
+        let swizzle = sample_swizzle(tic.view.format.unwrap_or(tic.format), tic.view.swizzle);
         let identity = first_level == 0
             && level_count == d.mip_levels
             && first_slice == 0
             && full
             && format == d.format
             && kind == d.kind
-            && tic.view.swizzle == [2, 3, 4, 5];
+            && swizzle == [2, 3, 4, 5];
         if (identity && atomic == 0) || d.storage == Storage::Memoryless {
             return Ok(res.tex.clone());
         }
@@ -217,7 +218,7 @@ impl TextureStore {
                 slice_count,
                 format_key(format) ^ (u32::from(atomic) << 30),
                 kind as u32,
-                u32::from_le_bytes(tic.view.swizzle),
+                u32::from_le_bytes(swizzle),
             ],
         );
         let mut views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
@@ -233,7 +234,7 @@ impl TextureStore {
             slice_count,
         };
         let made = if atomic == 0 {
-            res.tex.view_swizzled(&vd, tic.view.swizzle)
+            res.tex.view_swizzled(&vd, swizzle)
         } else {
             res.tex.atomic_view(&vd, atomic == 2)
         };
