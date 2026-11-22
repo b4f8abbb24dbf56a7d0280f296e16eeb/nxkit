@@ -325,6 +325,16 @@ pub(super) fn draw(
     if crate::diag::skip_list_on() && listed_skip(&d.program) {
         return stats.skip_draw(Some(&d.args), Skip::Listed);
     }
+    // A patch module (W37) may skip the draw or change its blend state, textures and stencil reference.
+    let patched;
+    let d = match crate::patch::draw(sh, DIAG_PASS.with(std::cell::Cell::get), n, d) {
+        crate::patch::Draw::Keep => d,
+        crate::patch::Draw::Skip => return stats.skip_draw(Some(&d.args), Skip::Listed),
+        crate::patch::Draw::Replace(p) => {
+            patched = p;
+            &*patched
+        }
+    };
     // With NXKIT_DIAG_FS, every draw of a listed fragment program prints, on every frame.
     let listed = crate::diag("draw") && listed_draw(d);
     if listed || draw_diag("draw", &DRAW_SHOWN) {

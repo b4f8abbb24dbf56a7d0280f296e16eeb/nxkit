@@ -57,6 +57,7 @@ mod ordinal;
 mod overlap;
 mod passes;
 mod passprof;
+mod patch;
 mod pipelines;
 mod poolreg;
 mod pools;

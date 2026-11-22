@@ -378,7 +378,7 @@ impl Gpu {
         }
         let res = textures.get(&id).ok_or(Skip::Texture)?;
         let tex_view = self.store.view(id, res, &slot.header, stats)?;
-        if crate::diag("barr") || crate::diag("nanscan") {
+        if crate::diag("barr") || crate::diag("nanscan") || crate::patch::handles_on() {
             crate::diag::note_handle(handle, id);
         }
         if crate::diag("bc") && res.desc.format.is_compressed() {

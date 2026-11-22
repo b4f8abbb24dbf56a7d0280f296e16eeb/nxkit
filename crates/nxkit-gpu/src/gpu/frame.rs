@@ -74,6 +74,7 @@ impl Gpu {
         let detail = augmented.as_ref().unwrap_or(detail);
         self.native.begin_frame();
         let diag_frame = crate::diag::begin_frame();
+        crate::patch::frame_begin(plan.passes.len(), detail.draws.len());
         let lum = crate::lum::begin();
         let scan = crate::nanscan::begin(&self.ctx);
         let t0 = Instant::now();
@@ -545,6 +546,7 @@ impl Gpu {
             let _ = self.wait();
             self.tiny_frame_end(view, &textures, &mirrored);
         }
+        crate::patch::frame_end(&stats);
         crate::health::frame(diag_frame, &stats);
         Ok(EncodeReport {
             batch: number,
