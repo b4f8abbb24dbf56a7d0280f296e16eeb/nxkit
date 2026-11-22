@@ -38,6 +38,9 @@ pub enum FlushReason {
     /// A CPU event signal released held submits with a lot of work: the frame goes to the GPU before the present, so the
     /// encode starts earlier (`NXKIT_RELEASE_FLUSH`).
     Release,
+    /// The work that a queue was given before an `nvnQueueFlush` reached no other flush in time: it goes to the GPU by
+    /// itself, as on the console, so a game that polls a report of it sees the report land.
+    Queue,
 }
 
 /// A failure that the backend reports. The text is for the log.

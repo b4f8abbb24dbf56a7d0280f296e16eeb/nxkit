@@ -33,6 +33,9 @@
 //! of the work starts those ms earlier. The flush runs no held op. The submits that it carries and the fences they make
 //! belong to its number; what is still held and what comes after goes into the next flush, which the present makes.
 //!
+//! `nvnQueueFlush` flushes the frame when no other flush took the submits before it along within 50 ms
+//! (`FlushReason::Queue`, `qflush`). It runs no held op either.
+//!
 //! A backend may encode a flushed frame on a thread of its own. [`Backend::wait_fence`] and [`Backend::wait_idle`] then
 //! wait for that thread, and [`Backend::settle`] brings the texture table up to date before the front end reads the
 //! residency of a texture (`nvnTextureReadTexels`). [`Backend::flush_frame`] settles the frame before it.
@@ -205,6 +208,8 @@ pub(crate) struct Gpu {
     gate: Mutex<gate::Gate>,
     /// Whether a CPU event signal that released a lot of work flushes the frame at once, and how much work is a lot.
     release_flush: order::ReleaseFlush,
+    /// The submits that went into the frame and those that a flush took along, for `nvnQueueFlush` (`qflush`).
+    pub(crate) queue_flush: super::qflush::QueueFlush,
     /// The ranges of `nvnMemoryPoolFlushMappedRange` that [`Gpu::lock`] has not yet told the front end.
     pending_writes: Mutex<Vec<(u64, u64)>>,
     /// The memory spans of recordings that ended since the last [`Gpu::lock`] (`nvnCommandBufferEndRecording`): the front
@@ -250,6 +255,7 @@ impl Gpu {
                 on: env.release_flush,
                 min_work: env.release_flush_min,
             },
+            queue_flush: super::qflush::QueueFlush::default(),
             pending_writes: Mutex::new(Vec::new()),
             pending_recorded: Mutex::new(Vec::new()),
             writes_dirty: AtomicBool::new(false),
@@ -385,10 +391,11 @@ impl Gpu {
                 self.gate().held.len()
             ));
         }
-        // A release flush runs nothing that is still held: what waits for a signal stays held for the flush after.
+        // A release or queue flush runs nothing that is still held: what waits for a signal stays held for the flush
+        // after, as the console's GPU waits for it.
         let (held, forced) = {
             let mut gate = self.gate();
-            let held = if reason == FlushReason::Release {
+            let held = if matches!(reason, FlushReason::Release | FlushReason::Queue) {
                 Ok(())
             } else {
                 self.release_all(front, &mut gate)
@@ -403,6 +410,7 @@ impl Gpu {
             );
         }
         self.vpool_watch(front);
+        self.queue_flush.sent();
         if front.frame_is_empty() {
             super::gateseq::note(format_args!("FLUSH {reason:?} found an empty frame"));
             return Ok(Fence(self.flushed()));
@@ -494,6 +502,7 @@ impl Gpu {
         // The backend's walk and the front end's decode read the same recordings and do not depend on each other, so the
         // walk runs on a helper thread while this one decodes. The walk ends before the front lock goes, so the next
         // flush finds it done, as when both ran here one after the other.
+        self.queue_flush.submitted();
         let deferred = self.backend.submit(queue, handles, origin_lower_left);
         let qos = nxkit_hos::sys::current_qos();
         let failed = std::thread::scope(|s| {

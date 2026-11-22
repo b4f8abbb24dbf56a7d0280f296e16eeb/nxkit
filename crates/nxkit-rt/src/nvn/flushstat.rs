@@ -1,6 +1,6 @@
 //! The flushes of a frame by reason, and how long each took to reach the GPU (`NXKIT_DIAG=frame` and `gateseq`).
 //!
-//! Per reason (release, present, CPU wait) it counts the flushes and, of the flushes whose batch completed, adds
+//! Per reason (release, present, CPU wait, queue flush) it counts the flushes and, of the flushes whose batch completed, adds
 //! - the time from the start of the flush to the first commit of its batch (for a release flush from the CPU event
 //!   signal that released the submits, so the decode of the released submits is in it), and
 //! - the time from that commit to the start of the batch on the GPU.
@@ -16,13 +16,17 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 use nxkit_nvn::front::FlushReason;
 
 /// The reasons, in the order of the counters.
-pub(crate) const NAMES: [&str; 3] = ["release", "present", "cpuwait"];
+pub(crate) const NAMES: [&str; REASONS] = ["release", "present", "cpuwait", "queue"];
+
+/// The number of reasons.
+const REASONS: usize = 4;
 
 fn index(reason: FlushReason) -> usize {
     match reason {
         FlushReason::Release => 0,
         FlushReason::Present => 1,
         FlushReason::CpuWait => 2,
+        FlushReason::Queue => 3,
     }
 }
 
@@ -80,15 +84,15 @@ impl Sums {
     }
 }
 
-static FLUSHES: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
-static TIMED: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
-static TO_COMMIT: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
-static TO_START: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static FLUSHES: [AtomicU64; REASONS] = [const { AtomicU64::new(0) }; REASONS];
+static TIMED: [AtomicU64; REASONS] = [const { AtomicU64::new(0) }; REASONS];
+static TO_COMMIT: [AtomicU64; REASONS] = [const { AtomicU64::new(0) }; REASONS];
+static TO_START: [AtomicU64; REASONS] = [const { AtomicU64::new(0) }; REASONS];
 /// The start of the release that the next release flush belongs to.
 static RELEASE_AT: AtomicU64 = AtomicU64::new(0);
 
 /// The counters since the last call, by reason (see [`NAMES`]).
-pub(crate) fn take() -> [Sums; 3] {
+pub(crate) fn take() -> [Sums; REASONS] {
     std::array::from_fn(|i| Sums {
         flushes: FLUSHES[i].swap(0, Ordering::Relaxed),
         timed: TIMED[i].swap(0, Ordering::Relaxed),
@@ -211,5 +215,6 @@ mod tests {
         assert_eq!(NAMES[index(FlushReason::Release)], "release");
         assert_eq!(NAMES[index(FlushReason::Present)], "present");
         assert_eq!(NAMES[index(FlushReason::CpuWait)], "cpuwait");
+        assert_eq!(NAMES[index(FlushReason::Queue)], "queue");
     }
 }

@@ -70,6 +70,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - A GPU-written texture with `NVN_TEXTURE_FLAGS_COMPRESSIBLE` in compressible pool memory is not copied back into
   guest memory at the end of the frame. On the console its bytes are compressed, so the CPU cannot read them.
   Octopath Traveler (Unreal Engine 4) copied back about 105 MB of render targets in each frame, 2.3 ms of GPU time.
+- `nvnQueueFlush` sends the submitted work to the GPU when no present, wait or other flush did so within 50 ms. On
+  the console flushed work runs by itself, and Unreal Engine 4.18 polls the report of an occlusion query with no
+  present and no wait. In a normal Octopath Traveler run it flushes in about 1 of 1600 frames.
+
 ## 0.15.0 - 2026-11-22
 
 ### Added

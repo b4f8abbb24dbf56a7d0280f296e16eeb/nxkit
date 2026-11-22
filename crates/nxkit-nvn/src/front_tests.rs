@@ -148,7 +148,8 @@ fn a_recording_that_is_submitted_every_frame_is_decoded_once() {
         FlushStats {
             present: 3,
             cpu_wait: 0,
-            release: 0
+            release: 0,
+            queue: 0
         }
     );
     assert!(f.submit(CommandHandle(CMD + 0x1000)).is_err());
@@ -372,7 +373,8 @@ fn flushes_are_counted_by_reason() {
         FlushStats {
             present: 1,
             cpu_wait: 2,
-            release: 1
+            release: 1,
+            queue: 0
         }
     );
 }

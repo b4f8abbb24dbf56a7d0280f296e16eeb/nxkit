@@ -176,8 +176,20 @@ fn submit_commands_in(q: u64, n: i32, handles: u64) {
     });
 }
 
-/// `nvnQueueFlush`: the host replays a frame when the game presents or waits, so a flush has nothing to send.
-extern "C" fn queue_flush(_q: u64) {}
+/// `nvnQueueFlush`: the work submitted so far reaches the GPU in time, also when no present or wait follows (`qflush`).
+extern "C" fn queue_flush(_q: u64) {
+    gpu("nvnQueueFlush").queue_flush.request(|reason| {
+        let Some(g) = super::ctx::installed() else {
+            return;
+        };
+        if let Err(e) = g.flush(reason) {
+            log_once(
+                "nvnQueueFlush",
+                format_args!("nvnQueueFlush: the flush of the submitted work failed: {e}"),
+            );
+        }
+    });
+}
 
 extern "C" fn queue_finish(_q: u64) {
     super::frametime::timed(super::frametime::Part::Wait, || {

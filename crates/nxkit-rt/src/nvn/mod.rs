@@ -33,6 +33,7 @@ pub(crate) mod frametime;
 pub(crate) mod gateseq;
 pub(crate) mod pool;
 pub(crate) mod program;
+mod qflush;
 pub(crate) mod queue;
 pub(crate) mod sampler;
 pub(crate) mod state;

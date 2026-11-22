@@ -40,6 +40,8 @@ pub struct FlushStats {
     pub cpu_wait: u64,
     /// Frames that the release of held submits by a CPU event signal ended early.
     pub release: u64,
+    /// Frames that went to the GPU because an `nvnQueueFlush` found no other flush in time.
+    pub queue: u64,
 }
 
 /// The memory callback of a game (`nvnCommandBufferSetMemoryCallback`). The host implements it
@@ -431,12 +433,14 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             FlushReason::Present => self.flushes.present += 1,
             FlushReason::CpuWait => self.flushes.cpu_wait += 1,
             FlushReason::Release => self.flushes.release += 1,
+            FlushReason::Queue => self.flushes.queue += 1,
         }
         self.analyser
             .analyse(&self.frame, &self.table, &mut self.plan)?;
         crate::rendercond::frame_diag(&mut self.render, &self.frame);
         self.render.flushed();
-        let flushed = self.flushes.present + self.flushes.cpu_wait + self.flushes.release;
+        let f = self.flushes;
+        let flushed = f.present + f.cpu_wait + f.release + f.queue;
         if flushed.is_multiple_of(SCAN_EVERY) {
             self.scan_outside_pools();
         }

@@ -1,4 +1,4 @@
-//! Tests of the GPU context: fences, waits, finish, command buffer numbers and the release flush.
+//! Tests of the GPU context: fences, waits, finish, command buffer numbers, the release and the queue flush.
 
 use super::*;
 use nxkit_nvn::backend::{BackendResult, PoolInfo};
@@ -215,6 +215,26 @@ fn a_release_flush_leaves_the_held_ops_held() {
     assert_eq!(g.gate().held.len(), 1, "the op that waits stays held");
     // Held work is work of the next flush: its fence is the next number.
     assert_eq!(g.fence_now(), Fence(2));
+}
+
+#[test]
+fn a_queue_flush_sends_the_frame_leaves_the_held_ops_held_and_notes_the_submits() {
+    let spy = Arc::new(Spy::default());
+    let g = gpu_with(spy.clone());
+    work(&g, 2);
+    g.queue_flush.submitted();
+    g.gate().push(
+        0xa,
+        gate::Op::Submit {
+            handles: vec![CommandHandle(1)],
+            origin: false,
+        },
+    );
+    assert_eq!(g.flush(FlushReason::Queue).expect("flush"), Fence(1));
+    assert_eq!(sent(&spy), vec![(FlushReason::Queue, 1, 2)]);
+    assert_eq!(g.gate().held.len(), 1, "the op that waits stays held");
+    assert_eq!(g.lock().flushes().queue, 1);
+    assert_eq!(g.queue_flush.unsent(), 0, "the flush took the submit along");
 }
 
 fn residency(g: &Gpu, id: TexId) -> nxkit_nvn::resource::Residency {
