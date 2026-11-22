@@ -72,8 +72,8 @@ const RES_ARGS: Evidence = Evidence::Recorded {
 /// `r.DefaultFeature.AntiAliasing=2` turned on temporal anti-aliasing. The pak was written by the reference tool
 /// `mkpak.py` (version 4, uncompressed, the same layout as the writer in `cvarpak`).
 pub const CVAR_PAK: Evidence = Evidence::Recorded {
-    source: "manual run of OCTOPATH TRAVELER v327680 with Kingship/Content/Paks/Kingship-Switch_1_P.pak (tools \
-             /Volumes/NX/nxkit-work/taa/pak.py and mkpak.py)",
+    source: "manual run of OCTOPATH TRAVELER v327680 with Kingship/Content/Paks/Kingship-Switch_1_P.pak, written by \
+             the reference tools pak.py and mkpak.py",
     read: "2026-11-22",
 };
 

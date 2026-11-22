@@ -88,7 +88,7 @@ const NVN_FUNCTIONS: Fact<&'static str> = Fact::new(
 /// half size, and temporal anti-aliasing turned on.
 const CVAR_RUN: Evidence = Evidence::Recorded {
     source: "manual run of OCTOPATH TRAVELER v327680 with Kingship/Content/Paks/Kingship-Switch_1_P.pak, \
-             r.ScreenPercentage=50 and r.DefaultFeature.AntiAliasing=2 (/Volumes/NX/nxkit-work/taa)",
+             r.ScreenPercentage=50 and r.DefaultFeature.AntiAliasing=2",
     read: "2026-11-22",
 };
 
