@@ -80,7 +80,7 @@ The title module and its family module answer the settings through their `nxtitl
 
 Required keys: `args`, `env`, `launch_param`, `display_versions` (a list of `{ "build_id", "version" }`), `core_preempt`, `present_display`, `fps_target` (`NXKIT_FPS_TARGET` wins where the title offers the rate, see launcher.json), `fps_max`, `fps_hold`, `present_snap`, `pso_mtl4`, `enc_thread`, `screen_aspect`, `pad_layout`, `op_mode` (`NXKIT_OP_MODE` wins, see launcher.json), `perf_boost`, `tex_flush_upload`, `tex_dirty_upload`, `tex_dyn_slots`, `render_cond`, `vertex_stream_null_bind`, `vconv_range`, `draw_barriers_game`, `shader_key_skip` (`{ "offset", "length" }`) and `upscaler_keys`.
 
-Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
+Optional keys: `shared_font`, `nvn_api` (`{ "major", "minor" }`), `optional_imports`, a list of import names that may stay 0 because the game checks them before it calls them, `shared_font_decode` (a flag, false when absent), `set_refresh` (a refresh rate in Hz that the display is switched to for the run, 0 when absent; `NXKIT_SET_REFRESH` wins), `fps_free` (a flag, false when absent: the game accepts any frame rate, see `docs/pacing.md`), `spatial_audio` (a flag, false when absent: the default of `NXKIT_SPATIAL_AUDIO`, which wins, see launcher.json) and `sf_services` (a list of service names that the system service answers with zeroed output). Any other import that nothing provides stops the load.
 
 Any other key goes unread, in order, to the service that the title module addressed. The core has no name for it. An engine setting is one example.
 
@@ -118,6 +118,8 @@ The launch options of the host, for a launcher such as NX2Apple. The host does n
 | `NXKIT_HOME_MENU` | toggle | `1`, `0` | `1` |
 | `NXKIT_HOME_QUIT` | toggle | `1`, `0` | `1` |
 | `NXKIT_METAL_HUD` | toggle | `1`, `0` | `0` |
+| `NXKIT_SPATIAL_AUDIO` | toggle | `1` (the game gets 5.1, played as spatial audio), `0` (stereo) | the `spatial_audio` of the title module, else `0` |
+| `NXKIT_HEAD_TRACKING` | toggle, needs `NXKIT_SPATIAL_AUDIO=1` | `1`, `0` | `0` |
 
 The launcher keeps the choice of the player for a row as the string `launcher.<env>` in the preferences domain of the app, the bundle identifier, only when it is not the default. At the start the host reads these strings before it reads any setting (`sys/prefs.rs`, `hostenv::with_saved`). A choice that the row does not accept is ignored, and the environment wins over a choice. The log gets one line for each choice. `NXKIT_SAVED_CHOICES=0` ignores the choices. A run outside an app bundle has none. So a start from Finder or the Dock gets the choices too. A new option is one row in the table and its read in `hostenv.rs`. The test `every_value_of_a_launch_option_is_read` fails when the host does not read a value of the table.
 

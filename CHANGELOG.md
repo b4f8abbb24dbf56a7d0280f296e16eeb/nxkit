@@ -4,6 +4,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Added
+
+- A title module can turn spatial audio on by default (`spatial_audio` of its run settings, written to `game.json`
+  and as the default of the `NXKIT_SPATIAL_AUDIO` row of `launcher.json`). The launch option still wins:
+  `NXKIT_SPATIAL_AUDIO=0` gives stereo, `1` spatial audio. Octopath Traveler has it on: CRIWARE ADX2 mixes 5.1 into its
+  six-channel AudioOut in the SDK's channel order.
+
 ### Fixed
 
 - Octopath Traveler has sound after "New Game". A write to a file opened with `OpenMode_AllowAppend` goes to its

@@ -1,5 +1,5 @@
 //! The channels of a frame between the outputs and the device: stereo, or 5.1 for spatial audio
-//! ([`crate::settings::width`]). 5.1 has the order of the SDK: front left, front right, center, LFE, back left,
+//! ([`crate::engine::width`]). 5.1 has the order of the SDK: front left, front right, center, LFE, back left,
 //! back right, which is also the order of `kAudioChannelLayoutTag_MPEG_5_1_A`.
 
 /// The SDK's default downmix coefficient of the center and the back channels.

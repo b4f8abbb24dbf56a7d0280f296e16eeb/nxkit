@@ -31,6 +31,7 @@ const TYPED: &[&str] = &[
     "screen_aspect",
     "pad_layout",
     "op_mode",
+    "spatial_audio",
     "perf_boost",
     "tex_flush_upload",
     "tex_dirty_upload",
@@ -93,6 +94,9 @@ pub struct Settings {
     pub pad_layout: String,
     /// The operation mode that the applet service reports, `handheld` or `docked`.
     pub op_mode: String,
+    /// Whether the game gets 5.1 played as spatial audio when `NXKIT_SPATIAL_AUDIO` is not set (`spatial_audio`,
+    /// optional: absent is off).
+    pub spatial_audio: bool,
     /// Whether the performance mode is boosted.
     pub perf_boost: bool,
     /// Whether texture uploads are flushed at the draw.
@@ -240,6 +244,10 @@ impl Settings {
             screen_aspect: flag(v, "screen_aspect")?,
             pad_layout: text(v, "pad_layout", "settings")?,
             op_mode: text(v, "op_mode", "settings")?,
+            spatial_audio: v
+                .get("spatial_audio")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             perf_boost: flag(v, "perf_boost")?,
             tex_flush_upload: flag(v, "tex_flush_upload")?,
             tex_dirty_upload: flag(v, "tex_dirty_upload")?,
@@ -356,6 +364,7 @@ mod tests {
         assert_eq!(s.shader_key_skip, (8, 4));
         assert_eq!(s.nvn_api, Some((53, 12)));
         assert_eq!(s.shared_font, None);
+        assert!(!s.spatial_audio, "absent: off");
         assert_eq!(s.extra, vec![("engine_key".to_string(), Value::Int(1))]);
         assert_eq!(
             s.display_versions,
@@ -421,6 +430,18 @@ mod tests {
         let Ok(s) = s else { return };
         assert_eq!(s.optional_imports, vec!["_ZN2nn3fs1fEv".to_string()]);
         assert!(s.extra.is_empty());
+    }
+
+    #[test]
+    fn reads_the_spatial_audio_of_the_title() {
+        let v = json::parse(&SETTINGS.replace("\"engine_key\": 1", "\"spatial_audio\": true"));
+        assert!(v.is_ok());
+        let Ok(v) = v else { return };
+        let s = Settings::parse(&v);
+        assert!(
+            s.as_ref()
+                .is_ok_and(|s| s.spatial_audio && s.extra.is_empty())
+        );
     }
 
     #[test]

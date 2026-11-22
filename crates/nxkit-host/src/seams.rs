@@ -366,7 +366,10 @@ pub fn init_services(
         nxkit_svc_input::set_system_event_hooks(wire::input_hooks());
     }
     if has(mask, Service::Audio) {
-        nxkit_svc_audio::init(&nxkit_svc_audio::Config::default());
+        nxkit_svc_audio::init(&nxkit_svc_audio::Config {
+            spatial_audio: s.spatial_audio,
+            ..nxkit_svc_audio::Config::default()
+        });
         if !nxkit_svc_audio::set_host(wire::audio_host()) {
             return Err(HostError::Manifest(
                 "the audio host seams are set twice".into(),

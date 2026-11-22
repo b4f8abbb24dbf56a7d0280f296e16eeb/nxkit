@@ -4,12 +4,12 @@
 //! The SDK renders in the guest: it generates the command list, the CPU processes it, and the host reads the DeviceSink
 //! out of the list. The render thread calls the SDK once per frame and plays the result on the mixer.
 
+use crate::engine::width;
 use crate::engine::{Buf, Notify, mixer};
 use crate::host::{self, sym, sym_opt};
 use crate::ren_cmd::{FRAME_MAX, capture};
 use crate::ren_scan::{LOCK_MUTEX, SDK_LOCK, SDK_UNLOCK, UNLOCK_MUTEX, impl_sys_off, update_lock};
 use crate::ren_state::{AR_MAX, CQ, Ren, Sym, T_AR, lk, of_sys, slot};
-use crate::settings::width;
 use crate::sys::call::{call, call_pair};
 use crate::sys::mem;
 use crate::sys::sem::Sem;

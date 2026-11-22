@@ -168,9 +168,9 @@ pub(crate) struct Cap {
 }
 
 impl Cap {
-    /// A capture state with a silent history, for frames of [`crate::settings::width`] channels.
+    /// A capture state with a silent history, for frames of [`crate::engine::width`] channels.
     pub(crate) fn new() -> Cap {
-        Cap::with_width(crate::settings::width())
+        Cap::with_width(crate::engine::width())
     }
 
     /// A capture state for frames of `w` channels.
@@ -451,7 +451,7 @@ fn sink_out(
     nout
 }
 
-/// Reads the DeviceSink of the command list `cl` into `dst` as 16-bit frames of [`crate::settings::width`] channels.
+/// Reads the DeviceSink of the command list `cl` into `dst` as 16-bit frames of [`crate::engine::width`] channels.
 /// Returns the number of frames, or 0 when the list has no sound for the device. `dst` holds `FRAME_MAX * 6` values.
 pub(crate) fn capture(
     lay: &mut Layout,

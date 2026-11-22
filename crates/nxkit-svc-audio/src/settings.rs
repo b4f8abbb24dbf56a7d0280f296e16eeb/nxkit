@@ -12,8 +12,9 @@ pub struct AudioSettings {
     pub clicks: bool,
     /// `NXKIT_AUDIO_DEVICE_FRAMES`: the buffer size of the output device in frames, `None` keeps the device's own.
     pub device_frames: Option<u32>,
-    /// `NXKIT_SPATIAL_AUDIO=1`: the outputs carry six channels (5.1) and the device plays them as spatial audio.
-    pub spatial: bool,
+    /// `NXKIT_SPATIAL_AUDIO`: `1` (Some(true)) makes the outputs carry six channels (5.1) that the device plays as
+    /// spatial audio, `0` (Some(false)) keeps stereo. `None` (unset or another value): the title's default.
+    pub spatial: Option<bool>,
     /// `NXKIT_HEAD_TRACKING=1`: spatial audio on AirPods follows the head.
     pub head_tracking: bool,
 }
@@ -29,7 +30,12 @@ impl AudioSettings {
                 .and_then(|v| v.parse::<u32>().ok()),
             spatial: env
                 .var(launch::SPATIAL_AUDIO)
-                .is_ok_and(|v| v.trim() == "1"),
+                .ok()
+                .and_then(|v| match v.trim() {
+                    "1" => Some(true),
+                    "0" => Some(false),
+                    _ => None,
+                }),
             head_tracking: env
                 .var(launch::HEAD_TRACKING)
                 .is_ok_and(|v| v.trim() == "1"),
@@ -45,9 +51,9 @@ pub fn install(settings: AudioSettings) -> Result<(), SlotError> {
     SETTINGS.install(settings)
 }
 
-/// The channels of every frame between the outputs and the device: 6 (5.1) with spatial audio, else 2.
-pub(crate) fn width() -> usize {
-    if settings().spatial { 6 } else { 2 }
+/// Whether a run plays spatial audio: the launch option when it is set, else the title's default.
+pub(crate) fn spatial(launch: Option<bool>, title: bool) -> bool {
+    launch.unwrap_or(title)
 }
 
 /// The installed settings (the defaults in a unit test).
@@ -70,7 +76,26 @@ mod tests {
             ("NXKIT_AUDIO_DEVICE_FRAMES", "512"),
             ("NXKIT_SPATIAL_AUDIO", "1"),
         ]));
-        assert!(s.clicks && s.spatial && !s.head_tracking);
+        assert!(s.clicks && s.spatial == Some(true) && !s.head_tracking);
         assert_eq!(s.device_frames, Some(512));
+        let off = AudioSettings::from_env(&Env::from_pairs([("NXKIT_SPATIAL_AUDIO", "0")]));
+        assert_eq!(off.spatial, Some(false));
+    }
+
+    #[test]
+    fn the_launch_option_wins_over_the_title() {
+        assert!(
+            !spatial(None, false),
+            "no key in game.json and no option: off"
+        );
+        assert!(spatial(None, true), "the title's default");
+        assert!(
+            !spatial(Some(false), true),
+            "NXKIT_SPATIAL_AUDIO=0 turns it off"
+        );
+        assert!(
+            spatial(Some(true), false),
+            "NXKIT_SPATIAL_AUDIO=1 turns it on"
+        );
     }
 }

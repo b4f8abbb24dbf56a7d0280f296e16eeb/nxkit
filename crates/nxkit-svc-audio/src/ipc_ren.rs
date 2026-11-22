@@ -125,7 +125,7 @@ impl Service for AudioDevice {
             2 | 8 => rsp.push_u32(DEV_VOL.load(Ordering::Relaxed)),
             3 | 10 | 13 => write_name(req),
             4 | 11 | 12 => rsp.copy_handles.push(self.readable),
-            5 => rsp.push_u32(crate::settings::width() as u32),
+            5 => rsp.push_u32(crate::engine::width() as u32),
             15..=18 => {
                 eprintln!(
                     "nxkit-audio: audren: IAudioDevice command {} (device notification) is not supported",

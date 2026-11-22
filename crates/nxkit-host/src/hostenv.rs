@@ -464,8 +464,9 @@ mod tests {
                     assert_ne!(read(a), read(b), "{}: {a} and {b} read the same", o.env);
                 }
             }
-            // the defaults of the console mode and the frame rate are the title's, which the host has from game.json
-            if o.env != launch::OP_MODE && o.env != launch::FPS_TARGET {
+            // the defaults of the console mode, the frame rate and spatial audio are the title's, which the host has
+            // from game.json
+            if ![launch::OP_MODE, launch::FPS_TARGET, launch::SPATIAL_AUDIO].contains(&o.env) {
                 assert_eq!(
                     read(o.default),
                     Default::default(),

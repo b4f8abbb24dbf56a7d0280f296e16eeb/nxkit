@@ -32,7 +32,7 @@ extern "C" fn active_name(name: u64) {
 }
 
 extern "C" fn channels() -> i32 {
-    crate::settings::width() as i32
+    crate::engine::width() as i32
 }
 
 extern "C" fn set_volume(_name: u64, v: f32) {

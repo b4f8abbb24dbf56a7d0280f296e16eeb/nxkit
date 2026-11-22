@@ -52,7 +52,7 @@ pub const LANGUAGE: &str = "NXKIT_LANGUAGE";
 pub const RUMBLE: &str = "NXKIT_RUMBLE";
 
 /// `1`: the game gets six channels (5.1), and the host plays them as spatial audio on the Mac's speakers and on
-/// headphones (`nxkit-svc-audio`).
+/// headphones (`nxkit-svc-audio`). `0`: stereo. Unset: the `spatial_audio` of the title module.
 pub const SPATIAL_AUDIO: &str = "NXKIT_SPATIAL_AUDIO";
 
 /// `1`: spatial audio on AirPods follows the movement of the head.
@@ -163,8 +163,8 @@ pub struct Opt {
     pub label: &'static str,
     /// The English note under the label, can be empty.
     pub note: &'static str,
-    /// The default value. The build puts the mode and the frame rate of the title module in place of the defaults of
-    /// [`OP_MODE`] and [`FPS_TARGET`].
+    /// The default value. The build puts the mode, the frame rate and the spatial audio of the title module in place
+    /// of the defaults of [`OP_MODE`], [`FPS_TARGET`] and [`SPATIAL_AUDIO`].
     pub default: &'static str,
     /// The section of the launcher: `Game`, `Controls` or `Performance`.
     pub section: &'static str,

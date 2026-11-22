@@ -126,6 +126,7 @@ fn settings(m: &Manifest) -> Value {
         ("screen_aspect", flag(t.screen_aspect)),
         ("pad_layout", s(t.pad_layout)),
         ("op_mode", s(t.op_mode)),
+        ("spatial_audio", flag(t.spatial_audio)),
         ("perf_boost", flag(t.perf_boost)),
         ("tex_flush_upload", flag(t.tex_flush_upload)),
         ("tex_dirty_upload", flag(t.tex_dirty_upload)),

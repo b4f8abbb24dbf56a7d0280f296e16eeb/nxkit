@@ -77,6 +77,9 @@ pub struct Settings {
     pub pad_layout: &'static str,
     /// `op_mode`: `console` (docked) or `handheld`.
     pub op_mode: &'static str,
+    /// `spatial_audio`: the default of the launch option `NXKIT_SPATIAL_AUDIO` (5.1 to the game, played as spatial
+    /// audio). The player's choice wins.
+    pub spatial_audio: bool,
     /// `perf_mode`: `true` reports Boost always, `false` follows the operation mode.
     pub perf_boost: bool,
     /// `tex_flush_upload`.
@@ -136,6 +139,7 @@ impl Settings {
         shared_font: None,
         pad_layout: "simple",
         op_mode: "console",
+        spatial_audio: false,
         perf_boost: false,
         tex_flush_upload: false,
         tex_dirty_upload: false,

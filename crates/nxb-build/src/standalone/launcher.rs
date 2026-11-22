@@ -1,11 +1,11 @@
 //! `launcher.json`: the launch options of the host for a launcher (`nxkit_abi::launch`).
 //!
 //! One row per option of the table, in the schema of the old engine's launcher, so that NX2Apple draws the rows
-//! without knowing them. Three rows follow the title: the default of the console mode is the mode of the title module
+//! without knowing them. Four rows follow the title: the default of the console mode is the mode of the title module
 //! (a touch screen game starts in handheld mode), the game language lists the languages of the game's
-//! `control.nacp`, and the frame rate lists the rates up to `fps_max` of the title module, with its `fps_target` as
-//! the default. A game with one language gets no language row, and a game without a target frame rate or with one
-//! rate gets no frame rate row.
+//! `control.nacp`, the frame rate lists the rates up to `fps_max` of the title module, with its `fps_target` as
+//! the default, and spatial audio is on by default when the title module sets `spatial_audio`. A game with one
+//! language gets no language row, and a game without a target frame rate or with one rate gets no frame rate row.
 
 use nxb_pyjson::Value;
 use nxkit_abi::launch::{self, Kind, Opt};
@@ -38,6 +38,7 @@ fn choices(list: &[(&str, &str)]) -> Value {
 struct Game {
     op_mode: &'static str,
     fps_target: u32,
+    spatial_audio: bool,
     languages: Choices,
     fps_targets: Choices,
 }
@@ -47,15 +48,26 @@ impl Game {
         Game {
             op_mode: settings.op_mode,
             fps_target: settings.fps_target,
+            spatial_audio: settings.spatial_audio,
             languages: launch::game_languages(language_flags(nacp)),
             fps_targets: launch::game_fps_targets(settings.fps_target, settings.fps_max),
         }
     }
 
-    /// The default of `o`: the title's for the console mode and the frame rate.
+    /// The default of `o`: the title's for the console mode, the frame rate and spatial audio.
     fn default(&self, o: &Opt) -> &'static str {
         match o.env {
             launch::OP_MODE => launch::op_mode_value(self.op_mode),
+            launch::SPATIAL_AUDIO => match o.kind {
+                Kind::Toggle { on, off } => {
+                    if self.spatial_audio {
+                        on
+                    } else {
+                        off
+                    }
+                }
+                _ => o.default,
+            },
             launch::FPS_TARGET => self
                 .fps_targets
                 .iter()
@@ -257,5 +269,22 @@ mod tests {
         );
         let dz = find(&high, launch::STICK_DEADZONE_L).unwrap();
         assert_eq!(dz.get("max"), Some(&Value::Float(50.0)));
+    }
+
+    #[test]
+    fn the_spatial_audio_row_has_the_default_of_the_title() {
+        let default = |spatial_audio| {
+            let t = nxtitle::Settings {
+                spatial_audio,
+                ..title("console", 0, 60)
+            };
+            let rows = rows_of(launcher_json(1, &t, None));
+            let row = find(&rows, launch::SPATIAL_AUDIO).unwrap();
+            row.get("default")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        assert_eq!(default(false).as_deref(), Some("0"));
+        assert_eq!(default(true).as_deref(), Some("1"));
     }
 }

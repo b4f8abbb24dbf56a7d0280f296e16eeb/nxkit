@@ -189,6 +189,9 @@ has the same parts:
 - Unreal Engine 4 on NVN calls `nvnDeviceSetDepthMode(NEAR_IS_ZERO)` (seen in OCTOPATH TRAVELER, 4.18). The depth
   mode is a capability, not a profile key: the host follows the call, and the build learns it from the recorded pipeline
   list. It is a candidate fact for an Unreal family once a second Unreal title needs a family.
+- OCTOPATH TRAVELER sets `spatial_audio` in its run settings: CRIWARE ADX2 mixes its buses into a six-channel AudioOut
+  in the SDK's order (L R C LFE Ls Rs, `criNcVoice_InterleavePcmFloat32toInt16`), so the game gains from 5.1 played as
+  spatial audio. The setting is the default of the launch option `NXKIT_SPATIAL_AUDIO`; the player's choice wins.
 - `shader_facts.tsv` is the folder's `shader_facts_manual.tsv`, where it has one.
 
 The tests of each module parse its profile and its rules with `nxb-rewrite` and count the rules. The rules of Pokémon

@@ -6,7 +6,6 @@
 
 use crate::chans::convert;
 use crate::host;
-use crate::settings::width;
 use crate::sys::au;
 use crate::sys::mem;
 use crate::sys::ring::Ring;
@@ -161,12 +160,20 @@ pub(crate) struct Mixer {
     alloc: Mutex<()>,
     out: Mutex<OutState>,
     force_silent: AtomicBool,
+    /// Whether the run plays spatial audio: the frames carry 5.1 ([`width`]).
+    spatial: AtomicBool,
     notifier: Mutex<bool>,
 }
 
 // Process-wide (W26): the mixer that the AUHAL callback (a CoreAudio thread with no context) and the guest exports
 // share.
 static MIXER: OnceLock<Arc<Mixer>> = OnceLock::new();
+
+/// The channels of every frame between the outputs and the device: 6 (5.1) with spatial audio, else 2. [`crate::init`]
+/// sets it on the mixer before the game starts.
+pub(crate) fn width() -> usize {
+    if mixer().spatial() { 6 } else { 2 }
+}
 
 /// The mixer of the process.
 pub(crate) fn mixer() -> &'static Arc<Mixer> {
@@ -179,6 +186,7 @@ pub(crate) fn mixer() -> &'static Arc<Mixer> {
             alloc: Mutex::new(()),
             out: Mutex::new(OutState::Unstarted),
             force_silent: AtomicBool::new(false),
+            spatial: AtomicBool::new(false),
             notifier: Mutex::new(false),
         })
     })
@@ -190,6 +198,16 @@ impl Mixer {
         self.master
             .store(master.max(0.0).to_bits(), Ordering::Relaxed);
         self.force_silent.store(silent, Ordering::Relaxed);
+    }
+
+    /// Sets whether the run plays spatial audio. Call it before the first output opens.
+    pub(crate) fn set_spatial(&self, on: bool) {
+        self.spatial.store(on, Ordering::Relaxed);
+    }
+
+    /// Whether the run plays spatial audio.
+    pub(crate) fn spatial(&self) -> bool {
+        self.spatial.load(Ordering::Relaxed)
     }
 
     /// Opens an output. Returns its index, or `None` when all slots are in use.

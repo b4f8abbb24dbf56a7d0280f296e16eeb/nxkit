@@ -41,6 +41,8 @@ pub struct Config {
     pub master_volume: f32,
     /// When true, no output device is opened and the mix is dropped. The game still sees its buffers played.
     pub silent_sink: bool,
+    /// The title's default for spatial audio (`spatial_audio` of `game.json`). `NXKIT_SPATIAL_AUDIO` wins.
+    pub spatial_audio: bool,
 }
 
 impl Default for Config {
@@ -48,13 +50,20 @@ impl Default for Config {
         Config {
             master_volume: 1.0,
             silent_sink: false,
+            spatial_audio: false,
         }
     }
 }
 
 /// Applies `cfg`. Call it once before the game starts.
 pub fn init(cfg: &Config) {
-    engine::mixer().configure(cfg.master_volume, cfg.silent_sink);
+    let spatial = settings::spatial(settings::settings().spatial, cfg.spatial_audio);
+    if spatial {
+        eprintln!("nxkit-audio: spatial audio: the game gets 5.1");
+    }
+    let m = engine::mixer();
+    m.set_spatial(spatial);
+    m.configure(cfg.master_volume, cfg.silent_sink);
 }
 
 /// Both export lists: the ones that run on the guest stack and the ones that need a big stack.

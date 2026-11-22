@@ -145,6 +145,7 @@ pub unsafe extern "C" fn nxkit_audio_init(
         Some(c) => Config {
             master_volume: c.master_volume,
             silent_sink: c.silent_sink != 0,
+            ..Config::default()
         },
         None => Config::default(),
     };
