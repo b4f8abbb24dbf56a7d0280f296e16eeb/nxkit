@@ -4,6 +4,14 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.16.1 - 2026-11-22
+
+### Fixed
+
+- The sky of Pokémon Pokopia is no longer black. A texture that a frame uploads and then writes on the GPU stays newer
+  on the GPU, so `nvnTextureReadTexels` copies it back. The frame marked every upload as in sync after the GPU writes,
+  and the game read old fog colours.
+
 ## 0.16.0 - 2026-11-22
 
 ### Changed
