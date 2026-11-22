@@ -88,17 +88,21 @@ impl Pipelines {
             None
         };
         let paint_dir = crate::knob("paintdir");
+        // Without a program list `paint` takes the draws into one colour target. A listed program is painted in any
+        // pass: the first four slots get the colour (up to the slots the pass has), the others keep their contents.
         let paint = (crate::knob("paint") || paint_dir)
-            && targets.colors.len() == 1
-            && targets.colors[0].is_some()
+            && targets.colors.first().is_some_and(Option::is_some)
             && fs.is_some()
             && {
                 let keys = crate::diag::paint_programs();
-                keys.is_empty()
-                    || d.program
+                if keys.is_empty() {
+                    targets.colors.len() == 1
+                } else {
+                    d.program
                         .fragment
                         .as_deref()
                         .is_some_and(|f| keys.iter().any(|k| k == f))
+                }
             };
         let paint_lib = if paint {
             let mut library = self.paint.lock().unwrap_or_else(PoisonError::into_inner);
@@ -108,6 +112,12 @@ impl Pipelines {
                     using namespace metal;
                     struct In { float4 loc0 [[user(locn0)]]; };
                     fragment float4 paint_magenta() { return float4(8.0, 0.0, 8.0, 1.0); }
+                    struct Out4 { float4 c0 [[color(0)]]; float4 c1 [[color(1)]];
+                        float4 c2 [[color(2)]]; float4 c3 [[color(3)]]; };
+                    fragment Out4 paint_magenta4() {
+                        float4 m = float4(8.0, 0.0, 8.0, 1.0);
+                        return { m, m, m, m };
+                    }
                     fragment float4 paint_dir(In in [[stage_in]]) { return float4(abs(in.loc0.xyz), 1.0); }
                 "#).map_err(|_| Skip::Pipeline)?);
             }
@@ -125,6 +135,8 @@ impl Pipelines {
                         lib,
                         if paint_dir {
                             "paint_dir"
+                        } else if targets.colors.len() > 1 {
+                            "paint_magenta4"
                         } else {
                             "paint_magenta"
                         },
@@ -135,6 +147,17 @@ impl Pipelines {
             &[],
         );
         desc.colors = color_targets(d, fs, targets);
+        if paint {
+            // `paint_dir` writes slot 0 only, `paint_magenta4` the first four. A slot that the paint does not write
+            // keeps its contents.
+            let painted = if paint_dir { 1 } else { 4 };
+            for (i, c) in desc.colors.iter_mut().enumerate() {
+                if let Some(c) = c {
+                    c.blend = None;
+                    c.write_mask = if i < painted { 0xf } else { 0 };
+                }
+            }
+        }
         // A vertex function that pulls reads the streams itself (`crate::pull`): the pipeline has no vertex layout, so
         // one base per pair serves every layout and the archive can hold it.
         desc.vertex_layout = if vs.pull {

@@ -35,7 +35,7 @@ only, and `set` refuses it. `NXKIT_CONTROL=0` turns the socket off.
 | `NXKIT_DIAG_DIR` | The directory of the diagnostic files: the `nobar` file and the `img` pictures. Default `/tmp/fmap`. |
 | `NXKIT_KNOB` | Comma separated list of knobs (see below). Knobs change what the encoder does. |
 | `NXKIT_KNOB_FILE` | A file with the same list as `NXKIT_KNOB`. The encoder reads it again every frame, so you can change a knob while the game runs. |
-| `NXKIT_PAINT_FS` | Comma separated fragment program keys that the `paint` and `paintdir` knobs paint. When it is empty, they paint every draw into one colour target. |
+| `NXKIT_PAINT_FS` | Comma separated fragment program keys that the `paint` and `paintdir` knobs paint. When it is empty, they paint every draw into one colour target. A listed program is also painted in a pass with more colour targets (a G-buffer pass). Then `paint` paints the first four slots and `paintdir` paints slot 0. The other slots keep their contents. |
 | `NXKIT_DIAG_FS` | Comma separated fragment program keys. With keys, the `draw` line prints every draw of these programs on every frame (at most 200 lines per program per run). The line ends with the index of its render pass in the frame, the size of the attachments and the colour targets of its pass. For each slot it gives the format and the blend state (`off`, or `on` with the NVN source and destination RGB factors and the RGB op). The `nanscan` category counts only the passes that hold a draw of these programs. For these passes it also counts the targets before the pass and the textures that the programs sample. Without the variable, `draw` prints on sampled frames only and `nanscan` counts every pass. |
 | `NXKIT_WATCH_TEX` | Comma separated texture ids. The encoder prints the passes that render into them and the copies that touch them (at most 40 each). |
 | `NXKIT_DIAG_WATCH` | With `NXKIT_DIAG=tiny`: `0xADDR:LEN,0xADDR:LEN` (GPU addresses, LEN in bytes, at most 512). On each sampled frame, after the frame completed, the guest memory of each range is printed as `DIAG tiny watch 0x.. f32 [..] hex [..]`. |
@@ -258,7 +258,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `nooffset` | Sets the depth bias to zero. |
 | `noeq` | Changes the depth test `equal` to `always`. |
 | `flat` | A draw into four colour targets that its fragment shader all writes gets constant G-buffer values. |
-| `paint` | Paints magenta every draw into one colour target, or only the programs of `NXKIT_PAINT_FS`. |
+| `paint` | Paints magenta every draw into one colour target, or only the programs of `NXKIT_PAINT_FS` in every pass. |
 | `paintdir` | Same as `paint`, but the colour is the absolute value of the first varying. |
 | `cubearr` | Makes a cube view as a cube array. |
 | `allbar` | Gives every pass a full barrier from all earlier work. This is the same as a `nobar` range that covers every pass. |
