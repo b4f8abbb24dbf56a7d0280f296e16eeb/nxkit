@@ -3,7 +3,7 @@
 
 use msl_parse::ast::{Attr, Stage};
 use msl_sema::hir::Func;
-use msl_sema::types::{Access, FieldDef, Scalar, Space, Type};
+use msl_sema::types::{Access, FieldDef, Scalar, Space, TexKind, Type};
 use msl_sema::Error;
 
 use crate::func::{Addr, FnGen, RetKind, V};
@@ -116,6 +116,15 @@ fn metal_array_md(
     let mut ops = vec![i(lead)];
     match elem {
         Type::Texture(tx) => {
+            if matches!(tx.kind, TexKind::T2dMs | TexKind::T2dMsArray) {
+                return Err(Error::unsupported(format!(
+                    "metal-array:{}",
+                    tx.kind.name()
+                )));
+            }
+            if tx.kind == TexKind::Buffer {
+                return Err(Error::unsupported("metal-array:texture_buffer"));
+            }
             ops.extend([s("air.texture"), s("air.location_index"), i(slot), i(*n)]);
             ops.push(s(access_name(tx.access)));
         }
@@ -150,6 +159,14 @@ fn resource_md(
     let mut ops = vec![i(lead)];
     match t {
         Type::Texture(tx) => {
+            if matches!(tx.kind, TexKind::T2dMs | TexKind::T2dMsArray)
+                && (cx.air_version != (2, 8, 0) || !cx.read_sampler)
+            {
+                return Err(Error::unsupported(format!("{}:target", tx.kind.name())));
+            }
+            if tx.kind == TexKind::Buffer && (cx.air_version != (2, 8, 0) || !cx.read_sampler) {
+                return Err(Error::unsupported("texture_buffer:target"));
+            }
             ops.extend([s("air.texture"), s("air.location_index"), i(slot), i(count)]);
             ops.push(s(access_name(tx.access)));
             let tn = cx.types.msl_name(t);
@@ -310,6 +327,19 @@ const BUILTINS: &[(&str, &str)] = &[
     ("thread_index_in_simdgroup", "air.thread_index_in_simdgroup"),
 ];
 
+fn viewport_array_index(cx: &ModCx, ty: &Type, attrs: &[Attr], a: &Attr) -> R<Md> {
+    if attrs.len() != 1 || !a.args.is_empty() || *ty != Type::Scalar(Scalar::Uint) {
+        return Err(Error::invalid(
+            "viewport_array_index requires a uint field with no other attributes or arguments",
+        ));
+    }
+    // Only AIR 2.8 has a verified native descriptor for both stage roles.
+    if cx.air_version != (2, 8, 0) {
+        return Err(Error::unsupported("viewport_array_index:target"));
+    }
+    Ok(s("air.viewport_array_index"))
+}
+
 /// Emits an entry point, returns its definition text.
 pub fn emit_entry(cx: &mut ModCx, f: &Func) -> R<String> {
     let stage = f.entry.ok_or_else(|| Error::invalid("not an entry"))?;
@@ -342,7 +372,9 @@ pub fn emit_entry(cx: &mut ModCx, f: &Func) -> R<String> {
                         }
                     }
                     Stage::Vertex => {
-                        if attr(fa, "position").is_some() {
+                        if let Some(a) = attr(fa, "viewport_array_index") {
+                            md.push(viewport_array_index(cx, &fd.ty, fa, a)?);
+                        } else if attr(fa, "position").is_some() {
                             md.push(s("air.position"));
                             if attr(fa, "invariant").is_some() {
                                 md.push(s("air.invariant"));
@@ -408,7 +440,9 @@ pub fn emit_entry(cx: &mut ModCx, f: &Func) -> R<String> {
                         md.extend([s("air.vertex_input"), s("air.location_index"), i(loc), i(1)]);
                     }
                     Stage::Fragment => {
-                        if attr(fa, "position").is_some() {
+                        if let Some(a) = attr(fa, "viewport_array_index") {
+                            md.push(viewport_array_index(cx, &fd.ty, fa, a)?);
+                        } else if attr(fa, "position").is_some() {
                             md.extend([
                                 s("air.position"),
                                 s("air.center"),

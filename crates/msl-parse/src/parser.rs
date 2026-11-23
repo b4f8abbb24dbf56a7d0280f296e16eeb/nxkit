@@ -132,9 +132,12 @@ fn py_split(s: &str) -> Vec<&str> {
 }
 
 const ADDR: [&str; 4] = ["device", "constant", "threadgroup", "thread"];
-const TEX_ACCEPTED: [&str; 9] = [
+const TEX_ACCEPTED: [&str; 12] = [
+    "texture_buffer",
     "texture2d",
     "texture2d_array",
+    "texture2d_ms",
+    "texture2d_ms_array",
     "texture3d",
     "texturecube",
     "texturecube_array",
@@ -143,7 +146,7 @@ const TEX_ACCEPTED: [&str; 9] = [
     "depthcube",
     "depthcube_array",
 ];
-const FIELD_ATTRS: [&str; 17] = [
+const FIELD_ATTRS: [&str; 18] = [
     "id",
     "user",
     "attribute",
@@ -156,6 +159,7 @@ const FIELD_ATTRS: [&str; 17] = [
     "center_no_perspective",
     "depth",
     "render_target_array_index",
+    "viewport_array_index",
     "center_perspective",
     "sample_mask",
     "clip_distance",
@@ -1208,7 +1212,12 @@ impl<'a> Parser<'a> {
         } else if tex_dim(v).is_some() {
             self.expect("<")?;
             let el = self.ident()?;
-            let mut acc = "sample";
+            let multisampled = matches!(v, "texture2d_ms" | "texture2d_ms_array");
+            let mut acc = if multisampled || v == "texture_buffer" {
+                "read"
+            } else {
+                "sample"
+            };
             if self.accept(",")? {
                 self.expect("access")?;
                 self.expect("::")?;
@@ -1219,6 +1228,18 @@ impl<'a> Parser<'a> {
                 Some(k @ (Scalar::Float | Scalar::Half | Scalar::Int | Scalar::Uint)) => k,
                 _ => return reject(format!("texture-elem:{el}")),
             };
+            if multisampled && (el != Scalar::Float || acc != "read") {
+                return reject(format!("{v}:float-read"));
+            }
+            if v == "texture_buffer"
+                && !matches!(
+                    (el, acc),
+                    (Scalar::Float, "read" | "read_write")
+                        | (Scalar::Uint, "read" | "write" | "read_write")
+                )
+            {
+                return reject("texture_buffer:float-read");
+            }
             if !TEX_ACCEPTED.contains(&v) {
                 return reject(format!("texture-kind:{v}"));
             }
@@ -2693,18 +2714,15 @@ impl<'a> Parser<'a> {
                 UINT,
             ));
         }
-        if name == "threadgroup_barrier" && !self.funcs.contains_key(name) {
+        if matches!(name, "threadgroup_barrier" | "simdgroup_barrier")
+            && !self.funcs.contains_key(name)
+        {
             self.expect("(")?;
             self.expect("mem_flags")?;
             self.expect("::")?;
             self.expect("mem_threadgroup")?;
             self.expect(")")?;
-            return bx(mk(
-                self,
-                Callee::Builtin("threadgroup_barrier".into()),
-                vec![],
-                Ty::Void,
-            ));
+            return bx(mk(self, Callee::Builtin(name.into()), vec![], Ty::Void));
         }
         if let Some(cands) = self.funcs.get(name).cloned() {
             let args = self.args()?;
@@ -2900,6 +2918,12 @@ impl<'a> Parser<'a> {
                 }
                 Ok(a[0].clone())
             }
+            "simd_is_helper_thread" => {
+                if !a.is_empty() {
+                    return reject("simd-helper-thread-form");
+                }
+                Ok(BOOL)
+            }
             "simd_any" | "simd_all" => {
                 if a.len() != 1 || a[0] != BOOL {
                     return reject("simd-vote-form");
@@ -2973,7 +2997,7 @@ impl<'a> Parser<'a> {
 
     fn sample_type(&mut self, t: &Ty, m: &str, a: &[Ty]) -> PResult<Ty> {
         self.frame(|p| {
-            let Ty::Tex { kind, el, .. } = t else { unreachable!("sample_type on a texture") };
+            let Ty::Tex { kind, el, access } = t else { unreachable!("sample_type on a texture") };
             let Some(dim) = tex_dim(kind) else {
                 return crash(PyExc::KeyError);
             };
@@ -3022,6 +3046,18 @@ impl<'a> Parser<'a> {
                         rest = &rest[1..];
                         r = FLOAT;
                     }
+                    if m == "gather_compare" {
+                        if !matches!(
+                            kind.as_ref(),
+                            "depth2d" | "depth2d_array" | "depthcube" | "depthcube_array"
+                        )
+                            || *el != Scalar::Float
+                            || rest != [FLOAT]
+                        {
+                            return reject("gather_compare:depth2d-ref");
+                        }
+                        return Ok(vk(Scalar::Float, 4));
+                    }
                     if m == "gather" && depth {
                         r = vk(Scalar::Float, 4);
                     }
@@ -3048,11 +3084,29 @@ impl<'a> Parser<'a> {
                     }
                     Ok(r)
                 }
+                "get_num_samples"
+                    if matches!(kind.as_ref(), "texture2d_ms" | "texture2d_ms_array")
+                        && a.is_empty() =>
+                {
+                    Ok(UINT)
+                }
                 "read" => {
                     if a.is_empty() {
                         return reject("read-args");
                     }
                     Ok(if depth { FLOAT } else { vk(*el, 4) })
+                }
+                "atomic_fetch_or" | "atomic_fetch_add" | "atomic_fetch_max" | "atomic_fetch_min"
+                    if kind.as_ref() == "texture2d"
+                        && access.as_ref() == "read_write"
+                        && matches!(
+                            (m, *el),
+                            ("atomic_fetch_or" | "atomic_fetch_add" | "atomic_fetch_max", Scalar::Uint)
+                                | ("atomic_fetch_max" | "atomic_fetch_min", Scalar::Int)
+                        )
+                        && a == [vk(Scalar::Uint, 2), vk(*el, 4)] =>
+                {
+                    Ok(vk(*el, 4))
                 }
                 "write" => Ok(Ty::Void),
                 "get_width" | "get_height" | "get_depth" | "get_array_size" | "get_num_mip_levels" => Ok(UINT),

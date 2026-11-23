@@ -274,6 +274,10 @@ pub enum SampleOpt {
     Bias(Box<Expr>),
     /// Explicit derivatives, in x then y order.
     Grad2d(Box<Expr>, Box<Expr>),
+    /// Explicit volume derivatives, in x then y order.
+    Grad3d(Box<Expr>, Box<Expr>),
+    /// Explicit cube direction derivatives, in x then y order.
+    GradCube(Box<Expr>, Box<Expr>),
 }
 
 /// Kind of a texture query.
@@ -289,6 +293,21 @@ pub enum Query {
     ArraySize,
     /// `get_num_mip_levels`
     MipLevels,
+    /// `get_num_samples`
+    Samples,
+}
+
+/// Supported fetch operations on an integer read-write 2D texture.
+#[derive(Clone, Copy, Debug)]
+pub enum TextureAtomicFetch {
+    /// Bitwise OR.
+    Or,
+    /// Unsigned addition.
+    Add,
+    /// Maximum (signedness follows the texture element type).
+    Max,
+    /// Signed minimum.
+    Min,
 }
 
 /// A texture operation.
@@ -311,13 +330,13 @@ pub enum TexOp {
         /// Texel offset (intN), None for zero.
         offset: Option<Box<Expr>>,
     },
-    /// `read(coord [, slice] [, lod])`
+    /// `read(coord [, slice] [, lod])` or multisample `read(coord, sample)`
     Read {
         /// uint coordinates.
         coord: Box<Expr>,
         /// Slice (uint).
         array: Option<Box<Expr>>,
-        /// Level (uint), None for 0.
+        /// Mip level (uint), None for 0. A multisample read has a required sample index here.
         lod: Option<Box<Expr>>,
     },
     /// `write(value, coord [, slice] [, lod])`
@@ -330,6 +349,15 @@ pub enum TexOp {
         array: Option<Box<Expr>>,
         /// Level (uint), None for 0.
         lod: Option<Box<Expr>>,
+    },
+    /// `texture2d<T, access::read_write>.atomic_fetch_*(coord, value)`.
+    AtomicFetch {
+        /// Operation.
+        op: TextureAtomicFetch,
+        /// uint2 coordinates.
+        coord: Box<Expr>,
+        /// Four lanes of the texture's integer element type.
+        value: Box<Expr>,
     },
     /// `get_width(lod)` and friends.
     Query {
@@ -626,7 +654,9 @@ fn visit_expr(e: &Expr, f: &mut dyn FnMut(FuncId)) {
                     match so {
                         SampleOpt::None => {}
                         SampleOpt::Level(x) | SampleOpt::Bias(x) => visit_expr(x, f),
-                        SampleOpt::Grad2d(dx, dy) => {
+                        SampleOpt::Grad2d(dx, dy)
+                        | SampleOpt::Grad3d(dx, dy)
+                        | SampleOpt::GradCube(dx, dy) => {
                             visit_expr(dx, f);
                             visit_expr(dy, f);
                         }
@@ -647,6 +677,10 @@ fn visit_expr(e: &Expr, f: &mut dyn FnMut(FuncId)) {
                     visit_expr(coord, f);
                     opt(array, f);
                     opt(lod, f);
+                }
+                TexOp::AtomicFetch { coord, value, .. } => {
+                    visit_expr(coord, f);
+                    visit_expr(value, f);
                 }
                 TexOp::Query { lod, .. } => opt(lod, f),
                 TexOp::Lod { sampler, coord, .. } => {

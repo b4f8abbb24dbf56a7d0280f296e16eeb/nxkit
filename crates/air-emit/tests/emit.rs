@@ -445,3 +445,79 @@ fn fragment_sample_id_can_be_a_stage_in_member() {
             .is_err_and(|e| e.to_string().contains("sample_id field is not uint")));
     }
 }
+
+#[test]
+fn viewport_array_index_matches_air28_entry_descriptors() {
+    let body = "struct V { float4 pos [[position]]; uint viewport [[viewport_array_index]]; };
+        vertex V vs(uint instance [[instance_id]]) {
+            V out;
+            out.pos = float4(0.0f);
+            out.viewport = instance;
+            return out;
+        }
+        fragment float4 fs(V in [[stage_in]]) { return float4(float(in.viewport)); }";
+    let target = Target::macos_for(26);
+    let source = format!("{PRE}{body}");
+    let ir = compile_source(&source, &target, "t.metal").expect("emits");
+    let md = r#"!"air.viewport_array_index", !"air.arg_type_name", !"uint", !"air.arg_name", !"viewport"}"#;
+    for prefix in ["", "i32 1, "] {
+        assert!(ir.contains(&format!("!{{{prefix}{md}")), "{ir}");
+    }
+    for bad in [
+        source.replace("uint viewport", "int viewport"),
+        source.replace("[[viewport_array_index]]", "[[viewport_array_index(0)]]"),
+        source.replace(
+            "[[viewport_array_index]]",
+            "[[viewport_array_index, render_target_array_index]]",
+        ),
+    ] {
+        assert!(compile_source(&bad, &target, "t.metal").is_err_and(|e| e
+            .to_string()
+            .contains("viewport_array_index requires a uint field")));
+    }
+    for target in [Target::macos(), Target::ios()] {
+        assert!(compile_source(&source, &target, "t.metal")
+            .is_err_and(|e| e.key().contains("viewport_array_index:target")));
+    }
+}
+
+#[test]
+fn air28_viewport_packed_return_does_not_count_as_a_vector() {
+    let body = "struct V { float4 pos [[position]]; uint viewport [[viewport_array_index]]; };
+        vertex V vp(uint i [[vertex_id]]) { V out; out.pos = float4(0.0f);
+            out.viewport = i; return out; }
+        struct In { float4 pos [[attribute(0)]]; };
+        vertex V vp_param(In in [[stage_in]]) { V out; out.pos = in.pos;
+            out.viewport = 0u; return out; }
+        vertex V vp_call(uint i [[vertex_id]]) { V out; out.pos = sqrt(float4(float(i)));
+            out.viewport = i; return out; }
+        struct Ordinary { float4 pos [[position]]; };
+        vertex Ordinary plain() { Ordinary out; out.pos = float4(0.0f); return out; }
+        fragment float4 fs(V in [[stage_in]]) { return float4(float(in.viewport)); }";
+    let ir =
+        compile_source(&format!("{PRE}{body}"), &Target::macos_for(26), "t.metal").expect("emits");
+    for (name, width) in [
+        ("vp", 0),
+        ("vp_param", 128),
+        ("vp_call", 128),
+        ("plain", 128),
+        ("fs", 128),
+    ] {
+        let prefix = format!("@{name}(");
+        let def = ir
+            .lines()
+            .find(|line| line.starts_with("define ") && line.contains(&prefix))
+            .expect("entry");
+        let group = def.rsplit_once(" #").expect("definition attributes").1;
+        let group = group.split_whitespace().next().expect("attribute group");
+        let prefix = format!("attributes #{group} = ");
+        let attrs = ir
+            .lines()
+            .find(|line| line.starts_with(&prefix))
+            .expect("attribute definition");
+        assert!(
+            attrs.contains(&format!("\"min-legal-vector-width\"=\"{width}\"")),
+            "{name}: {attrs}"
+        );
+    }
+}

@@ -1,8 +1,8 @@
 //! metal_stdlib builtins and texture methods as AIR intrinsic calls. Every name and signature
 //! here was read from Apple's front end output for the same MSL (`tools/probe/probe.py`).
 
-use msl_sema::hir::{Expr, ExprKind, PlaceKind, Query, SampleOpt, TexOp};
-use msl_sema::types::{is_float, is_signed, Scalar, Tex, TexKind, Type};
+use msl_sema::hir::{Expr, ExprKind, PlaceKind, Query, SampleOpt, TexOp, TextureAtomicFetch};
+use msl_sema::types::{is_float, is_signed, Access, Scalar, Tex, TexKind, Type};
 use msl_sema::Error;
 
 use crate::func::{Addr, FnGen, FM, V};
@@ -71,6 +71,44 @@ pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> 
             ("i32".into(), "1".into()),
         ];
         let r = call(g, "air.wg.barrier", &ops, "void", Attrs::Convergent, false);
+        return Ok(V { r, ty: ret.clone() });
+    }
+    if name == "simdgroup_barrier" {
+        const THREADGROUP_MEMORY: u32 = 2;
+        const SEQ_CST_ORDER: u32 = 5;
+        const SIMDGROUP_SCOPE: u32 = 4;
+        let operand = |value: u32| ("i32".into(), value.to_string());
+        let mut ops = vec![operand(THREADGROUP_MEMORY)];
+        match g.cx.air_version {
+            (2, 8, 0) => {}
+            (2, 9, 0) => ops.push(operand(SEQ_CST_ORDER)),
+            _ => return Err(Error::unsupported("simdgroup-barrier:target")),
+        }
+        ops.push(operand(SIMDGROUP_SCOPE));
+        let r = call(
+            g,
+            "air.simdgroup.barrier",
+            &ops,
+            "void",
+            Attrs::Convergent,
+            false,
+        );
+        return Ok(V { r, ty: ret.clone() });
+    }
+    if name == "simd_is_helper_thread" {
+        // Apple Metal 32023.921, macOS 26 (AIR 2.8): convergent i1 query,
+        // not readnone. The result can change across a fragment discard.
+        if g.cx.air_version != (2, 8, 0) {
+            return Err(Error::unsupported("simd-helper-thread:target"));
+        }
+        let r = call(
+            g,
+            "air.simd_is_helper_thread",
+            &[],
+            "i1",
+            Attrs::Convergent,
+            false,
+        );
         return Ok(V { r, ty: ret.clone() });
     }
     let simple = |n: &str| Some(n.to_string());
@@ -423,7 +461,23 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
                     g.not_mustprogress();
                     ("false", g.expr(x)?.r)
                 }
-                SampleOpt::Grad2d(dx, dy) => {
+                SampleOpt::Grad2d(dx, dy)
+                | SampleOpt::Grad3d(dx, dy)
+                | SampleOpt::GradCube(dx, dy) => {
+                    if g.cx.air_version != (2, 8, 0) {
+                        match opt {
+                            SampleOpt::Grad2d(..) if kind == TexKind::T2d => {
+                                return Err(Error::unsupported("gradient2d:target"));
+                            }
+                            SampleOpt::Grad3d(..) => {
+                                return Err(Error::unsupported("gradient3d:target"));
+                            }
+                            SampleOpt::GradCube(..) => {
+                                return Err(Error::unsupported("gradientcube:target"));
+                            }
+                            _ => {}
+                        }
+                    }
                     gradients = Some([g.expr(dx)?, g.expr(dy)?]);
                     ("false", "0x0000000000000000".to_string())
                 }
@@ -455,18 +509,35 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
                 a.push(("float".into(), x.r.clone()));
             }
             if let Some(comp) = gather {
-                if kind != TexKind::T2d && kind != TexKind::T2dArray {
-                    return Err(Error::unsupported(format!("gather:{}", kind.name())));
+                let (name, vt) = if cmp.is_some() {
+                    if g.cx.air_version != (2, 8, 0) {
+                        return Err(Error::unsupported("gather_compare:target"));
+                    }
+                    (format!("air.gather_compare_{an}.f32"), "<4 x float>".into())
+                } else {
+                    if kind != TexKind::T2d && kind != TexKind::T2dArray {
+                        return Err(Error::unsupported(format!("gather:{}", kind.name())));
+                    }
+                    let (sfx, vt) = tex_ret(tx, false)?;
+                    (format!("air.gather_{an}.{sfx}"), vt)
+                };
+                if !matches!(kind, TexKind::DepthCube | TexKind::DepthCubeArray) {
+                    a.push(("i1".into(), "true".into()));
+                    a.push(split_typed(&off));
                 }
-                a.push(("i1".into(), "true".into()));
-                let (ty, v) = split_typed(&off);
-                a.push((ty, v));
-                a.push(("i32".into(), comp.to_string()));
+                if cmp.is_none() {
+                    a.push(("i32".into(), comp.to_string()));
+                }
                 a.push(("i32".into(), "0".into()));
-                let (sfx, vt) = tex_ret(tx, false)?;
-                let name = format!("air.gather_{an}.{sfx}");
                 let st = format!("{{ {vt}, i8 }}");
-                let r = call(g, &name, &a, &st, Attrs::ReadOnly, false);
+                // The AIR 2.8 array compare gather omits the read-only memory effect,
+                // while its individual texture and sampler operands remain readonly.
+                let attrs = if kind == TexKind::Depth2dArray && cmp.is_some() {
+                    Attrs::Write
+                } else {
+                    Attrs::ReadOnly
+                };
+                let r = call(g, &name, &a, &st, attrs, false);
                 let x = g.tmp();
                 g.emit(format!("{x} = extractvalue {st} {r}, 0"));
                 return Ok(V {
@@ -482,8 +553,10 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
                     a.push((lt(g, &v.ty), v.r));
                 }
                 a.push(("float".into(), "0x0000000000000000".into()));
-                a.push(("i1".into(), "true".into()));
-                a.push(split_typed(&off));
+                if !matches!(opt, SampleOpt::GradCube(..)) {
+                    a.push(("i1".into(), "true".into()));
+                    a.push(split_typed(&off));
+                }
                 a.push(("i32".into(), "0".into()));
                 (format!("air.sample_{an}_grad.{sfx}"), Attrs::ReadOnly)
             } else {
@@ -513,11 +586,28 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
             })
         }
         TexOp::Read { coord, array, lod } => {
-            if kind != TexKind::T2d && kind != TexKind::T2dArray && kind != TexKind::T3d {
-                return Err(Error::unsupported(format!("read:{}", kind.name())));
-            }
-            if kind != TexKind::T2d && kind != TexKind::T2dArray {
-                return Err(Error::unsupported(format!("read:{}", kind.name())));
+            let buffer = kind == TexKind::Buffer;
+            let multisampled = kind == TexKind::T2dMs;
+            match kind {
+                TexKind::T2d | TexKind::T2dArray => {}
+                TexKind::T2dMs
+                    if g.cx.air_version == (2, 8, 0)
+                        && g.cx.read_sampler
+                        && tx.elem == Scalar::Float
+                        && tx.access == Access::Read => {}
+                TexKind::Buffer
+                    if g.cx.air_version == (2, 8, 0)
+                        && g.cx.read_sampler
+                        && matches!(tx.elem, Scalar::Float | Scalar::Uint)
+                        && matches!(tx.access, Access::Read | Access::ReadWrite)
+                        && array.is_none()
+                        && lod.is_none() => {}
+                TexKind::T3d
+                    if g.cx.air_version == (2, 8, 0)
+                        && g.cx.read_sampler
+                        && tx.elem == Scalar::Float
+                        && tx.access == Access::Sample => {}
+                _ => return Err(Error::unsupported(format!("read:{}", kind.name()))),
             }
             let c = g.expr(coord)?;
             let slice = match array {
@@ -545,11 +635,25 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
             if let Some(x) = slice {
                 a.push(("i32".into(), x.r));
             }
-            if g.cx.read_sampler {
-                a.push(("<2 x i32>".into(), "zeroinitializer".into()));
+            if g.cx.read_sampler && !multisampled && !buffer {
+                a.push(split_typed(&zero_offset(kind.coord_dim())));
             }
-            a.push(("i32".into(), l));
-            a.push(("i32".into(), "0".into()));
+            if !buffer {
+                a.push(("i32".into(), l));
+            }
+            // Match the captured AIR 2.8 modes for implicit-mip 2D storage reads.
+            let implicit_mip_air28 =
+                g.cx.air_version == (2, 8, 0) && g.cx.read_sampler && lod.is_none();
+            let plane_image = kind == TexKind::T2d && implicit_mip_air28;
+            let array_image = kind == TexKind::T2dArray && implicit_mip_air28;
+            let selector = match (tx.access, tx.elem) {
+                (Access::ReadWrite, _) if buffer => 3,
+                (Access::ReadWrite, Scalar::Float | Scalar::Int | Scalar::Uint) if plane_image => 3,
+                (Access::Read, Scalar::Float | Scalar::Int | Scalar::Uint) if plane_image => 1,
+                (Access::Read, Scalar::Float) if array_image => 1,
+                _ => u32::from(multisampled || buffer),
+            };
+            a.push(("i32".into(), selector.to_string()));
             let (sfx, vt) = tex_ret(tx, kind.is_depth())?;
             let st = format!("{{ {vt}, i8 }}");
             let r = call(
@@ -568,16 +672,41 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
             })
         }
         TexOp::Query { what, lod } => {
+            let buffer = kind == TexKind::Buffer;
+            if buffer
+                && (g.cx.air_version != (2, 8, 0)
+                    || !g.cx.read_sampler
+                    || tx.elem != Scalar::Float
+                    || tx.access != Access::Read
+                    || !matches!(what, Query::Width)
+                    || lod.is_some())
+            {
+                return Err(Error::unsupported("texture_buffer:query"));
+            }
+            let multisampled = matches!(kind, TexKind::T2dMs | TexKind::T2dMsArray);
+            let ms_array_len = kind == TexKind::T2dMsArray && matches!(what, Query::ArraySize);
+            if multisampled
+                && (g.cx.air_version != (2, 8, 0)
+                    || lod.is_some()
+                    || !(ms_array_len
+                        || matches!(what, Query::Width | Query::Height | Query::Samples)))
+            {
+                return Err(Error::unsupported(format!("{}:query", kind.name())));
+            }
             let q = match what {
                 Query::Width => "width",
                 Query::Height => "height",
                 Query::Depth => "depth",
                 Query::ArraySize => "array_size",
                 Query::MipLevels => "num_mip_levels",
+                Query::Samples => "num_samples",
             };
             let t = tex_value(g, tex)?;
             let mut a = vec![(format!("{ht} nocapture readonly"), t.r)];
-            if matches!(what, Query::Width | Query::Height | Query::Depth) {
+            if !multisampled
+                && !buffer
+                && matches!(what, Query::Width | Query::Height | Query::Depth)
+            {
                 let l = match lod {
                     Some(x) => g.expr(x)?.r,
                     None => "0".into(),
@@ -599,13 +728,17 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
             sampler,
             coord,
         } => {
-            if !matches!(kind, TexKind::T2d | TexKind::T2dArray) {
-                return Err(Error::unsupported(format!("lod:{}", kind.name())));
-            }
-            g.sampler_copy = true;
-            let smp = g.expr(sampler);
-            g.sampler_copy = false;
-            let smp = smp?;
+            let smp = match kind {
+                TexKind::T2d | TexKind::T2dArray => g.expr(sampler)?,
+                TexKind::T3d | TexKind::Cube | TexKind::CubeArray
+                    if g.cx.air_version == (2, 8, 0)
+                        && tx.elem == Scalar::Float
+                        && tx.access == Access::Sample =>
+                {
+                    g.load_untagged(sampler)?
+                }
+                _ => return Err(Error::unsupported(format!("lod:{}", kind.name()))),
+            };
             let c = g.expr(coord)?;
             let t = tex_value(g, tex)?;
             let a = vec![
@@ -628,17 +761,74 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
             );
             Ok(V { r, ty: ret.clone() })
         }
+        TexOp::AtomicFetch { op, coord, value } => {
+            let op = match op {
+                TextureAtomicFetch::Or => "or",
+                TextureAtomicFetch::Add => "add",
+                TextureAtomicFetch::Max => "max",
+                TextureAtomicFetch::Min => "min",
+            };
+            if g.cx.air_version != (2, 8, 0) {
+                return Err(Error::unsupported(format!(
+                    "texture2d:atomic-fetch-{op}-target"
+                )));
+            }
+            let c = g.expr(coord)?;
+            let v = g.expr(value)?;
+            let t = tex_value(g, tex)?;
+            let (sfx, vt) = tex_ret(tx, false)?;
+            // Apple Metal 32023.921, AIR 2.8: offset, relaxed order, read-write access.
+            let a = [
+                (format!("{ht} nocapture"), t.r),
+                (lt(g, &c.ty), c.r),
+                split_typed(&zero_offset(2)),
+                (vt.clone(), v.r),
+                ("i32".into(), "0".into()),
+                ("i32".into(), "3".into()),
+            ];
+            let r = call(
+                g,
+                &format!("air.atomic_fetch_{op}_explicit_{an}.{sfx}"),
+                &a,
+                &vt,
+                Attrs::NoUnwindWillReturn,
+                false,
+            );
+            Ok(V { r, ty: ret.clone() })
+        }
         TexOp::Write {
             value,
             coord,
             array,
             lod,
         } => {
-            if kind != TexKind::T2d || array.is_some() {
+            let buffer = kind == TexKind::Buffer;
+            let buffer_write = buffer
+                && g.cx.air_version == (2, 8, 0)
+                && g.cx.read_sampler
+                && matches!(
+                    (tx.elem, tx.access),
+                    (Scalar::Float, Access::ReadWrite)
+                        | (Scalar::Uint, Access::Write | Access::ReadWrite)
+                )
+                && lod.is_none();
+            let array_write = kind == TexKind::T2dArray
+                && g.cx.air_version == (2, 8, 0)
+                && tx.elem == Scalar::Float
+                && tx.access == Access::Write
+                && array.is_some()
+                && lod.is_none();
+            if !array_write && ((kind != TexKind::T2d && !buffer_write) || array.is_some()) {
                 return Err(Error::unsupported(format!("write:{}", kind.name())));
             }
-            let c = g.expr(coord)?;
-            let v = g.expr(value)?;
+            let (c, v) = if array_write && simple_store_arg(coord) && simple_store_arg(value) {
+                // Apple's AIR 2.8 builds the payload first for these side-effect-free arguments.
+                let v = g.expr(value)?;
+                (g.expr(coord)?, v)
+            } else {
+                (g.expr(coord)?, g.expr(value)?)
+            };
+            let slice = array.as_ref().map(|a| g.expr(a)).transpose()?;
             let l = match lod {
                 Some(x) => g.expr(x)?.r,
                 None => "0".into(),
@@ -649,13 +839,16 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
             };
             let (sfx, vt) = tex_ret(tx, false)?;
             let t = tex_value(g, tex)?;
-            let a = vec![
-                (format!("{ht} nocapture"), t.r),
-                (lt(g, &c.ty), c.r),
-                (vt, v.r),
-                ("i32".into(), l),
-                ("i32".into(), access.into()),
-            ];
+            let mut a = vec![(format!("{ht} nocapture"), t.r), (lt(g, &c.ty), c.r)];
+            // Apple Metal 32023.921, AIR 2.8: a 2D array store puts its slice before the texel.
+            if let Some(slice) = slice {
+                a.push(("i32".into(), slice.r));
+            }
+            a.push((vt, v.r));
+            if !buffer {
+                a.push(("i32".into(), l));
+            }
+            a.push(("i32".into(), access.into()));
             call(
                 g,
                 &format!("air.write_{an}.{sfx}"),
@@ -669,6 +862,17 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
                 ty: ret.clone(),
             })
         }
+    }
+}
+
+// Limit reordered construction to values that cannot observe or cause side effects.
+fn simple_store_arg(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Zero => true,
+        ExprKind::Load(place) => matches!(place.kind, PlaceKind::Local(_)),
+        ExprKind::Convert(x) | ExprKind::Splat(x) => simple_store_arg(x),
+        ExprKind::Vector(xs) => xs.iter().all(simple_store_arg),
+        _ => false,
     }
 }
 

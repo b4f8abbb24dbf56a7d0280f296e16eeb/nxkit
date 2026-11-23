@@ -240,9 +240,10 @@ impl Space {
 /// Texture kinds of the prototype's `TEX_KINDS` with their coordinate dimension.
 pub fn tex_dim(kind: &str) -> Option<u8> {
     Some(match kind {
-        "texture2d" | "texture2d_array" | "depth2d" | "depth2d_array" | "texture2d_ms" => 2,
+        "texture2d" | "texture2d_array" | "depth2d" | "depth2d_array" | "texture2d_ms"
+        | "texture2d_ms_array" => 2,
         "texture3d" | "texturecube" | "texturecube_array" | "depthcube" | "depthcube_array" => 3,
-        "texture1d" => 1,
+        "texture1d" | "texture_buffer" => 1,
         _ => return None,
     })
 }
