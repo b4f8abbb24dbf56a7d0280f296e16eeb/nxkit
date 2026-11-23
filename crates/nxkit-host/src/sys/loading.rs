@@ -107,6 +107,10 @@ fn make(mtm: MainThreadMarker, total: usize) -> Shown {
     window.setContentView(Some(&content));
     window.center();
     window.makeKeyAndOrderFront(None);
+    // The screen shows before the run loop runs, and an activation asked for then can get lost (cooperative
+    // activation, see `appkit.rs`): the window stayed behind the terminal or the launcher. It goes in front without the
+    // activation.
+    window.orderFrontRegardless();
     app.activate();
     Shown {
         window,

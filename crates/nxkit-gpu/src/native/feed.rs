@@ -33,6 +33,10 @@ use super::slots::{Binds, Miss, Pic, Table, Why};
 /// feeder cannot keep up. The oldest pictures are dropped (the plan makes them).
 const QUEUE: usize = 8;
 
+/// The longest wait of the encoder for a result that the Neural Engine has not finished yet. A picture takes 15 to 45
+/// ms through the conversion and the Neural Engine (Ocarina of Time on an M2 class GPU, 2026-11-22).
+const LATE_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// The fingerprints of decoded pictures the feed remembers.
 const PRINTS: usize = 16;
 
@@ -58,7 +62,10 @@ struct State {
 /// The picture feed of the process.
 pub(super) struct Feed {
     state: Mutex<State>,
+    /// Wakes the feeder thread when a picture is queued.
     wake: Condvar,
+    /// Wakes the encoder that waits for a late result ([`Feed::pick`]) when a picture is finished.
+    done: Condvar,
 }
 
 /// The feed. It exists once the encoder asks for it ([`install`]).
@@ -78,6 +85,7 @@ pub(super) fn feed() -> &'static Feed {
             ones: 0,
         }),
         wake: Condvar::new(),
+        done: Condvar::new(),
     })
 }
 
@@ -258,7 +266,23 @@ impl Feed {
         if let Some(l) = st.matcher.hit(how) {
             eprintln!("{l}");
         }
-        match st.table.take(pic, epoch) {
+        // A result that is still on its way is waited for, up to `LATE_WAIT`: the Neural Engine is done in tens of
+        // milliseconds, and the Metal plan that makes the picture instead takes about 220 ms of GPU time (Ocarina of
+        // Time, 2026-11-22), which the game's next fence waits for.
+        let deadline = Instant::now() + LATE_WAIT;
+        let taken = loop {
+            let r = st.table.take(pic, epoch);
+            let now = Instant::now();
+            if r != Err(Miss::Late) || now >= deadline {
+                break r;
+            }
+            st = self
+                .done
+                .wait_timeout(st, deadline - now)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        };
+        match taken {
             Ok(slot) => Ok(Hold { slot, pic }),
             Err(Miss::Unknown) => Err((
                 "unknown_picture",
@@ -368,6 +392,8 @@ impl Feed {
             st.error = e.chars().take(120).collect();
         }
         st.table.finished(slot, pic, error.is_none());
+        drop(st);
+        self.done.notify_all();
     }
 }
 
