@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use nxkit_abi::platform::{self, Platform};
 use nxkit_gpu::{GpuBackend, GpuSettings};
 use nxkit_metal::{
-    Context, DisplayTick, FrameHooks, FrameInterval, FrameSource, GobOrder, GuestMemory, Pacer,
-    PolicyInput, choose_present_plan,
+    Context, DisplayTick, FrameHooks, FrameInterval, FrameSource, GobOrder, Pacer, PolicyInput,
+    choose_present_plan,
 };
 use nxkit_nvn::backend::Backend;
 use nxkit_rt::nvn::{self, CommandSettings};
@@ -252,7 +252,7 @@ fn shown_on(now_ns: u64, secs: f64) {
 /// Makes the backend, installs it in the NVN front end and returns the hooks for the display link.
 pub fn install(
     ctx: &Context,
-    memory: &Arc<GuestMemory>,
+    memory: &nxkit_gpu::GuestBuffer,
     root: &Path,
     settings: &Settings,
     run: &RunSettings,
@@ -260,7 +260,7 @@ pub fn install(
     refresh: &Arc<crate::refresh::Refresh>,
 ) -> Result<Arc<dyn FrameHooks>> {
     crate::sys::exitflush::install();
-    let backend = GpuBackend::new(
+    let backend = GpuBackend::with_guest(
         ctx,
         memory.clone(),
         &nxkit_gpu::GpuSettings {

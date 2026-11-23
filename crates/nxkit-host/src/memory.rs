@@ -58,6 +58,12 @@ impl GuestMemory {
         self.res.as_gpu_memory(ctx, r.start, r.len)
     }
 
+    /// The CPU view of [`GuestMemory::gpu_range`] without a buffer, for the per-pool mode (`NXKIT_GPU_BUFFER=pools`).
+    pub fn gpu_space(&self) -> Result<nxkit_metal::GuestSpace> {
+        let r = self.gpu_range();
+        self.res.as_guest_space(r.start, r.len)
+    }
+
     /// Keeps the pages under the GPU buffer where they are, after [`GuestMemory::gpu_memory`].
     ///
     /// The GPU driver wires every page of the buffer while it is resident and keeps using those pages, so a host call
@@ -88,5 +94,19 @@ impl GuestMemory {
     pub fn seal(&self) -> Result<()> {
         self.res
             .protect(self.layout.main_stack.start, PAGE, PROT_NONE)
+    }
+}
+
+/// The kernel's pinned set as the pool set of the per-pool mode sees it: every pool buffer pins its pages while it
+/// exists, so `MapMemory` copies over them and giving them back zeroes them in place (`nxkit_hos::pinned`).
+pub struct KernelPins;
+
+impl nxkit_gpu::PagePins for KernelPins {
+    fn pin(&self, start: u64, end: u64) {
+        nxkit_hos::pinned::pin(start, end);
+    }
+
+    fn unpin(&self, start: u64, end: u64) {
+        nxkit_hos::pinned::unpin(start, end);
     }
 }

@@ -6,9 +6,12 @@
 //! - `nxkit_merge_in` runs on the GPU before the first pass of the frame. It copies the whole guest range into the copy
 //!   and then takes the words of `C` from the bytes that the CPU thread captured at the flush. The guest words of `G`
 //!   hold what the frame before wrote (`nxkit_merge_out` ran at its end), so the state of the GPU carries over.
-//! - `nxkit_merge_out` runs on the GPU after the last pass of the frame. It writes the words of `G` from the copy into
-//!   the guest range. The CPU never writes those words and the GPU never writes the words of `C` into the guest, so
-//!   neither side overwrites the other.
+//! - `nxkit_merge_out` runs on the GPU after the last pass of the frame. It writes the words of `G` and every other word
+//!   that the frame changed (it differs from the second copy that `nxkit_merge_in` keeps of the start) and that is not a
+//!   word of `C` into the guest range. The CPU never writes those words and the GPU never writes the words of `C` into the guest, so neither
+//!   side overwrites the other. The words of `G` that the learning saw are not enough: a culling list whose length
+//!   follows what is visible writes words past them in a later frame, and those writes were lost (the foliage of
+//!   Ocarina of Time went on and off from frame to frame).
 //!
 //! Both kernels run as passes of their own with a barrier from all earlier work and one for all later work, so the order
 //! of the frames on the queue is the order of the state.
@@ -62,8 +65,10 @@ kernel void nxkit_probe_out(device const merge_job *jp [[buffer(0)]], uint t [[t
 kernel void nxkit_merge_out(device const merge_job *jp [[buffer(0)]], uint t [[thread_position_in_grid]]) {
     merge_job j = jp[0];
     if (t >= j.words) return;
+    bool c = ((j.cmask[t >> 5] >> (t & 31u)) & 1u) != 0u;
     bool g = ((j.gmask[t >> 5] >> (t & 31u)) & 1u) != 0u;
-    if (g) j.guest[t] = j.slot[t];
+    uint v = j.slot[t];
+    if (g || (!c && v != j.copy2[t])) j.guest[t] = v;
 }
 "#;
 
@@ -76,7 +81,7 @@ pub(crate) struct MergeRun {
     pub(crate) guest: u64,
     /// The real address of the copy.
     pub(crate) slot: u64,
-    /// For a probe, the real address of the copy as it started, 0 for a merge range.
+    /// The real address of the copy as it started (a probe and a merge range have one).
     pub(crate) copy2: u64,
 }
 
@@ -110,7 +115,8 @@ pub(crate) enum Phase {
 }
 
 /// Encodes the kernel of `phase` for `runs` as a compute pass of `cb`. At the end of a frame a merge range runs
-/// `nxkit_merge_out` (the words of `G`) and a probe `nxkit_probe_out` (every word that differs from the start copy).
+/// `nxkit_merge_out` (every changed word that is not the CPU's) and a probe `nxkit_probe_out` (every word that differs
+/// from the start copy).
 pub(crate) fn encode(
     pipelines: &Pipelines,
     cb: &mut CommandBuffer,
@@ -128,10 +134,10 @@ pub(crate) fn encode(
         let range = &r.cap.ranges[r.idx];
         let words = range.len / 4;
         let push = |b: &[u8]| scratch.push(b).map_err(|_| Skip::Buffer);
-        let entry = match (phase, r.copy2 != 0) {
+        let entry = match (phase, range.kind) {
             (Phase::In, _) => "nxkit_merge_in",
-            (Phase::Out, false) => "nxkit_merge_out",
-            (Phase::Out, true) => "nxkit_probe_out",
+            (Phase::Out, super::Kind::Merge) => "nxkit_merge_out",
+            (Phase::Out, _) => "nxkit_probe_out",
         };
         let (cvals, cprefix) = if phase == Phase::In {
             // The words of the CPU, packed (an empty list still needs an address).

@@ -85,7 +85,7 @@ mod ubotex;
 mod upload;
 mod walk;
 
-pub use backend::{GpuBackend, MAX_PENDING};
+pub use backend::{GpuBackend, GuestBuffer, MAX_PENDING};
 pub use gpu::{Gpu, GpuConfig};
 pub use guestpools::GuestPools;
 pub use hotswap::ShaderHub;

@@ -39,7 +39,7 @@ fn the_kernels_fill_the_copy_and_merge_the_gpu_words_back() {
         return;
     };
     let guest = DataBuffer::new(&ctx, 256).unwrap();
-    let slot = DataBuffer::new(&ctx, 256).unwrap();
+    let slot = DataBuffer::new(&ctx, 512).unwrap();
     // 40 words. The GPU's state is in words 2 and 35, the CPU writes words 1 and 33. The guest holds a stale value of the
     // CPU's words and the state of the GPU.
     let mut g: Vec<u32> = (100..140).collect();
@@ -75,7 +75,7 @@ fn the_kernels_fill_the_copy_and_merge_the_gpu_words_back() {
         idx: 0,
         guest: guest.gpu_address(),
         slot: slot.gpu_address(),
-        copy2: 0,
+        copy2: slot.gpu_address() + 256,
     }];
     let scratch = Scratch::new(&ctx, 1 << 16).unwrap();
     let table = ArgumentTable::new(&ctx, 31, 0).unwrap();
@@ -99,10 +99,12 @@ fn the_kernels_fill_the_copy_and_merge_the_gpu_words_back() {
     assert_eq!(copy[2], 102);
     assert_eq!(copy[35], 135);
     assert_eq!(copy[0], 100);
-    // The frame changes the copy: its word 2 (GPU state) and word 5 (not in a mask).
+    // The frame changes the copy: its word 2 (GPU state that the learning saw), word 5 (a word past what the learning saw)
+    // and word 33 (a word of the CPU, which the GPU must not write back).
     let mut c2 = copy.clone();
     c2[2] = 4242;
     c2[5] = 9999;
+    c2[33] = 7777;
     put(&slot, &c2);
     let mut frame = ring.begin().unwrap();
     encode(
@@ -118,7 +120,11 @@ fn the_kernels_fill_the_copy_and_merge_the_gpu_words_back() {
     frame.submit().unwrap().wait().unwrap();
     let after = words(&guest, 40);
     assert_eq!(after[2], 4242, "the GPU's word goes back");
-    assert_eq!(after[5], 105, "a word outside the masks stays");
+    assert_eq!(
+        after[5], 9999,
+        "a word that the GPU changed goes back, also past the learned mask"
+    );
+    assert_eq!(after[6], 106, "a word that the frame did not change stays");
     assert_eq!(after[1], 0xdead, "the CPU's word is not written by the GPU");
     assert_eq!(after[33], 0xbeef);
 }

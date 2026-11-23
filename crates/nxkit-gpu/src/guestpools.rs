@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use nxkit_metal::{GUEST_VA_BASE, GuestMemory};
+use nxkit_metal::{Context, GUEST_VA_BASE, GuestMemory};
 
 use crate::pools::{Backing, PagePins, PoolSet, PoolSnapshot};
 
@@ -40,4 +40,23 @@ pub(crate) fn whole(guest: &Arc<GuestMemory>) -> GuestPoolSet {
         Arc::clone(guest),
         Arc::new(NoPins),
     )
+}
+
+/// The set of the per-pool mode over the guest range that starts at the host address `host_base`: every registered pool
+/// gets a no-copy buffer of its own over its pages rounded out to [`crate::pools::PAGE`]. The buffers join the residency
+/// set without a commit. The encoder commits once per frame before it submits, so a new pool is resident before the GPU
+/// work that uses it. `pins` tells the kernel which pages lie under a buffer (`nxkit_hos::pinned`).
+pub(crate) fn per_pool(
+    ctx: &Context,
+    space: &nxkit_metal::GuestSpace,
+    pins: Arc<dyn PagePins>,
+) -> GuestPoolSet {
+    let (ctx, space2) = (ctx.clone(), space.clone());
+    let maker = move |host_start: u64, len: u64| -> Result<Arc<GuestMemory>, String> {
+        space2
+            .buffer_uncommitted(&ctx, host_start, len)
+            .map(Arc::new)
+            .map_err(|e| e.to_string())
+    };
+    PoolSet::new(GUEST_VA_BASE, space.host_base(), maker, pins)
 }

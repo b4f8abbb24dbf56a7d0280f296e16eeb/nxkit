@@ -53,8 +53,8 @@ impl GuestSpace {
     ///
     /// # Safety
     ///
-    /// `[host_base, host_base + len)` must be valid for reads and writes for as long as the space and every copy of it
-    /// lives. The memory must not be unmapped or moved.
+    /// `[host_base, host_base + len)` must be valid for reads and writes for as long as the space, every copy of it and
+    /// every buffer that [`GuestSpace::buffer_uncommitted`] made over it lives. The memory must not be unmapped or moved.
     pub unsafe fn from_raw(host_base: u64, len: u64) -> Result<Self> {
         let map = virtual_map(host_base, len)?;
         let base = NonNull::new(host_base as *mut u8)
@@ -64,6 +64,39 @@ impl GuestSpace {
             base,
             _owner: None,
         })
+    }
+
+    /// A no-copy buffer over `len` bytes at the host address `host_start`, a part of a space made by
+    /// [`GuestSpace::from_raw`] (whose maker promised the memory for every such buffer). The buffer joins the residency
+    /// set without a commit (`GuestMemory::from_raw_uncommitted`): the caller commits once before the GPU uses it.
+    /// `host_start` and `len` must be multiples of the page size. A space made by [`GuestSpace::over`] refuses, because
+    /// its owner could go before the buffer.
+    pub fn buffer_uncommitted(
+        &self,
+        ctx: &crate::Context,
+        host_start: u64,
+        len: u64,
+    ) -> Result<GuestMemory> {
+        if self._owner.is_some() {
+            return Err(MetalError::Invalid(
+                "a space over a buffer makes no buffers of its own",
+            ));
+        }
+        let base = self.base.as_ptr() as u64;
+        let end = host_start
+            .checked_add(len)
+            .ok_or(MetalError::Invalid("a pool buffer range wraps"))?;
+        if len == 0 || host_start < base || end > base + self.map.len() {
+            return Err(MetalError::Invalid(
+                "a pool buffer range leaves the guest space",
+            ));
+        }
+        let ptr = NonNull::new(host_start as *mut u8).ok_or(MetalError::Invalid(
+            "the host start of a pool buffer is null",
+        ))?;
+        // SAFETY: the range lies in the space, and the maker of the space (`from_raw`) promised that its memory stays
+        // valid for every buffer made here.
+        unsafe { GuestMemory::from_raw_uncommitted(ctx, ptr, len) }
     }
 
     /// The map between host addresses and guest GPU addresses. Its `gpu_base` is `GUEST_VA_BASE`.

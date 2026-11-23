@@ -259,8 +259,8 @@ impl Renamer {
             }
             offsets.push((i, total));
             let size = u64::from(r.len).next_multiple_of(ALIGN);
-            // A probe has a second copy, which keeps the state at the start of the frame.
-            total += if r.kind == Kind::Probe {
+            // A probe and a merge range have a second copy, which keeps the state at the start of the frame.
+            total += if matches!(r.kind, Kind::Probe | Kind::Merge) {
                 2 * size
             } else {
                 size
@@ -294,7 +294,10 @@ impl Renamer {
             let size = r.len;
             entries.push((r.addr, size, real));
             match r.kind {
-                Kind::Merge => merges.push((i, r.addr, size, real, 0)),
+                Kind::Merge => {
+                    let second = off + u64::from(size).next_multiple_of(ALIGN);
+                    merges.push((i, r.addr, size, real, buf.gpu_address() + second));
+                }
                 Kind::Probe => {
                     let second = off + u64::from(size).next_multiple_of(ALIGN);
                     probes.push((i, off, second));
@@ -312,7 +315,10 @@ impl Renamer {
                 r.kind == Kind::Rename || (r.kind == Kind::Merge && !is_empty_mask(&r.rmask))
             })
             .collect();
-        let merge_count = merges.iter().filter(|m| m.4 == 0).count();
+        let merge_count = merges
+            .iter()
+            .filter(|m| cap.ranges[m.0].kind == Kind::Merge)
+            .count();
         note_n(Reason::OverlapRenamed, offsets.len() as u64);
         if merge_count != 0 {
             note_n(Reason::OverlapMergeRanges, merge_count as u64);

@@ -308,6 +308,19 @@ impl Reservation {
     }
 }
 
+impl Reservation {
+    /// The CPU view of `[start, start + len)` of the reservation without a buffer, for the per-pool mode of the GPU
+    /// backend (`NXKIT_GPU_BUFFER=pools`): the pool set makes one buffer per pool over parts of it.
+    pub fn as_guest_space(&self, start: u64, len: u64) -> Result<nxkit_metal::GuestSpace> {
+        self.check(start, len)?;
+        // SAFETY: the range lies inside the reservation, which is mapped for the whole run and never unmapped or moved,
+        // so it stays valid for the space and for every pool buffer made over it.
+        unsafe { nxkit_metal::GuestSpace::from_raw(start, len) }.map_err(|e| {
+            HostError::Memory(format!("the guest space over {start:#x} + {len:#x}: {e}"))
+        })
+    }
+}
+
 /// The argument of `fcntl(F_ADDFILESIGS_RETURN)`, `fsignatures_t` of `<sys/fcntl.h>`. The last fields are for
 /// `F_ADDFILESIGS_INFO` and stay zero.
 #[repr(C)]

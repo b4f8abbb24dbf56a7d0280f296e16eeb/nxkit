@@ -3,10 +3,17 @@
 //! Found by ComicBit (v0lumehi/nxkit#22): the two dynamic-resolution palettes of the game share ten scale words in
 //! the bootup pack's ModelSceneExtensionParam. Setting all ten to one scale pins the resolution. The thresholds,
 //! the initialization and the timing stay as they are. The digests are those of v131072. No game data is stored here.
+//!
+//! The default is 0.75, the game's own top level: its levels are scales of 2048x1152 from 0.75 (1536x864) down to
+//! 0.333, so 1.0 would render 2048x1152 (GPU 23.7 instead of 19.8 ms a frame, Kokiri Forest, M2 Max). With the dynamic
+//! resolution on, the game moves its render targets to new offsets and sizes in its GPU-only pool every few frames, and
+//! the host makes new Metal textures for them, whose GPU contents are lost: the picture flickered after a load
+//! (measured on nxkit, Kokiri Forest, 2026-11-23). `--resource-patch resolution-scale=stock` keeps the game's own
+//! dynamic resolution, for a test of the host's handling of moving targets.
 
 use nxtitle::{Digest, Edit, Evidence, Fact, ResourcePatch, ZstdDictionary};
 
-/// The patch. Without the option the game keeps its dynamic resolution.
+/// The patch. Without the option the resolution is pinned at the game's top level (`default`).
 pub(super) const PATCHES: &[Fact<ResourcePatch>] = &[Fact::new(
     ResourcePatch {
         option: "resolution-scale",
@@ -25,7 +32,7 @@ pub(super) const PATCHES: &[Fact<ResourcePatch>] = &[Fact::new(
             above: 0.0,
             up_to: 1.0,
         },
-        default: None,
+        default: Some(0.75),
     },
     Evidence::Recorded {
         source: "https://github.com/v0lumehi/nxkit/pull/22 (ComicBit)",
@@ -51,9 +58,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_patch_is_off_by_default_and_takes_scales_up_to_one() {
+    fn the_patch_pins_the_top_level_by_default_and_takes_scales_up_to_one() {
         let p = PATCHES[0].value;
-        assert_eq!(p.default, None);
+        assert_eq!(p.default, Some(0.75));
         assert!(PATCHES[0].evidence.is_checked());
         assert!(p.edit.accepts(0.5) && p.edit.accepts(1.0));
         assert!(!p.edit.accepts(0.0) && !p.edit.accepts(1.5) && !p.edit.accepts(f32::NAN));

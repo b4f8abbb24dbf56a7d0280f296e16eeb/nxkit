@@ -1,6 +1,10 @@
 # One GPU buffer per memory pool: the GPU wires only the memory it can reach
 
-Status: plan, 2026-11-09. Nothing is built. The code references are to `feat/nxkit-rt` at `b9987b0`. Line numbers
+Status: built through P7 (2026-11-23): `NXKIT_GPU_BUFFER=pools` turns the per-pool mode on, `whole` stays the default.
+Measured on Ocarina of Time (Kokiri Forest, M2 Max): wired guest memory 12,626 → 5,348 MiB, resident guest pages 12,692 →
+7,049 MiB, Metal device total 15,400 → 8,428 MiB; encode 7.7 ms and GPU 19.8 ms in both modes (two A/B pairs); no
+`bind.no-pool` or crossed pool edges, the picture right. Open: the default, after Pokopia, Xenoblade Chronicles 3 and a
+long session; P8 (the docs of each crate). The plan below is the plan as written on 2026-11-09. The code references are to `feat/nxkit-rt` at `b9987b0`. Line numbers
 drift, but the function names do not.
 
 ## Recommendation

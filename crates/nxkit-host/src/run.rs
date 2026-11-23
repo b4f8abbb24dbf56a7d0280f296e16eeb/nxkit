@@ -154,8 +154,18 @@ pub fn run(opts: &Options) -> Result<()> {
 
     // The GPU buffer comes first, while no page of the reservation is `PROT_NONE` (Metal refuses such a range).
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
-    let gpu_memory = Arc::new(mem.gpu_memory(&ctx)?);
-    mem.keep_gpu_pages(env);
+    // `NXKIT_GPU_BUFFER=pools`: no buffer over the whole range. Each NVN memory pool gets its own, and only its pages
+    // are wired and pinned. Otherwise one buffer over the whole range, wired in full and pinned for the run.
+    let guest_buffer = if run.gpu.gpu_buffer_pools {
+        nxkit_gpu::GuestBuffer::Pools {
+            space: mem.gpu_space()?,
+            pins: Arc::new(crate::memory::KernelPins),
+        }
+    } else {
+        let whole = nxkit_gpu::GuestBuffer::Whole(Arc::new(mem.gpu_memory(&ctx)?));
+        mem.keep_gpu_pages(env);
+        whole
+    };
     mem.seal()?;
     crate::memreport::start(&ctx, &layout, env);
 
@@ -194,7 +204,7 @@ pub fn run(opts: &Options) -> Result<()> {
     let hooks = match loaded.game.graphics {
         Graphics::Nvn => seams::frame_hooks(
             &ctx,
-            &gpu_memory,
+            &guest_buffer,
             &opts.root,
             &settings,
             &run,

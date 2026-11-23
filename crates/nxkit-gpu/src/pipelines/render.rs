@@ -205,7 +205,12 @@ impl Pipelines {
             let key = swapped_key(key, vs.swap, fs.map_or(0, |f| f.swap));
             return self.render_swapped(key, d, vs, fs, &mut desc);
         }
-        if async_on() && !icb {
+        // A draw that tests the depth for `equal` repeats the geometry of a depth prepass. Left out, it leaves the prepass
+        // depth behind with nothing drawn over it, and whatever was there before shows through (in Ocarina of Time the
+        // sky, values 9 to 19, which made the first minute white while the pipelines compiled). It waits for its
+        // pipeline in the encode instead.
+        let equal_depth = d.depth_stencil.depth_test && d.depth_stencil.depth_func == 3;
+        if async_on() && !icb && !equal_depth {
             let fallback =
                 class != TopologyClass::Point && falls_back(&self.topology_fallbacks, key, vertex);
             if let Some(p) =
@@ -341,7 +346,9 @@ impl Pipelines {
                 d.program.fragment.as_deref()
             )
         };
-        if async_on() {
+        // As for a vertex draw: a mesh draw that tests the depth for `equal` waits for its pipeline.
+        let equal_depth = d.depth_stencil.depth_test && d.depth_stencil.depth_func == 3;
+        if async_on() && !equal_depth {
             stats::pending_draw();
             if self.builds.touch(key) {
                 return Err(Skip::Pending);

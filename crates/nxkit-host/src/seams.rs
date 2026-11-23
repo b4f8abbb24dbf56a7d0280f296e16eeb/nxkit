@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use nxkit_abi::ipc::Named;
 use nxkit_abi::launch;
-use nxkit_metal::{Context, FrameHooks, GuestMemory};
+use nxkit_metal::{Context, FrameHooks};
 use nxkit_rt::Service;
 use nxkit_svc_input::{KeyMap, PadMap};
 use nxkit_svc_pacing::{LoadConfig, StepMode};
@@ -532,7 +532,7 @@ pub fn mouse_mode() -> MouseMode {
 /// `root` is the run folder, which has the shaders. The work is in `frames.rs`.
 pub fn frame_hooks(
     ctx: &Context,
-    memory: &Arc<GuestMemory>,
+    memory: &nxkit_gpu::GuestBuffer,
     root: &std::path::Path,
     settings: &Settings,
     run: &crate::hostenv::RunSettings,

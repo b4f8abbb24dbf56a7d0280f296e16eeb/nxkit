@@ -72,6 +72,21 @@ struct Pending {
     origin_lower_left: bool,
 }
 
+/// How the GPU reaches guest memory.
+#[derive(Clone)]
+pub enum GuestBuffer {
+    /// One no-copy buffer over the whole guest range (`NXKIT_GPU_BUFFER=whole`, the default). The driver wires all of it.
+    Whole(Arc<GuestMemory>),
+    /// One buffer per NVN memory pool (`NXKIT_GPU_BUFFER=pools`). `space` is the CPU view of the guest range, and `pins`
+    /// tells the kernel which pages lie under a buffer.
+    Pools {
+        /// The guest range, with no buffer.
+        space: GuestSpace,
+        /// The kernel's pinned set.
+        pins: Arc<dyn crate::pools::PagePins>,
+    },
+}
+
 /// The backend of the front end and the sink of the display ticks.
 pub struct GpuBackend {
     ctx: Context,
@@ -167,7 +182,28 @@ impl GpuBackend {
         guest: Arc<GuestMemory>,
         settings: &GpuSettings,
     ) -> nxkit_metal::Result<Arc<Self>> {
-        let space = GuestSpace::over(&guest)?;
+        Self::with_guest(ctx, GuestBuffer::Whole(guest), settings)
+    }
+
+    /// Makes the backend over the guest memory in the given mode.
+    pub fn with_guest(
+        ctx: &Context,
+        guest: GuestBuffer,
+        settings: &GpuSettings,
+    ) -> nxkit_metal::Result<Arc<Self>> {
+        let (space, pools) = match guest {
+            GuestBuffer::Whole(guest) => {
+                (GuestSpace::over(&guest)?, crate::guestpools::whole(&guest))
+            }
+            GuestBuffer::Pools { space, pins } => {
+                let pools = crate::guestpools::per_pool(ctx, &space, pins);
+                eprintln!(
+                    "nxkit-gpu: one GPU buffer per memory pool (NXKIT_GPU_BUFFER=pools) over {} MiB of guest range",
+                    space.len() >> 20
+                );
+                (space, pools)
+            }
+        };
         let events = events::EventSignals::new(space.clone());
         let gpu = Gpu::with_config(ctx, space.clone(), settings.config())?;
         let pool_hint = gpu.pool_hint();
@@ -175,12 +211,11 @@ impl GpuBackend {
         let mut walker = Walker::new(settings.shader_dir.clone(), space.address_map());
         walker.set_game_overlap(settings.overlap);
         let invalidations = walker.invalidations();
-        let pools = crate::guestpools::whole(&guest);
         // `NXKIT_PRIVATE`: the page tracker and, for `1`, the mirror. With the mirror the overlap and the renamer are off.
         crate::private::attach(
             ctx,
-            guest.host_base(),
-            guest.len(),
+            space.host_base(),
+            space.len(),
             space.address_map().gpu_base(),
         );
         let threaded = settings.enc_thread || crate::settings::env().enc_thread;
