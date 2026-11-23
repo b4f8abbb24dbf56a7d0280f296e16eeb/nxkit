@@ -99,6 +99,11 @@ impl View {
         self.has(SET_MODE) && self.bits >> MODE_SHIFT == MODE_STENCIL
     }
 
+    /// The depth-stencil mode of the view when it sets one: true for stencil. `None` takes the mode of the texture.
+    pub(super) fn mode(&self) -> Option<bool> {
+        self.has(SET_MODE).then(|| self.stencil())
+    }
+
     fn has(&self, bit: u8) -> bool {
         self.bits & bit != 0
     }
@@ -389,6 +394,18 @@ mod tests {
         let m = testing::alloc(4);
         assert!(set(get_depth_stencil_mode(v, m)));
         assert_eq!(Obj(m).i32(0).expect("mode"), 1);
+    }
+
+    #[test]
+    fn a_view_gives_its_depth_stencil_mode_only_when_it_sets_one() {
+        let v = testing::alloc(16);
+        set_defaults(v);
+        assert_eq!(View::load(v).expect("load").mode(), None);
+        set_depth_stencil_mode(v, 0);
+        assert_eq!(View::load(v).expect("load").mode(), Some(false));
+        set_depth_stencil_mode(v, 1);
+        assert_eq!(View::load(v).expect("load").mode(), Some(true));
+        assert_eq!(View::load(0).expect("null view").mode(), None);
     }
 
     #[test]

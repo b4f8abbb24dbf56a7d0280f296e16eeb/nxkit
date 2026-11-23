@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 
 use nxkit_abi::guest;
 
-use crate::nvn::abi::{AbiResult, guard, log_once, magic, table};
+use crate::nvn::abi::{AbiResult, guard, magic, table};
 use crate::nvn::ctx::gpu;
 
 use super::pool::{self, DescPools};
@@ -51,15 +51,11 @@ extern "C" fn finalize(tp: u64) {
 fn register(name: &'static str, tp: u64, id: i32, t: u64, v: u64) -> AbiResult<()> {
     let tex = Tex::load(t)?;
     let slot = POOLS.slot(tp, id)?;
-    if tex.stencil || view::View::load(v)?.stencil() {
-        log_once(
-            "texture_stencil",
-            format_args!(
-                "{name}: a stencil view of a depth-stencil texture is registered as its depth view"
-            ),
-        );
-    }
-    let tv = view::texture_view(v, tex.swizzle)?;
+    // A view that sets a depth-stencil mode wins over the mode of the texture. The backend reads a stencil view of a
+    // depth-stencil texture as its stencil (`TextureView::stencil`).
+    let stencil = view::View::load(v)?.mode().unwrap_or(tex.stencil);
+    let mut tv = view::texture_view(v, tex.swizzle)?;
+    tv.stencil = stencil;
     let g = gpu(name);
     let (registered, dropped) = g.with_front(|f| {
         f.register_texture(slot.id, tex.id, tv)

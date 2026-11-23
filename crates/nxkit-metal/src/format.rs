@@ -64,6 +64,7 @@ impl Mtl for Format {
             Format::Depth32Float => MTLPixelFormat::Depth32Float,
             Format::Stencil8 => MTLPixelFormat::Stencil8,
             Format::Depth32FloatStencil8 => MTLPixelFormat::Depth32Float_Stencil8,
+            Format::X32Stencil8 => MTLPixelFormat::X32_Stencil8,
             Format::Bc(k) => bc_mtl(k),
             Format::Astc { size, srgb } => astc_mtl(size, srgb),
         }

@@ -23,6 +23,7 @@
 //! | samples (log2) | 3 | a power of two up to 128 | fits, nxkit's limit |
 //! | levels, view levels | 6 | 15 (`g_devinfo[0x2C]`) | fits |
 //! | base level | 5 | 15 | fits |
+//! | stencil (depth-stencil mode of the texture or the view) | 1, word 4 bit 25 | `NVN_TEXTURE_DEPTH_STENCIL_MODE_STENCIL` 1 | fits |
 //! | width, height, depth minus 1 | 20 | 16384 (`g_devinfo[0x3D]`) | fits |
 //! | width minus 1 of a buffer | 27, the upper 7 in the height field | 2^27 (`g_devinfo[0x3E]`) | fits |
 //! | layers, base layer | 16 | 2048 (`g_devinfo[0x2D]`) | fits |
@@ -84,6 +85,9 @@ pub struct TextureView {
     pub target: Option<Target>,
     /// The channel swizzle: 0 zero, 1 one, 2 R, 3 G, 4 B, 5 A, for each of R, G, B, A.
     pub swizzle: [u8; 4],
+    /// `NVN_TEXTURE_DEPTH_STENCIL_MODE_STENCIL` of the texture or the view: a depth-stencil texture is read as its
+    /// stencil, not its depth.
+    pub stencil: bool,
 }
 
 impl TextureView {
@@ -97,6 +101,7 @@ impl TextureView {
             format: None,
             target: None,
             swizzle: [2, 3, 4, 5],
+            stencil: false,
         }
     }
 }
@@ -231,7 +236,9 @@ impl Tic {
                 field(self.height.wrapping_sub(1), 20, "height")?,
             )
         };
-        let w4 = w_lo | field(u32::from(self.view.base_level), 5, "base level")? << 20;
+        let w4 = w_lo
+            | field(u32::from(self.view.base_level), 5, "base level")? << 20
+            | u32::from(self.view.stencil) << 25;
         let w6 = field(self.depth.wrapping_sub(1), 20, "depth")?
             | field(u32::from(self.flags), 12, "flags")? << 20;
         let w7 = u32::from(self.view.base_layer) | u32::from(self.view.layers) << 16;
@@ -299,6 +306,7 @@ impl Tic {
                 format: view_format,
                 target: view_target,
                 swizzle,
+                stencil: bits(w[4], 25, 1) != 0,
             },
             flags: bits(w[6], 20, 12) as u16,
         })
@@ -565,6 +573,7 @@ mod tests {
                 format: Some(156),
                 target: Some(Target::Buffer),
                 swizzle: [5, 5, 5, 5],
+                stencil: true,
             },
             flags: 0xfff,
         };

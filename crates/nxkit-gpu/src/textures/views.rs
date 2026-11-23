@@ -150,6 +150,15 @@ impl TextureStore {
             }
             _ => d.format,
         };
+        // A stencil view (`NVN_TEXTURE_DEPTH_STENCIL_MODE_STENCIL`) of a depth-stencil texture reads the stencil. The
+        // shader declares a float texture and takes the bits of the integer, which Metal gives through X32_Stencil8.
+        // Xenoblade Chronicles 3 tests bit 3 of that stencil to classify its pixels for the lighting: through the depth
+        // view it tested a bit of the depth's mantissa, and the lit surfaces showed stripes along the depth.
+        let format = if tic.view.stencil && d.format == Format::Depth32FloatStencil8 {
+            Format::X32Stencil8
+        } else {
+            format
+        };
         let wanted = forced.or_else(|| kind_of(tic.view.target.unwrap_or(tic.target)));
         let mut kind = match (d.kind, wanted) {
             (TextureKind::D3, _) => TextureKind::D3,

@@ -181,6 +181,9 @@ formats! {
     Stencil8 => 253, 1, Stencil;
     /// 32 bit float depth with an 8 bit stencil.
     Depth32FloatStencil8 => 260, 8, DepthStencil;
+    /// The stencil of a [`Format::Depth32FloatStencil8`] texture, for a view that reads the stencil
+    /// (`NVN_TEXTURE_DEPTH_STENCIL_MODE_STENCIL`). Only a view has it, never a texture.
+    X32Stencil8 => 261, 8, Stencil;
 }
 
 /// The block compressed formats of the BC family.
@@ -271,7 +274,8 @@ impl Format {
             | Self::Rgba16Uint
             | Self::Rgba32Uint
             | Self::Rgb10A2Uint
-            | Self::Stencil8 => SampleType::Uint,
+            | Self::Stencil8
+            | Self::X32Stencil8 => SampleType::Uint,
             Self::R8Sint
             | Self::R16Sint
             | Self::R32Sint
