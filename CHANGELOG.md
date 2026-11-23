@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.16.4 - 2026-11-23
+
 ### Fixed
 
 - Xenoblade Chronicles 3 no longer draws its characters, enemies and statues as long stretched polygons. The game
