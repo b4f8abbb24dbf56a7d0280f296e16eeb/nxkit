@@ -8,7 +8,7 @@ use msl_parse::ty::{arith, ScalarName, Ty};
 
 use crate::hir::{
     Arg, BinOp, CmpOp, ConstArray, Expr, ExprKind, FnConst, Func, Local, LocalId, Module, Param,
-    Place, PlaceKind, Query, SampleOpt, Stmt, SwitchArm, TexOp, UnOp,
+    Place, PlaceKind, Query, SampleOpt, Stmt, SwitchArm, TexOp, TextureAtomicFetch, UnOp,
 };
 use crate::types::{is_float, is_signed, Access, Scalar, Space, Tex, TexKind, Type};
 use crate::{builtins, conv, Error};
@@ -25,6 +25,8 @@ enum OptKind {
     Level,
     Bias,
     Grad2d,
+    Grad3d,
+    GradCube,
 }
 
 impl OptKind {
@@ -33,27 +35,41 @@ impl OptKind {
             "level" => Some(Self::Level),
             "bias" => Some(Self::Bias),
             "gradient2d" => Some(Self::Grad2d),
+            "gradient3d" => Some(Self::Grad3d),
+            "gradientcube" => Some(Self::GradCube),
             _ => None,
         }
     }
 
     fn arity(self) -> usize {
         match self {
-            Self::Grad2d => 2,
+            Self::Grad2d | Self::Grad3d | Self::GradCube => 2,
             _ => 1,
         }
     }
 
     fn lower(self, previous: &SampleOpt, mut value: impl FnMut(usize) -> R<Expr>) -> R<SampleOpt> {
-        if matches!(previous, SampleOpt::Grad2d(..))
-            || (self == Self::Grad2d && !matches!(previous, SampleOpt::None))
-        {
-            return Err(Error::invalid("multiple sample options with gradient2d"));
+        let repeated = match (previous, self) {
+            (SampleOpt::Grad2d(..), _) => Some("gradient2d"),
+            (SampleOpt::Grad3d(..), _) => Some("gradient3d"),
+            (SampleOpt::GradCube(..), _) => Some("gradientcube"),
+            (SampleOpt::None, _) => None,
+            (_, Self::Grad2d) => Some("gradient2d"),
+            (_, Self::Grad3d) => Some("gradient3d"),
+            (_, Self::GradCube) => Some("gradientcube"),
+            _ => None,
+        };
+        if let Some(kind) = repeated {
+            return Err(Error::invalid(format!(
+                "multiple sample options with {kind}"
+            )));
         }
         Ok(match self {
             Self::Level => SampleOpt::Level(Box::new(value(0)?)),
             Self::Bias => SampleOpt::Bias(Box::new(value(0)?)),
             Self::Grad2d => SampleOpt::Grad2d(Box::new(value(0)?), Box::new(value(1)?)),
+            Self::Grad3d => SampleOpt::Grad3d(Box::new(value(0)?), Box::new(value(1)?)),
+            Self::GradCube => SampleOpt::GradCube(Box::new(value(0)?), Box::new(value(1)?)),
         })
     }
 
@@ -62,7 +78,13 @@ impl OptKind {
             Self::Grad2d if value.ty != Type::Vector(Scalar::Float, 2) => {
                 Err(Error::invalid("gradient2d requires float2 derivatives"))
             }
-            Self::Grad2d => Ok(value),
+            Self::Grad3d if value.ty != Type::Vector(Scalar::Float, 3) => {
+                Err(Error::invalid("gradient3d requires float3 derivatives"))
+            }
+            Self::GradCube if value.ty != Type::Vector(Scalar::Float, 3) => {
+                Err(Error::invalid("gradientcube requires float3 derivatives"))
+            }
+            Self::Grad2d | Self::Grad3d | Self::GradCube => Ok(value),
             _ => conv(value, &Type::FLOAT),
         }
     }
@@ -204,8 +226,12 @@ struct Cx {
     /// A file-scope `#pragma clang fp contract(off)` came before the current item.
     contract_off: bool,
     barrier_funcs: HashSet<usize>,
+    simd_barrier_funcs: HashSet<usize>,
+    fragment_lod_funcs: HashMap<usize, &'static str>,
     // per function
     uses_threadgroup_barrier: bool,
+    uses_simdgroup_barrier: bool,
+    fragment_lod_error: Option<&'static str>,
     locals: Vec<Local>,
     scopes: Vec<HashMap<Rc<str>, LocalId>>,
     /// Parameters passed by reference: local -> (space, value type).
@@ -419,6 +445,8 @@ impl Cx {
 
     fn function(&mut self, f: &ast::Function) -> R<()> {
         self.uses_threadgroup_barrier = false;
+        self.uses_simdgroup_barrier = false;
+        self.fragment_lod_error = None;
         self.locals.clear();
         self.ref_locals.clear();
         self.scopes = vec![HashMap::new()];
@@ -458,6 +486,18 @@ impl Cx {
                 return Err(Error::unsupported("threadgroup-barrier:vertex"));
             }
             self.barrier_funcs.insert(self.out.funcs.len());
+        }
+        if self.uses_simdgroup_barrier {
+            if matches!(sig.entry, Some(ast::Stage::Vertex | ast::Stage::Fragment)) {
+                return Err(Error::unsupported("simdgroup-barrier:noncompute"));
+            }
+            self.simd_barrier_funcs.insert(self.out.funcs.len());
+        }
+        if let Some(error) = self.fragment_lod_error {
+            if matches!(sig.entry, Some(ast::Stage::Vertex | ast::Stage::Kernel)) {
+                return Err(Error::unsupported(error));
+            }
+            self.fragment_lod_funcs.insert(self.out.funcs.len(), error);
         }
         let func = Func {
             name: sig.name.clone(),
@@ -1211,6 +1251,10 @@ impl Cx {
                     .map(|(_, id)| *id)
                     .ok_or_else(|| Error::invalid(format!("call of undefined {}", sig.name)))?;
                 self.uses_threadgroup_barrier |= self.barrier_funcs.contains(&fid);
+                self.uses_simdgroup_barrier |= self.simd_barrier_funcs.contains(&fid);
+                self.fragment_lod_error = self
+                    .fragment_lod_error
+                    .or_else(|| self.fragment_lod_funcs.get(&fid).copied());
                 let mut out = Vec::with_capacity(args.len());
                 let params: Vec<(Option<Space>, Type)> = self.out.funcs[fid]
                     .params
@@ -1265,6 +1309,7 @@ impl Cx {
             Callee::Prelude(p) => Err(Error::unsupported(format!("prelude-call:{p}"))),
             Callee::Builtin(name) => {
                 self.uses_threadgroup_barrier |= name.as_ref() == "threadgroup_barrier";
+                self.uses_simdgroup_barrier |= name.as_ref() == "simdgroup_barrier";
                 let mut vals = Vec::with_capacity(args.len());
                 for a in args {
                     vals.push(self.expr(a)?);
@@ -1461,6 +1506,42 @@ impl Cx {
         let Type::Texture(tx) = tex.ty else {
             return Err(Error::invalid("method on non-texture"));
         };
+        let buffer = tx.kind == TexKind::Buffer;
+        if buffer
+            && !match name {
+                "read" => args.len() == 1,
+                "write"
+                    if tx.access == Access::ReadWrite
+                        || (tx.elem == Scalar::Uint && tx.access == Access::Write) =>
+                {
+                    args.len() == 2
+                }
+                "get_width" if tx.access == Access::Read => args.is_empty(),
+                _ => false,
+            }
+        {
+            return Err(Error::unsupported("texture_buffer:read-index"));
+        }
+        let ms_array = tx.kind == TexKind::T2dMsArray;
+        if ms_array
+            && (!args.is_empty()
+                || !matches!(
+                    name,
+                    "get_width" | "get_height" | "get_array_size" | "get_num_samples"
+                ))
+        {
+            return Err(Error::unsupported("texture2d_ms_array:query"));
+        }
+        let multisampled = tx.kind == TexKind::T2dMs;
+        if multisampled
+            && !match name {
+                "read" => args.len() == 2,
+                "get_width" | "get_height" | "get_num_samples" => args.is_empty(),
+                _ => false,
+            }
+        {
+            return Err(Error::unsupported("texture2d_ms:read-coord-sample"));
+        }
         let tex_b = Box::new(tex.clone());
         let lod_arg = |cx: &mut Cx, a: Option<&ast::Expr>| -> R<Option<Box<Expr>>> {
             match a {
@@ -1469,14 +1550,24 @@ impl Cx {
             }
         };
         let op = match name {
-            "sample" | "sample_compare" | "gather" => {
+            "sample" | "sample_compare" | "gather" | "gather_compare" => {
                 let extra: Vec<SampleArg> = args.iter().map(SampleArg::Ast).collect();
                 let e = self.sample_op(tx, tex, name, &extra)?;
                 return Ok(Expr { ty, ..e });
             }
             "read" => {
                 let dim = tx.kind.coord_dim();
-                let coord = conv(self.expr(&args[0])?, &Type::vec(Scalar::Uint, dim))?;
+                let coord = self.expr(&args[0])?;
+                let coord_ty = Type::vec(Scalar::Uint, dim);
+                if buffer && coord.ty != Type::UINT {
+                    return Err(Error::unsupported("texture_buffer:read-index"));
+                }
+                if multisampled && coord.ty != coord_ty {
+                    return Err(Error::invalid(
+                        "multisample read requires uint2 coordinates",
+                    ));
+                }
+                let coord = conv(coord, &coord_ty)?;
                 let mut rest = &args[1..];
                 let array = if tx.kind.is_array() {
                     let a = rest.first().ok_or_else(|| Error::invalid("read slice"))?;
@@ -1485,20 +1576,63 @@ impl Cx {
                 } else {
                     None
                 };
-                if tx.kind == TexKind::T2dMs {
-                    return Err(Error::unsupported("method:read:texture2d_ms"));
+                if tx.kind == TexKind::T3d && rest.len() > 1 {
+                    return Err(Error::unsupported("read:texture3d-args"));
                 }
-                let lod = lod_arg(self, rest.first())?;
+                let lod = if multisampled {
+                    let sample = self.expr(&args[1])?;
+                    if sample.ty != Type::UINT {
+                        return Err(Error::invalid(
+                            "multisample read requires a uint sample index",
+                        ));
+                    }
+                    Some(Box::new(sample))
+                } else {
+                    lod_arg(self, rest.first())?
+                };
                 TexOp::Read {
                     coord: Box::new(coord),
                     array,
                     lod,
                 }
             }
+            "write" if tx.kind == TexKind::T2dArray => {
+                let unsupported = || Error::unsupported("write:texture2d_array");
+                let [value, coord, slice] = args else {
+                    return Err(unsupported());
+                };
+                if tx.elem != Scalar::Float || tx.access != Access::Write {
+                    return Err(unsupported());
+                }
+                let value = self.expr(value)?;
+                let coord = self.expr(coord)?;
+                let slice = self.expr(slice)?;
+                if value.ty != Type::Vector(Scalar::Float, 4)
+                    || coord.ty != Type::Vector(Scalar::Uint, 2)
+                    || slice.ty != Type::UINT
+                {
+                    return Err(unsupported());
+                }
+                TexOp::Write {
+                    value: Box::new(value),
+                    coord: Box::new(coord),
+                    array: Some(Box::new(slice)),
+                    lod: None,
+                }
+            }
             "write" => {
-                let value = conv(self.expr(&args[0])?, &Type::Vector(tx.elem, 4))?;
+                let value = self.expr(&args[0])?;
+                let value_ty = Type::Vector(tx.elem, 4);
+                if buffer && value.ty != value_ty {
+                    return Err(Error::unsupported("texture_buffer:write-value"));
+                }
+                let value = conv(value, &value_ty)?;
                 let dim = tx.kind.coord_dim();
-                let coord = conv(self.expr(&args[1])?, &Type::vec(Scalar::Uint, dim))?;
+                let coord = self.expr(&args[1])?;
+                if buffer && coord.ty != Type::UINT {
+                    return Err(Error::unsupported("texture_buffer:write-index"));
+                }
+                let coord = conv(coord, &Type::vec(Scalar::Uint, dim))?;
                 let mut rest = &args[2..];
                 let array = if tx.kind.is_array() {
                     let a = rest.first().ok_or_else(|| Error::invalid("write slice"))?;
@@ -1515,6 +1649,43 @@ impl Cx {
                     lod,
                 }
             }
+            "atomic_fetch_or" | "atomic_fetch_add" | "atomic_fetch_max" | "atomic_fetch_min" => {
+                let [coord, value] = args else {
+                    return Err(Error::unsupported(format!("method:{name}")));
+                };
+                let coord = self.expr(coord)?;
+                let value = self.expr(value)?;
+                let supported_element = matches!(
+                    (name, tx.elem),
+                    (
+                        "atomic_fetch_or" | "atomic_fetch_add" | "atomic_fetch_max",
+                        Scalar::Uint
+                    ) | ("atomic_fetch_max" | "atomic_fetch_min", Scalar::Int)
+                );
+                if tx.kind != TexKind::T2d
+                    || !supported_element
+                    || tx.access != Access::ReadWrite
+                    || coord.ty != Type::Vector(Scalar::Uint, 2)
+                    || value.ty != Type::Vector(tx.elem, 4)
+                {
+                    return Err(Error::unsupported(format!("method:{name}")));
+                }
+                TexOp::AtomicFetch {
+                    op: match name {
+                        "atomic_fetch_or" => TextureAtomicFetch::Or,
+                        "atomic_fetch_add" => TextureAtomicFetch::Add,
+                        "atomic_fetch_max" => TextureAtomicFetch::Max,
+                        "atomic_fetch_min" => TextureAtomicFetch::Min,
+                        _ => unreachable!(),
+                    },
+                    coord: Box::new(coord),
+                    value: Box::new(value),
+                }
+            }
+            "get_num_samples" if multisampled || ms_array => TexOp::Query {
+                what: Query::Samples,
+                lod: None,
+            },
             "get_width" | "get_height" | "get_depth" | "get_array_size" | "get_num_mip_levels" => {
                 let what = match name {
                     "get_width" => Query::Width,
@@ -1531,6 +1702,12 @@ impl Cx {
                 TexOp::Query { what, lod }
             }
             "calculate_clamped_lod" | "calculate_unclamped_lod" => {
+                self.fragment_lod_error = self.fragment_lod_error.or(match tx.kind {
+                    TexKind::T3d => Some("lod:texture3d-stage"),
+                    TexKind::Cube => Some("lod:texturecube-stage"),
+                    TexKind::CubeArray => Some("lod:texturecube_array-stage"),
+                    _ => None,
+                });
                 let sampler = self.expr(&args[0])?;
                 let coord = conv(
                     self.expr(&args[1])?,
@@ -1566,8 +1743,11 @@ impl Cx {
         self.sample_op(tx, tex, "sample", &all)
     }
 
-    /// `sample`, `sample_compare`, `gather` with arguments (sampler, coord, [slice], [ref], options...).
+    /// Sampling and gather methods take (sampler, coord, [slice], [ref], options...).
     fn sample_op(&mut self, tx: Tex, tex: Expr, name: &str, args: &[SampleArg<'_>]) -> R<Expr> {
+        if tx.kind == TexKind::T2dMsArray {
+            return Err(Error::unsupported("texture2d_ms_array:query"));
+        }
         let mut it = args.iter();
         let sampler = self.sample_arg(it.next().ok_or_else(|| Error::invalid("sampler"))?)?;
         let dim = tx.kind.coord_dim();
@@ -1579,7 +1759,11 @@ impl Cx {
         } else {
             None
         };
-        let compare = if name == "sample_compare" {
+        let compare_gather = name == "gather_compare";
+        if compare_gather && tx.access != Access::Sample {
+            return Err(Error::unsupported("gather_compare:access"));
+        }
+        let compare = if compare_gather || name == "sample_compare" {
             let r = self.sample_arg(it.next().ok_or_else(|| Error::invalid("compare ref"))?)?;
             Some(Box::new(conv(r, &Type::FLOAT)?))
         } else {
@@ -1587,7 +1771,11 @@ impl Cx {
         };
         let mut opt = SampleOpt::None;
         let mut offset = None;
-        let mut gather = if name == "gather" { Some(0u8) } else { None };
+        let mut gather = if compare_gather || name == "gather" {
+            Some(0u8)
+        } else {
+            None
+        };
         for a in it {
             if let SampleArg::Opt(o, l) = a {
                 opt = o.lower(&opt, |i| {
@@ -1630,9 +1818,33 @@ impl Cx {
             return Err(Error::invalid("gather option"));
         }
         if matches!(opt, SampleOpt::Grad2d(..))
-            && (name != "sample" || tx.kind != TexKind::T2dArray || tx.elem != Scalar::Float)
+            && (name != "sample"
+                || tx.elem != Scalar::Float
+                || !match tx.kind {
+                    TexKind::T2dArray => true,
+                    TexKind::T2d => tx.access == Access::Sample && offset.is_none(),
+                    _ => false,
+                })
         {
             return Err(Error::unsupported("sample-option:gradient2d"));
+        }
+        if matches!(opt, SampleOpt::Grad3d(..))
+            && (name != "sample"
+                || tx.kind != TexKind::T3d
+                || tx.elem != Scalar::Float
+                || tx.access != Access::Sample
+                || offset.is_some())
+        {
+            return Err(Error::unsupported("sample-option:gradient3d"));
+        }
+        if matches!(opt, SampleOpt::GradCube(..))
+            && (name != "sample"
+                || !matches!(tx.kind, TexKind::Cube | TexKind::CubeArray)
+                || tx.elem != Scalar::Float
+                || tx.access != Access::Sample
+                || gather.is_some())
+        {
+            return Err(Error::unsupported("sample-option:gradientcube"));
         }
         let ty = if name == "sample_compare" || (tx.kind.is_depth() && name == "sample") {
             Type::FLOAT

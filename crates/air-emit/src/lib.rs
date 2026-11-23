@@ -203,6 +203,7 @@ pub struct ModCx {
     kernel: Vec<usize>,
     /// [`Target::vec_tbaa_char`].
     pub vec_tbaa_char: bool,
+    air_version: (u32, u32, u32),
     /// [`Target::read_sampler`].
     pub read_sampler: bool,
     metal41: bool,
@@ -370,6 +371,7 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         fragment: Vec::new(),
         kernel: Vec::new(),
         vec_tbaa_char: t.vec_tbaa_char,
+        air_version: t.air_version,
         read_sampler: t.read_sampler,
         metal41: t.air_version == (2, 9, 0) && t.language == (4, 1, 0),
         tbaa: tbaa::Cache::default(),
@@ -708,7 +710,18 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         }
     }
     defs.push_str(&ctor_text);
-    let (defs, fn_groups) = vector_widths(&defs);
+    let viewport_entries: BTreeSet<&str> = m
+        .funcs
+        .iter()
+        .filter(|f| {
+            t.air_version == (2, 8, 0)
+                && f.entry == Some(msl_parse::ast::Stage::Vertex)
+                && matches!(&f.ret, Type::Struct(id) if m.types.structs[*id].fields.iter().any(|field|
+                    field.attrs.iter().any(|a| a.name == "viewport_array_index")))
+        })
+        .map(|f| f.name.as_ref())
+        .collect();
+    let (defs, fn_groups) = vector_widths(&defs, &viewport_entries);
 
     // types
     let mut types = String::new();
@@ -1072,7 +1085,7 @@ fn emit_function(cx: &mut ModCx, f: &msl_sema::hir::Func, fid: usize) -> Result<
 
 /// Rewrites each definition's attribute group `#N` to `#N*1000+W`, W = the widest vector value (bits)
 /// in its signature and call sites. Returns the text and the (N, W) pairs used.
-fn vector_widths(defs: &str) -> (String, BTreeSet<(u32, u32)>) {
+fn vector_widths(defs: &str, viewport_entries: &BTreeSet<&str>) -> (String, BTreeSet<(u32, u32)>) {
     fn width(line: &str) -> u32 {
         let mut best = 0;
         let mut k = 0;
@@ -1122,7 +1135,15 @@ fn vector_widths(defs: &str) -> (String, BTreeSet<(u32, u32)>) {
             return;
         }
         let head = chunk[0];
-        let mut w = width(head);
+        // AIR 2.8 does not count fields in the packed viewport result as by-value vectors.
+        // Keep counting actual vector parameters and vectors at call sites.
+        let signature = head
+            .strip_prefix("define <{")
+            .and_then(|head| head.split_once("}> @"))
+            .and_then(|(_, tail)| tail.split_once('('))
+            .filter(|(name, _)| viewport_entries.contains(name))
+            .map_or(head, |(_, parameters)| parameters);
+        let mut w = width(signature);
         let mut classify = false;
         let mut nomp = false;
         for l in chunk.iter().skip(1) {

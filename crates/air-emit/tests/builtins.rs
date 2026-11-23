@@ -362,3 +362,80 @@ fn shared_halfword_alias_does_not_accept_device_or_plain_aliases() {
         );
     }
 }
+
+#[test]
+fn simd_is_helper_thread_uses_verified_target_signature() {
+    let source = format!(
+        "{PRE}fragment float4 f() {{ return float4(simd_is_helper_thread() ? 1.0 : 0.0); }}"
+    );
+    let ir = compile_source(&source, &Target::macos_for(26), "t.metal").expect("emits");
+    has(&ir, "call i1 @air.simd_is_helper_thread() #12");
+    has(&ir, "declare i1 @air.simd_is_helper_thread() #12");
+    has(&ir, "attributes #12 = { convergent nounwind willreturn }");
+    for target in [Target::ios(), Target::macos_for(27)] {
+        let error = compile_source(&source, &target, "t.metal").unwrap_err();
+        has(&error.key(), "simd-helper-thread:target");
+    }
+
+    let bad = source.replace("simd_is_helper_thread()", "simd_is_helper_thread(0u)");
+    let error = compile_source(&bad, &Target::macos_for(26), "t.metal").unwrap_err();
+    has(&error.key(), "simd-helper-thread-form");
+}
+
+#[test]
+fn simdgroup_barrier_uses_verified_target_signature() {
+    let source =
+        format!("{PRE}kernel void k() {{ simdgroup_barrier(mem_flags::mem_threadgroup); }}");
+    for (target, operands, types) in [
+        (Target::macos_for(26), "i32 2, i32 4", "i32, i32"),
+        (
+            Target::macos_for(27),
+            "i32 2, i32 5, i32 4",
+            "i32, i32, i32",
+        ),
+    ] {
+        let ir = compile_source(&source, &target, "t.metal").expect("emits");
+        has(
+            &ir,
+            &format!("call void @air.simdgroup.barrier({operands}) #12"),
+        );
+        has(
+            &ir,
+            &format!("declare void @air.simdgroup.barrier({types}) #12"),
+        );
+        has(&ir, "attributes #12 = { convergent nounwind willreturn }");
+        assert!(!ir.contains("air.wg.barrier"));
+    }
+    let error = compile_source(&source, &Target::ios(), "t.metal").unwrap_err();
+    has(&error.key(), "simdgroup-barrier:target");
+}
+
+#[test]
+fn simdgroup_barrier_requires_compute_and_one_known_mask() {
+    let barrier = "simdgroup_barrier(mem_flags::mem_threadgroup);";
+    let source = format!(
+        "{PRE}static void sync() {{ {barrier} }} static void relay() {{ sync(); }} \
+         fragment float4 f() {{ relay(); return float4(1.0); }}"
+    );
+    let error = compile_source(&source, &Target::macos(), "t.metal").unwrap_err();
+    has(&error.key(), "simdgroup-barrier:noncompute");
+
+    let source = format!(
+        "{PRE}struct O {{ float4 p [[position]]; }}; vertex O v() {{ {barrier} \
+         O o; o.p = float4(1.0); return o; }}"
+    );
+    let error = compile_source(&source, &Target::macos(), "t.metal").unwrap_err();
+    has(&error.key(), "simdgroup-barrier:noncompute");
+    for mask in [
+        "mem_flags::mem_device",
+        "mem_flags::mem_threadgroup | mem_flags::mem_device",
+    ] {
+        let source = format!("{PRE}kernel void k() {{ simdgroup_barrier({mask}); }}");
+        assert!(compile_source(&source, &Target::macos(), "t.metal").is_err());
+    }
+    let ir = emit(
+        "static uint simdgroup_barrier(uint x) { return x + 1u; } \
+         kernel void k(device uint *p [[buffer(0)]]) { p[0] = simdgroup_barrier(1u); }",
+    );
+    assert!(!ir.contains("air.simdgroup.barrier"));
+}

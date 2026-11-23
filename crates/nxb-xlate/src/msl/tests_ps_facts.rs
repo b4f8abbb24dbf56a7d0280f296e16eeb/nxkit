@@ -105,6 +105,34 @@ fn the_helper_invocation_is_a_metal_query() {
     assert!(!msl.contains("HelperInvocation"));
 }
 
+#[test]
+fn maxwell_s2r_thread_kill_emits_the_helper_query() {
+    use crate::job::parse_jobs;
+    use crate::maxwell::{enums::SReg, insts::InstS2r};
+
+    const PT: u64 = 7;
+    const S2R: u64 = 0b11110000110010 << 50;
+    const EXIT: u64 = 0xe300_0000_0000_000f | PT << 16;
+    // Maxwell S2R R0, SR_THREAD_KILL; EXIT. Keep R0 live in RT0.x.
+    let s2r = S2R | PT << 16 | (SReg::ThreadKill.0 as u64) << 20;
+    let op = InstS2r(s2r);
+    assert_eq!(op.dest(), 0);
+    assert_eq!(op.pred(), PT as i32);
+    assert!(op.s_reg() == SReg::ThreadKill);
+
+    let mut header = [0u32; 20];
+    header[0] = 5 << 10;
+    header[18] = 1;
+    let mut code: Vec<_> = header.into_iter().flat_map(u32::to_le_bytes).collect();
+    code.extend([0, s2r, EXIT, 0].into_iter().flat_map(u64::to_le_bytes));
+    let job = parse_jobs(r#"[{"key":"thread_kill","stage":"ps"}]"#)
+        .expect("fixture job")
+        .remove(0);
+    let result = super::translate(&job, &code, &Context::default()).expect("fixture translates");
+    let msl = &result.libraries[0].msl;
+    assert!(msl.contains("simd_is_helper_thread()"), "{msl}");
+}
+
 /// A pixel shader that writes the image `fp_i_0`, between a begin and an end of the interlock when `fsi` is set.
 fn with_image(fsi: bool) -> B {
     let mut b = fragment();

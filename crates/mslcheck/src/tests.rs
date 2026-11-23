@@ -6,7 +6,7 @@ using namespace metal;
 struct Args { texture3d<float> tex [[id(0)]]; sampler smp [[id(1)]]; };
 fragment float4 main0(constant Args& a [[buffer(0)]]) {
     return a.tex.sample(a.smp, float3(0.25f, 0.5f, 0.75f),
-        gradient3d(float3(0.125f, 0.0f, 0.0f), float3(0.0f, 0.125f, 0.25f)));
+        gradient3d(float3(0.125f, 0.0f, 0.0f), float3(0.0f, 0.125f, 0.25f)), int3(1, 0, 0));
 }
 "#;
 

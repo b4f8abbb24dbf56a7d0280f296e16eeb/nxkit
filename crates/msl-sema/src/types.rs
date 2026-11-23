@@ -13,12 +13,16 @@ pub type StructId = usize;
 pub enum TexKind {
     /// `texture1d`
     T1d,
+    /// `texture_buffer`
+    Buffer,
     /// `texture2d`
     T2d,
     /// `texture2d_array`
     T2dArray,
     /// `texture2d_ms`
     T2dMs,
+    /// `texture2d_ms_array` (query-only).
+    T2dMsArray,
     /// `texture3d`
     T3d,
     /// `texturecube`
@@ -40,9 +44,11 @@ impl TexKind {
     pub fn from_name(s: &str) -> Option<TexKind> {
         Some(match s {
             "texture1d" => TexKind::T1d,
+            "texture_buffer" => TexKind::Buffer,
             "texture2d" => TexKind::T2d,
             "texture2d_array" => TexKind::T2dArray,
             "texture2d_ms" => TexKind::T2dMs,
+            "texture2d_ms_array" => TexKind::T2dMsArray,
             "texture3d" => TexKind::T3d,
             "texturecube" => TexKind::Cube,
             "texturecube_array" => TexKind::CubeArray,
@@ -58,9 +64,11 @@ impl TexKind {
     pub fn name(self) -> &'static str {
         match self {
             TexKind::T1d => "texture1d",
+            TexKind::Buffer => "texture_buffer",
             TexKind::T2d => "texture2d",
             TexKind::T2dArray => "texture2d_array",
             TexKind::T2dMs => "texture2d_ms",
+            TexKind::T2dMsArray => "texture2d_ms_array",
             TexKind::T3d => "texture3d",
             TexKind::Cube => "texturecube",
             TexKind::CubeArray => "texturecube_array",
@@ -75,9 +83,11 @@ impl TexKind {
     pub fn air_name(self) -> &'static str {
         match self {
             TexKind::T1d => "texture_1d",
+            TexKind::Buffer => "texture_buffer_1d",
             TexKind::T2d => "texture_2d",
             TexKind::T2dArray => "texture_2d_array",
             TexKind::T2dMs => "texture_2d_ms",
+            TexKind::T2dMsArray => "texture_2d_ms_array",
             TexKind::T3d => "texture_3d",
             TexKind::Cube => "texture_cube",
             TexKind::CubeArray => "texture_cube_array",
@@ -101,6 +111,7 @@ impl TexKind {
         matches!(
             self,
             TexKind::T2dArray
+                | TexKind::T2dMsArray
                 | TexKind::CubeArray
                 | TexKind::Depth2dArray
                 | TexKind::DepthCubeArray
@@ -118,10 +129,11 @@ impl TexKind {
     /// Number of float coordinates for sampling.
     pub fn coord_dim(self) -> u8 {
         match self {
-            TexKind::T1d => 1,
+            TexKind::T1d | TexKind::Buffer => 1,
             TexKind::T2d
             | TexKind::T2dArray
             | TexKind::T2dMs
+            | TexKind::T2dMsArray
             | TexKind::Depth2d
             | TexKind::Depth2dArray => 2,
             _ => 3,

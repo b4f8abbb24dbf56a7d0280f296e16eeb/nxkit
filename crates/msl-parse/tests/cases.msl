@@ -156,8 +156,12 @@ void f(device atomic_uint* a) { }
 expect: reject texture-elem:short
 void f(texture2d<short> t) { }
 
-=== texture-kind
-expect: reject texture-kind:texture2d_ms
+=== multisample-reject-non-float
+expect: reject texture2d_ms:float-read
+void f(texture2d_ms<uint> t) { }
+
+=== multisample-float-read-type
+expect: accept
 void f(texture2d_ms<float> t) { }
 
 === thread-reference
