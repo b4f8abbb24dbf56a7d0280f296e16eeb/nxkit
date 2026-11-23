@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.16.3 - 2026-11-23
+
 ### Fixed
 
 - Ocarina of Time is no longer overexposed. Its opaque pass draws under render conditions on the occlusion counters of
