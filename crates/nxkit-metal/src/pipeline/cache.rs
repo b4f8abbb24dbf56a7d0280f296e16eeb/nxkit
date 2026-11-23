@@ -463,6 +463,7 @@ impl PipelineCache {
         } else {
             MTL4AlphaToCoverageState::Disabled
         });
+        d.setRasterizationEnabled(desc.rasterize);
         d.setSupportIndirectCommandBuffers(if desc.support_icb {
             MTL4IndirectCommandBufferSupportState::Enabled
         } else {

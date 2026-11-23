@@ -75,6 +75,9 @@ pub struct ProgramFacts {
     pub entry_layer: Option<String>,
     /// The entries that keep the clip depth (`entry_z`, `entry_layer_z`).
     pub entry_z: [Option<String>; 2],
+    /// The entry of a vertex shader that writes buffers or images that runs only those stores and returns nothing
+    /// (`entry_discard`), for a draw with rasterizer discard on.
+    pub entry_discard: Option<String>,
     /// The vertex inputs: location and the type the shader reads (`Float4`, `UInt4` or `Int4`). Empty unless read as a
     /// vertex shader.
     pub inputs: Vec<(u32, VertexFormat)>,
@@ -188,6 +191,7 @@ pub fn read<'a, J: JsonView<'a>>(json: J, vertex: bool) -> Result<ProgramFacts, 
             .map(|(entry, mask)| (entry, mask as u8)),
         entry_layer: text("entry_layer"),
         entry_z: [text("entry_z"), text("entry_layer_z")],
+        entry_discard: text("entry_discard"),
         inputs,
         colors,
         pull: if vertex { pull_entry(json) } else { None },

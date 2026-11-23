@@ -19,7 +19,8 @@ pub enum Skip {
     Format,
     /// The render targets leave a gap between colour slots, or the pass has no target.
     Target,
-    /// Front and back faces are both culled.
+    /// Front and back faces are both culled, or rasterizer discard is on and the vertex library has no entry that runs
+    /// only its stores (`entry_discard`): nothing would be drawn.
     Cull,
     /// A texture could not be created or resolved.
     Texture,

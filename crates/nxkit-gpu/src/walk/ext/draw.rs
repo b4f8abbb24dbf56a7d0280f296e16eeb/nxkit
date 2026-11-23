@@ -4,6 +4,8 @@ use super::*;
 
 impl Walker {
     pub(super) fn draw<M: GuestMem>(&mut self, mem: &M, st: &State, x: &Ext) -> DrawDetail {
+        // A draw while a capture is on writes the feedback buffers, also one that the encoder has no detail for.
+        self.feedback.draw();
         if let Some(args) = mesh_args(x) {
             return self.mesh_draw(mem, st, args);
         }

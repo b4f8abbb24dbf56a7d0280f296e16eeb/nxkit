@@ -33,6 +33,7 @@ impl Pipelines {
                 zero_to_one,
                 topology: d.topology,
                 alpha_to_coverage: d.raster.alpha_to_coverage,
+                discard: d.raster.discard,
                 program: d.program.clone(),
                 targets: targets.clone(),
                 blend: d.blend,
@@ -127,7 +128,15 @@ impl Pipelines {
         } else {
             None
         };
-        let (vertex_fn, vertex_kind) = vertex_entry(d, vs, zero_to_one);
+        // Rasterizer discard: the entry that runs only the stores, no fragment stage and no rasterization. A library
+        // without that entry (the shader writes no memory, or the `_bp` library that pulls its vertices) draws
+        // nothing, and the draw is left out.
+        let discard = d.raster.discard;
+        let (vertex_fn, vertex_kind) = match (discard, vs.entry_discard.as_deref()) {
+            (true, Some(e)) => (e, ":discard"),
+            (true, None) => return Err(Skip::Cull),
+            (false, _) => vertex_entry(d, vs, zero_to_one),
+        };
         let mut desc = RenderPipelineDesc::new(
             (&vs.lib, vertex_fn),
             paint_lib
@@ -145,9 +154,11 @@ impl Pipelines {
                     )
                 })
                 .or_else(|| flat_lib.as_ref().map(|lib| (lib, "flat_gbuffer")))
-                .or_else(|| fs.map(|f| (&f.lib, fragment_entry(f, targets)))),
+                .or_else(|| fs.map(|f| (&f.lib, fragment_entry(f, targets))))
+                .filter(|_| !discard),
             &[],
         );
+        desc.rasterize = !discard;
         desc.colors = color_targets(d, fs, targets);
         if paint {
             // `paint_dir` writes slot 0 only, `paint_magenta4` the first four. A slot that the paint does not write
@@ -209,8 +220,10 @@ impl Pipelines {
         // depth behind with nothing drawn over it, and whatever was there before shows through (in Ocarina of Time the
         // sky, values 9 to 19, which made the first minute white while the pipelines compiled). It waits for its
         // pipeline in the encode instead.
+        // A draw with rasterizer discard writes buffers that later draws read (Xenoblade Chronicles 3 skins its
+        // characters so): it waits too.
         let equal_depth = d.depth_stencil.depth_test && d.depth_stencil.depth_func == 3;
-        if async_on() && !icb && !equal_depth {
+        if async_on() && !icb && !equal_depth && !discard {
             let fallback =
                 class != TopologyClass::Point && falls_back(&self.topology_fallbacks, key, vertex);
             if let Some(p) =
@@ -244,6 +257,7 @@ impl Pipelines {
                     topology: desc.topology,
                     sample_count: desc.sample_count,
                     alpha_to_coverage: desc.alpha_to_coverage,
+                    rasterize: desc.rasterize,
                 }),
             };
             self.builds

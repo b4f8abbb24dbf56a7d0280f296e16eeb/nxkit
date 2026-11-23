@@ -123,6 +123,7 @@ fn required(json: &Json, pulling: bool) -> Result<Vec<String>, String> {
     names.extend(f.entry_mixed.map(|m| m.0));
     names.extend(f.entry_layer);
     names.extend(f.entry_z.into_iter().flatten());
+    names.extend(f.entry_discard);
     Ok(names)
 }
 

@@ -16,6 +16,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   top level). Its dynamic resolution moved the render targets every few frames. `--resource-patch resolution-scale=stock`
   keeps the game's dynamic resolution.
 
+- A draw with rasterizer discard on no longer rasterizes. It runs the stores of its vertex stage only, with
+  rasterization off, as on the console. Xenoblade Chronicles 3 blends its characters' bone matrices with such point
+  draws, which drew depth, stencil and occlusion samples of their own. Its stretched cloth and hair stay: they come
+  from transform feedback of a geometry shader, which the host does not run yet (`docs/plans/geometry-feedback.md`).
+
 ### Added
 
 - `NXKIT_GPU_BUFFER=pools`: one Metal buffer per NVN memory pool instead of one over the whole guest range, so only

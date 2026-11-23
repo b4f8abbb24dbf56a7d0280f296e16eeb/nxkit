@@ -40,6 +40,10 @@ pub(super) fn render_rec(
         Some((l, e)) => Some(stage(l, e)?),
         None => None,
     };
+    // The list has no field for a pipeline without rasterization: it compiles at its first draw.
+    if !d.rasterize {
+        return None;
+    }
     colors_text(&d.colors)?;
     Some(RenderRec {
         key: Some(key),

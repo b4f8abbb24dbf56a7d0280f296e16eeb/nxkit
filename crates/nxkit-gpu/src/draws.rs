@@ -40,9 +40,10 @@ pub(crate) fn prepare(
     if !vs.pull && !stage_in_fits(d, &vs) {
         vs = sh.programs.pulled(&d.program.vertex)?;
     }
+    // With rasterizer discard the pipeline has no fragment stage (`Pipelines::render`).
     let fs = match &d.program.fragment {
-        Some(k) => Some(sh.programs.stage(k, false)?),
-        None => None,
+        Some(k) if !d.raster.discard => Some(sh.programs.stage(k, false)?),
+        _ => None,
     };
     let (pipeline, key) = sh
         .pipelines

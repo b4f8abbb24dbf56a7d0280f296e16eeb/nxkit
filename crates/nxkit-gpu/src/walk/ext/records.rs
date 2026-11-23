@@ -244,9 +244,17 @@ impl Walker {
                     ..ClearDetail::default()
                 });
             }
-            // The capture into it is not run (`walk::feedback`): the walker keeps the range so that its readers are left
-            // out.
-            ExtCode::TransformFeedbackBuffer => self.feedback.note(x.word64(0), x.word64(2)),
+            // The capture into it is not run (`walk::feedback`): the walker keeps the ranges that a capture writes, so
+            // that their readers are left out. A recording with these records is no template: the walk of each submit
+            // must see them.
+            ExtCode::TransformFeedbackBuffer => {
+                self.track.truncated();
+                self.feedback.bind(x.arg, x.word64(0), x.word64(2));
+            }
+            ExtCode::TransformFeedback => {
+                self.track.truncated();
+                self.feedback.control(x.arg);
+            }
             ExtCode::Draw => {
                 let t = self.prof.start();
                 let d = self.draw(&*mem, st, x);
@@ -348,6 +356,9 @@ impl Walker {
         } else if kind == Setting::DepthClamp as u16 {
             st.raster.clamp = x.word(0) != 0;
             set(sc::CLAMP);
+        } else if kind == Setting::RasterizerDiscard as u16 {
+            st.raster.discard = x.word(0) != 0;
+            set(sc::DISCARD);
         }
     }
 }

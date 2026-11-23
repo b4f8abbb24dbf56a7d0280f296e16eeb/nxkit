@@ -275,6 +275,20 @@ mod tests {
     }
 
     #[test]
+    fn the_facts_name_the_entry_that_runs_only_the_stores() {
+        let j = parse(r#"{"entry":"main0","entry_z":"main0_z","entry_discard":"main0_discard"}"#);
+        let f = j.as_ref().map(|j| nxkit_pipestate::program::read(j, true));
+        let f = f.and_then(Result::ok);
+        assert_eq!(
+            f.and_then(|f| f.entry_discard).as_deref(),
+            Some("main0_discard")
+        );
+        let j = parse(r#"{"entry":"main0"}"#);
+        let f = j.as_ref().map(|j| nxkit_pipestate::program::read(j, true));
+        assert_eq!(f.and_then(Result::ok).map(|f| f.entry_discard), Some(None));
+    }
+
+    #[test]
     fn refuses_malformed_input() {
         for bad in ["", "{", "[1,]", "{\"a\" 1}", "\"x", "{} x", "tru"] {
             assert!(parse(bad).is_none(), "{bad}");

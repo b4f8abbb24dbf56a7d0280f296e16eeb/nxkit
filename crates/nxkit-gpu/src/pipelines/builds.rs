@@ -35,6 +35,7 @@ pub(super) struct RenderJob {
     pub(super) topology: TopologyClass,
     pub(super) sample_count: u32,
     pub(super) alpha_to_coverage: bool,
+    pub(super) rasterize: bool,
 }
 
 /// A mesh pipeline: object, mesh and fragment stages.
@@ -261,6 +262,7 @@ impl Builds {
                 desc.topology = r.topology;
                 desc.sample_count = r.sample_count;
                 desc.alpha_to_coverage = r.alpha_to_coverage;
+                desc.rasterize = r.rasterize;
                 build_render(cache, fallbacks, job.key, r.vertex_key, &mut desc).map(
                     |(_, source)| {
                         crate::pipelines::coverage::record(cache, source, Some(&desc), &job.what);

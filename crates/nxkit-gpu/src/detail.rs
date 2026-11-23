@@ -92,6 +92,9 @@ pub struct RasterDetail {
     pub depth_bias: Option<[f32; 3]>,
     /// Whether depth clamp is on (no clipping against the near and far plane).
     pub depth_clamp: bool,
+    /// Whether rasterizer discard is on: the draw makes no fragments (NVN still runs its vertex stages for transform
+    /// feedback, which the host does not run).
+    pub discard: bool,
     /// Whether the coverage comes from the alpha of the fragment.
     pub alpha_to_coverage: bool,
 }

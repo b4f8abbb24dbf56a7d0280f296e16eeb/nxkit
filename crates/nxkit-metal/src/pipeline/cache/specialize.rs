@@ -88,6 +88,7 @@ pub(super) fn archivable(desc: &RenderPipelineDesc<'_>) -> bool {
         && desc.sample_count == 1
         && !desc.alpha_to_coverage
         && !desc.support_icb
+        && desc.rasterize
 }
 
 /// The hash of the state of `desc` besides its colour attachments: 0 when it is the archived state, so all such
@@ -103,6 +104,7 @@ fn rest_of_state(desc: &RenderPipelineDesc<'_>) -> u64 {
         desc.sample_count,
         desc.alpha_to_coverage,
         desc.support_icb,
+        desc.rasterize,
     )
         .hash(&mut h);
     h.finish() | 1

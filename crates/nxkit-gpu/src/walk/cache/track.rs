@@ -118,6 +118,7 @@ impl Scalars {
             && (!has(sc::MULTISAMPLE) || r.alpha_to_coverage == o.alpha_to_coverage)
             && (!has(sc::OFFSET) || bits3(r.offset) == bits3(o.offset))
             && (!has(sc::CLAMP) || r.clamp == o.clamp)
+            && (!has(sc::DISCARD) || r.discard == o.discard)
             && (!has(sc::VIEWPORT) || bits4(st.viewport) == bits4(self.viewport))
             && (!has(sc::VIEWPORT_SWIZZLE) || st.viewport_swizzle == self.viewport_swizzle)
             && (!has(sc::ORIGINS) || st.origins == self.origins)
@@ -163,6 +164,9 @@ impl Scalars {
         }
         if has(sc::CLAMP) {
             st.raster.clamp = self.raster.clamp;
+        }
+        if has(sc::DISCARD) {
+            st.raster.discard = self.raster.discard;
         }
         if has(sc::VIEWPORT) {
             st.viewport = self.viewport;

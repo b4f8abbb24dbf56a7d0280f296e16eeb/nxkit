@@ -82,6 +82,8 @@ struct Last {
     zero_to_one: bool,
     topology: u32,
     alpha_to_coverage: bool,
+    /// Rasterizer discard: the pipeline runs the stores of the vertex function only.
+    discard: bool,
     program: ProgramRef,
     targets: Targets,
     blend: [BlendDetail; 8],
@@ -113,6 +115,7 @@ impl Last {
             && self.zero_to_one == zero_to_one
             && self.topology == d.topology
             && self.alpha_to_coverage == d.raster.alpha_to_coverage
+            && self.discard == d.raster.discard
             && self.write_masks == d.write_masks
             && self.blend == d.blend
             && self.program == d.program

@@ -201,6 +201,10 @@ fn diag_depth() -> bool {
 
 /// The cull mode of a draw. NVN culls both faces with `FRONT_AND_BACK`, which Metal cannot.
 pub(crate) fn cull_of(d: &DrawDetail) -> Result<CullMode, Skip> {
+    // With rasterizer discard nothing reaches the culling, and the stores of the vertex stage still run.
+    if d.raster.discard {
+        return Ok(CullMode::None);
+    }
     translate::cull(if crate::knob("nocull") {
         0
     } else {

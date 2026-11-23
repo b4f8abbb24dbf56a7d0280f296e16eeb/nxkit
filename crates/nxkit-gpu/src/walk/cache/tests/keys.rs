@@ -72,6 +72,23 @@ fn random_record(r: &mut Lcg, callees: &[u64]) -> Record {
             0,
             &[1, 0, 2, 0, 0, 0, 0, 0, 4, 4, 1],
         ),
+        24 => ext(
+            ExtCode::Setting,
+            Setting::RasterizerDiscard as u16,
+            &[r.next(2) as u32],
+        ),
+        // A feedback buffer at the vertex buffer of the draws, and a capture that writes it.
+        25 if r.next(2) == 0 => ext(
+            ExtCode::TransformFeedbackBuffer,
+            0,
+            &[
+                (GPU + 0x2000) as u32,
+                ((GPU + 0x2000) >> 32) as u32,
+                0x100,
+                0,
+            ],
+        ),
+        25 => ext(ExtCode::TransformFeedback, r.next(2) as u16, &[0, 0]),
         _ => draw(),
     }
 }

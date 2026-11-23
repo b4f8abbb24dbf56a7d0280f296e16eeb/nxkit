@@ -166,6 +166,8 @@ pub(super) struct Raster {
     pub(super) offset_on: bool,
     pub(super) offset: [f32; 3],
     pub(super) clamp: bool,
+    /// `nvnCommandBufferSetRasterizerDiscard`: the primitives are not rasterized.
+    pub(super) discard: bool,
     pub(super) alpha_to_coverage: bool,
 }
 
@@ -191,6 +193,7 @@ impl Raster {
             polygon_mode: self.polygon_mode,
             depth_bias: (self.offset_on && self.offset != [0.0; 3]).then_some(self.offset),
             depth_clamp: self.clamp,
+            discard: self.discard,
             alpha_to_coverage: self.alpha_to_coverage,
         }
     }

@@ -148,6 +148,9 @@ pub(crate) struct StageProgram {
     /// The entries of a vertex or mesh shader that keep the clip depth as it is, for a device in the depth mode 0 to 1
     /// (`entry_z` and `entry_layer_z`). `entry` and `entry_layer` convert the -1 to 1 depth of the GL convention.
     pub(crate) entry_z: [Option<String>; 2],
+    /// The entry of a vertex shader that runs only its stores to buffers and images, for a draw with rasterizer
+    /// discard on (`entry_discard`). The `_bp` library has none.
+    pub(crate) entry_discard: Option<String>,
     /// The members of the argument buffer.
     pub(crate) binds: Vec<Bind>,
     /// The size of the argument buffer in bytes.
@@ -300,6 +303,7 @@ impl Programs {
             // depth (`pull.entry_z`). Without it a device in the depth mode 0 to 1 draws with the converting entry
             // (`pipe.depth-mode-ignored`).
             p.entry_z = [nxkit_pipestate::program::pull_entry_z(&json), None];
+            p.entry_discard = None;
             p.pull = true;
         }
         self.swaps.apply(key, &mut p);
@@ -483,6 +487,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         entry_mixed: facts.entry_mixed,
         entry_layer: facts.entry_layer,
         entry_z: facts.entry_z,
+        entry_discard: facts.entry_discard,
         binds,
         arg_bytes,
         inputs: facts.inputs,
