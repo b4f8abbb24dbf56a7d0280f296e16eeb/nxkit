@@ -51,6 +51,16 @@ pub(crate) enum Op {
     Fence { sync: u64 },
     /// `nvnQueueWaitSync` on a sync that held work fences.
     Wait { sync: u64 },
+    /// A part of a recording that the gate split at its waits (`pieces`): the records from the place `start` up to
+    /// the place `stop` (`nxkit_nvn::decode::queue_marks_at`). The first part (`start` is `[handle]`) decodes the whole
+    /// recording and lists in `cuts` the marks where the later parts start.
+    Piece {
+        handle: CommandHandle,
+        start: Vec<u64>,
+        stop: Option<Vec<u64>>,
+        origin: bool,
+        cuts: Vec<usize>,
+    },
 }
 
 /// Held work.
@@ -109,6 +119,8 @@ pub(crate) struct Gate {
     /// The waits for CPU event signals of the ops that a flush ran without their signal, until the flush that ran them
     /// reports them to the backend.
     pub(crate) forced_waits: Vec<ForcedWait>,
+    /// The decoded later parts of the recordings whose first part ran, by queue and handle (`pieces`).
+    pub(crate) pieces: HashMap<(u64, u64), VecDeque<nxkit_nvn::frame::CmdStream>>,
 }
 
 impl Gate {
@@ -132,8 +144,13 @@ impl Gate {
         let marks = match op {
             Op::Fence { sync } => Some(vec![MarkOp::FenceSync { sync }]),
             Op::Wait { sync } => Some(vec![MarkOp::WaitSync { sync }]),
-            Op::Submit { .. } => None,
+            Op::Submit { .. } | Op::Piece { .. } => None,
         };
+        self.push_marked(queue, op, marks);
+    }
+
+    /// Holds `op` with its marks, when they are known already.
+    pub(crate) fn push_marked(&mut self, queue: u64, op: Op, marks: Option<Vec<MarkOp>>) {
         self.held.push_back(Held {
             queue,
             op,

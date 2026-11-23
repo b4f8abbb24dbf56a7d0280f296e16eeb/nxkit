@@ -509,3 +509,78 @@ fn a_callback_that_gives_too_little_memory_is_not_asked_forever() {
         Err(NvnError::OutOfCommandMemory { .. })
     ));
 }
+
+/// A submit that the queue gate splits at a wait: the pieces hold the commands before the wait and from the wait on, and
+/// together they are the commands of the whole recording.
+#[test]
+fn a_recording_splits_into_pieces_at_a_wait() {
+    use crate::ext::{Ext, ExtCode};
+    use crate::marks::MarkOp;
+    let event = Ext::new(ExtCode::WaitEvent, 0)
+        .u64(GPU + 0x100)
+        .u32(0)
+        .u32(7);
+    let signal = Ext::new(ExtCode::SignalEvent, 0)
+        .u64(GPU + 0x200)
+        .u32(1)
+        .u32(0)
+        .u32(0)
+        .u32(9);
+    let mut f = fe();
+    let c = tex(&mut f, 0x10_0000);
+    let t_c = targets(&f, &[c]);
+    let h = record(
+        &mut f,
+        CMD,
+        &[
+            t_c,
+            Record::Draw,
+            Record::Ext(event),
+            Record::Draw,
+            Record::Ext(signal),
+            Record::Draw,
+        ],
+    );
+    let mut at = Vec::new();
+    f.queue_marks_at(h, &mut at).unwrap();
+    assert_eq!(at.len(), 2);
+    assert!(matches!(at[0].0, MarkOp::WaitEvent { value: 7, .. }) && at[0].1.len() == 1);
+
+    let pieces = f.decode_pieces(0, h, &[0]).unwrap();
+    assert_eq!(pieces.len(), 2);
+    let draws = |s: &crate::frame::CmdStream| {
+        s.cmds
+            .iter()
+            .filter(|c| matches!(c, Cmd::Draw { .. }))
+            .count()
+    };
+    assert_eq!((draws(&pieces[0]), draws(&pieces[1])), (1, 2));
+    let queue_ops =
+        |s: &crate::frame::CmdStream| s.marks.iter().filter(|m| m.op.orders_queues()).count();
+    assert_eq!((queue_ops(&pieces[0]), queue_ops(&pieces[1])), (0, 2));
+    assert!(matches!(pieces[1].marks[0].op, MarkOp::WaitEvent { .. }));
+
+    f.begin_frame();
+    for p in &pieces {
+        f.append_piece(0, p);
+    }
+    let split = f.frame().cmds.clone();
+    let mut g = fe();
+    let c = tex(&mut g, 0x10_0000);
+    let t_c = targets(&g, &[c]);
+    let h = record(
+        &mut g,
+        CMD,
+        &[
+            t_c,
+            Record::Draw,
+            Record::Ext(event),
+            Record::Draw,
+            Record::Ext(signal),
+            Record::Draw,
+        ],
+    );
+    g.begin_frame();
+    g.submit_on(0, h).unwrap();
+    assert_eq!(split, g.frame().cmds);
+}

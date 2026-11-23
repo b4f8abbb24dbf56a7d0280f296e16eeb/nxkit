@@ -272,6 +272,26 @@ impl CmdStream {
         append(&mut self.cmds, &mut self.lists, other);
     }
 
+    /// The commands `cmds` and the marks `marks` of this stream as a stream of their own, with the marks counted from
+    /// the first of those commands. The lists stay whole, so the spans need no change. A submit that the queue gate
+    /// splits at its waits goes to the frame in such pieces.
+    pub fn piece(&self, cmds: Range<usize>, marks: Range<usize>) -> CmdStream {
+        let base = cmds.start as u32;
+        CmdStream {
+            cmds: self.cmds[cmds].to_vec(),
+            lists: self.lists.clone(),
+            marks: self.marks[marks]
+                .iter()
+                .map(|m| Mark {
+                    at: m.at.saturating_sub(base),
+                    op: m.op,
+                })
+                .collect(),
+            span_at: Vec::new(),
+            sealed: usize::MAX,
+        }
+    }
+
     /// Adds a list and returns its span.
     pub fn push_list(&mut self, items: &[TexId]) -> Span {
         let start = self.lists.len() as u32;

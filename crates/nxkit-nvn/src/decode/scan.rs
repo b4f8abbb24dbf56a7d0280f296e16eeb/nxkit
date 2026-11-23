@@ -21,10 +21,30 @@ const OP_CALL: u16 = 2;
 
 /// Appends the marks that order queues of the recording at `handle` and of the recordings it calls, in record order.
 pub fn queue_marks<M: GuestMem>(mem: &M, handle: u64, out: &mut Vec<MarkOp>) -> Result<()> {
-    scan(mem, handle, out, 0)
+    let mut at = Vec::new();
+    scan(mem, handle, &mut at, &mut Vec::new())?;
+    out.extend(at.into_iter().map(|(m, _)| m));
+    Ok(())
 }
 
-fn scan<M: GuestMem>(mem: &M, handle: u64, out: &mut Vec<MarkOp>, depth: u32) -> Result<()> {
+/// The marks of [`queue_marks`] with the place of each: the guest addresses of the call records that lead to it, from
+/// the recording at `handle` inwards, and last the address of its own record. A walk that starts at such a place runs
+/// the rest of the recording from that mark: the host splits a submit there (`crate::front::FrontEnd::decode_pieces`).
+pub fn queue_marks_at<M: GuestMem>(
+    mem: &M,
+    handle: u64,
+    out: &mut Vec<(MarkOp, Vec<u64>)>,
+) -> Result<()> {
+    scan(mem, handle, out, &mut Vec::new())
+}
+
+fn scan<M: GuestMem>(
+    mem: &M,
+    handle: u64,
+    out: &mut Vec<(MarkOp, Vec<u64>)>,
+    path: &mut Vec<u64>,
+) -> Result<()> {
+    let depth = path.len() as u32;
     if depth > MAX_CALL_DEPTH {
         return Err(NvnError::BadRecord("calls are nested too deep"));
     }
@@ -44,7 +64,12 @@ fn scan<M: GuestMem>(mem: &M, handle: u64, out: &mut Vec<MarkOp>, depth: u32) ->
                     pos = to;
                     continue;
                 }
-                Record::Call(h) => scan(mem, h, out, depth + 1)?,
+                Record::Call(h) => {
+                    path.push(pos);
+                    let r = scan(mem, h, out, path);
+                    path.pop();
+                    r?;
+                }
                 _ => return Err(NvnError::BadRecord("jump or call")),
             },
             op if orders_queues(op) => {
@@ -63,7 +88,9 @@ fn scan<M: GuestMem>(mem: &M, handle: u64, out: &mut Vec<MarkOp>, depth: u32) ->
                             value: x.word(3),
                         },
                     };
-                    out.push(m);
+                    let mut at = path.clone();
+                    at.push(pos);
+                    out.push((m, at));
                 }
             }
             _ => {}
@@ -184,6 +211,30 @@ mod tests {
 
         assert_eq!(scanned.len(), 4, "{scanned:?}");
         assert_eq!(scanned, from_summary);
+
+        // The places: the wait and the signal are records of the top level (the jump stays at the top level), the
+        // fence is in the call at the top level, the wait sync in the call in that call.
+        let mut at = Vec::new();
+        queue_marks_at(&m, a, &mut at).unwrap();
+        let places: Vec<Vec<u64>> = at.into_iter().map(|(_, p)| p).collect();
+        let len = |r: Record| u64::from(r.encode().unwrap().len());
+        let draws = len(Record::Draw)
+            + len(Record::Ext(
+                Ext::new(ExtCode::Draw, 1).u32(4).u32(0).u32(36).u32(0),
+            ));
+        let call_b = a + len(wait(3)) + draws;
+        let call_d = b + len(Record::Ext(
+            Ext::new(ExtCode::FenceSync, 0).u64(0x15_0000_0200),
+        ));
+        assert_eq!(
+            places,
+            [
+                vec![a],
+                vec![call_b, b],
+                vec![call_b, call_d, d],
+                vec![c + len(Record::Draw)],
+            ]
+        );
     }
 
     #[test]

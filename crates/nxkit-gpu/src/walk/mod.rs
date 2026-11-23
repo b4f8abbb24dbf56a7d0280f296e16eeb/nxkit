@@ -207,6 +207,13 @@ pub(crate) struct Walker {
     bypass: bool,
     /// The old bytes of the guest memory that `write_update` replaced, while the verification runs.
     undo: Option<Vec<(u64, Vec<u8>)>>,
+    /// The place at which the walk stops (`Walker::submit_range`): the call records from the top level inwards, then
+    /// the record.
+    stop: Option<Vec<u64>>,
+    /// The place of the record that the walk reads, while `stop` is set.
+    at: Vec<u64>,
+    /// The walk reached `stop`: every level returns.
+    stopped: bool,
 }
 
 impl Walker {
@@ -236,6 +243,9 @@ impl Walker {
             verify: cfg!(test) || crate::settings::env().verify_cache,
             bypass: false,
             undo: None,
+            stop: None,
+            at: Vec::new(),
+            stopped: false,
         }
         .with_knobs()
     }
@@ -325,6 +335,67 @@ impl Walker {
         }
     }
 
+    /// Walks the records of the recording at `handle` on `queue` from the place `start` up to the place `stop` (the
+    /// end when None). A place is the call records that lead to a record, from the top level inwards, and last the
+    /// record (`nxkit_nvn::decode::queue_marks_at`). The queue gate runs a submit in such parts when a wait inside it
+    /// holds the rest: the state of the queue goes on from part to part. Templates are not used for such a walk.
+    pub(crate) fn submit_range<M: GuestMem>(
+        &mut self,
+        mem: &mut M,
+        queue: u64,
+        handle: u64,
+        start: &[u64],
+        stop: Option<Vec<u64>>,
+    ) {
+        self.drain_invalidations();
+        self.read_knobs();
+        let (draws, dispatches) = (self.out.draws.len(), self.out.dispatches.len());
+        self.snaps.get_mut().clear();
+        let mut st = self.queues.remove(&queue).unwrap_or_default();
+        st.origins[0] = self.origin_lower_left;
+        let whole = start == [handle];
+        if whole {
+            st.copy_strides = [0; 2];
+        }
+        self.stop = stop;
+        self.at.clear();
+        self.stopped = false;
+        let bypass = std::mem::replace(&mut self.bypass, true);
+        self.track.reset();
+        self.resume(mem, &mut st, start, 0);
+        self.bypass = bypass;
+        self.stop = None;
+        self.stopped = false;
+        self.queues.insert(queue, st);
+        let c = &mut self.counters;
+        c.submits += 1;
+        c.recordings += u32::from(whole);
+        c.draws += (self.out.draws.len() - draws) as u32;
+        c.dispatches += (self.out.dispatches.len() - dispatches) as u32;
+    }
+
+    /// Walks from the place `path` at `depth`: into the call that `path[depth]` names, then on behind it.
+    fn resume<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, path: &[u64], depth: u32) {
+        let d = depth as usize;
+        let Some(&pos) = path.get(d) else {
+            return;
+        };
+        if d + 1 == path.len() {
+            self.walk_records(mem, st, pos, depth);
+            return;
+        }
+        let Ok((Record::Call(_), size)) = Record::read(&*mem, pos) else {
+            return;
+        };
+        self.at.truncate(d);
+        self.at.push(pos);
+        self.resume(mem, st, path, depth + 1);
+        if self.stopped {
+            return;
+        }
+        self.walk_records(mem, st, pos + u64::from(size), depth);
+    }
+
     /// The counters since the last call.
     pub(crate) fn take_counters(&mut self) -> WalkCounters {
         let mut c = std::mem::take(&mut self.counters);
@@ -356,6 +427,15 @@ impl Walker {
     fn walk_records<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64, depth: u32) {
         let mut pos = handle;
         for _ in 0..MAX_RECORDS {
+            if let Some(stop) = &self.stop {
+                let d = depth as usize;
+                self.at.truncate(d);
+                self.at.push(pos);
+                if *stop == self.at {
+                    self.stopped = true;
+                    return;
+                }
+            }
             let t = self.prof.start();
             let read = Record::read(&*mem, pos);
             self.prof.lap(&self.prof.read_ns, t);
@@ -371,7 +451,12 @@ impl Walker {
                     pos = to;
                     continue;
                 }
-                Record::Call(h) => self.run(mem, st, h, depth + 1),
+                Record::Call(h) => {
+                    self.run(mem, st, h, depth + 1);
+                    if self.stopped {
+                        return;
+                    }
+                }
                 Record::Ext(x) => {
                     let t = self.prof.start();
                     self.ext(mem, st, &x);

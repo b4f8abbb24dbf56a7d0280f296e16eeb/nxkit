@@ -17,7 +17,7 @@ use crate::cmdbuf::{CommandBuffer, CommandHandle};
 use crate::decode::{Ctx, State, summary};
 use crate::descriptors::Descriptors;
 use crate::error::{NvnError, Result};
-use crate::frame::{Cmd, Frame};
+use crate::frame::{Cmd, CmdStream, Frame};
 use crate::layout::TextureDesc;
 use crate::marks::MarkOp;
 use crate::mem::GuestMem;
@@ -336,6 +336,69 @@ impl<S: GpuSpace, M: GuestMem> FrontEnd<S, M> {
             }
         }
         Ok(())
+    }
+
+    /// Decodes the recording at `handle` on `queue` as [`FrontEnd::submit_on`] does, but puts nothing into the frame: it
+    /// returns the commands in pieces. A piece starts at each mark that orders queues whose index (among those marks,
+    /// in the order of [`crate::decode::queue_marks`]) is in `cuts`, ascending. The state of the queue moves to the end
+    /// of the recording at once: no other work of the queue comes between the pieces. [`FrontEnd::append_piece`] puts
+    /// a piece into the frame.
+    pub fn decode_pieces(
+        &mut self,
+        queue: usize,
+        handle: CommandHandle,
+        cuts: &[usize],
+    ) -> Result<Vec<CmdStream>> {
+        let cx = Ctx {
+            mem: &self.mem,
+            table: &self.table,
+            desc: &self.descriptors,
+        };
+        let inherited = self.queues.entry(queue).or_default();
+        let i = summary(&mut self.cache, &cx, handle.0, inherited, 0)?;
+        let s = self
+            .cache
+            .entry(handle.0, i)
+            .ok_or(NvnError::BadRecord("summary is missing"))?;
+        inherited.apply(&s.delta);
+        let stream = &s.stream;
+        // The mark index and the command index where each piece starts.
+        let mut starts = vec![(0usize, 0usize)];
+        let mut nth = 0;
+        for (k, m) in stream.marks.iter().enumerate() {
+            if !m.op.orders_queues() {
+                continue;
+            }
+            if cuts.contains(&nth) {
+                starts.push((k, m.at as usize));
+            }
+            nth += 1;
+        }
+        starts.push((stream.marks.len(), stream.cmds.len()));
+        Ok(starts
+            .windows(2)
+            .map(|w| stream.piece(w[0].1..w[1].1, w[0].0..w[1].0))
+            .collect())
+    }
+
+    /// The marks of [`FrontEnd::queue_marks`] of one recording, with the place of each ([`crate::decode::queue_marks_at`]).
+    pub fn queue_marks_at(
+        &self,
+        handle: CommandHandle,
+        out: &mut Vec<(MarkOp, Vec<u64>)>,
+    ) -> Result<()> {
+        crate::decode::queue_marks_at(&self.mem, handle.0, out)
+    }
+
+    /// Puts a piece of [`FrontEnd::decode_pieces`] into the frame, with its render conditions.
+    pub fn append_piece(&mut self, queue: usize, piece: &CmdStream) {
+        let base = self.frame.cmds.len() as u32;
+        self.frame.append(piece);
+        let (space, mem) = (&self.space, &self.mem);
+        self.render
+            .apply(queue, base, &piece.marks, &mut self.frame, |addr| {
+                crate::rendercond::read_gpu_u64(space, mem, addr)
+            });
     }
 
     /// Adds the waits and signals between queues of `handles`, submitted in order on `queue`, to `out`, without

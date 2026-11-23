@@ -58,6 +58,7 @@ use super::program::ProgramRecord;
 
 mod gate;
 mod order;
+mod pieces;
 mod vpools;
 mod vwatch;
 pub(crate) use vpools::VMode;
@@ -208,6 +209,8 @@ pub(crate) struct Gpu {
     gate: Mutex<gate::Gate>,
     /// Whether a CPU event signal that released a lot of work flushes the frame at once, and how much work is a lot.
     release_flush: order::ReleaseFlush,
+    /// Whether the gate splits submits at their waits (`pieces`).
+    queue_split: bool,
     /// The submits that went into the frame and those that a flush took along, for `nvnQueueFlush` (`qflush`).
     pub(crate) queue_flush: super::qflush::QueueFlush,
     /// The ranges of `nvnMemoryPoolFlushMappedRange` that [`Gpu::lock`] has not yet told the front end.
@@ -255,6 +258,7 @@ impl Gpu {
                 on: env.release_flush,
                 min_work: env.release_flush_min,
             },
+            queue_split: env.queue_split,
             queue_flush: super::qflush::QueueFlush::default(),
             pending_writes: Mutex::new(Vec::new()),
             pending_recorded: Mutex::new(Vec::new()),

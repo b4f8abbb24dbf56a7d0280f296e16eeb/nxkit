@@ -87,16 +87,26 @@ impl Backend for GpuBackend {
         handles: &'a [CommandHandle],
         origin_lower_left: bool,
     ) -> Option<Deferred<'a>> {
-        // The walk may run later (the helper thread, or a held submit from the gate pump): the draws take the device
-        // origin of the moment the game submitted, not that of a later `device_modes`.
-        let device = self.device_lower_left.load(Ordering::Acquire);
-        Some(Box::new(move || {
-            let mut walker = locked(&self.walker);
-            walker.device_origin(device);
-            walker.queue_origin(queue, origin_lower_left);
-            let mut mem = GuestView(self.guest.clone());
-            walker.submit(&mut mem, queue, handles);
-        }))
+        self.walk_later(queue, origin_lower_left, move |w, mem| {
+            w.submit(mem, queue, handles)
+        })
+    }
+
+    fn splits(&self) -> bool {
+        true
+    }
+
+    fn submit_range(
+        &self,
+        queue: u64,
+        handle: CommandHandle,
+        start: Vec<u64>,
+        stop: Option<Vec<u64>>,
+        origin_lower_left: bool,
+    ) -> Option<Deferred<'_>> {
+        self.walk_later(queue, origin_lower_left, move |w, mem| {
+            w.submit_range(mem, queue, handle.0, &start, stop)
+        })
     }
 
     fn flush_frame(

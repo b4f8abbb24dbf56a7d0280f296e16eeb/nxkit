@@ -51,6 +51,7 @@ fn op_name(op: &Op) -> &'static str {
         Op::Submit { .. } => "submit",
         Op::Fence { .. } => "fence",
         Op::Wait { .. } => "wait",
+        Op::Piece { .. } => "part",
     }
 }
 
@@ -143,13 +144,17 @@ impl Gpu {
             let r = self.run_submit(&mut front, queue, handles, origin_lower_left);
             return r;
         }
-        gate.push(
-            queue,
-            Op::Submit {
-                handles: handles.to_vec(),
-                origin: origin_lower_left,
-            },
-        );
+        if !(self.splits()
+            && super::pieces::push_split(&front, &mut gate, queue, handles, origin_lower_left))
+        {
+            gate.push(
+                queue,
+                Op::Submit {
+                    handles: handles.to_vec(),
+                    origin: origin_lower_left,
+                },
+            );
+        }
         let r = self.pump(&mut front, &mut gate);
         drop(gate);
         r
@@ -407,7 +412,7 @@ impl Gpu {
     /// Runs a held op: a submit goes to the frame, and its fences and signals count from now.
     fn run_held(&self, front: &mut Front, gate: &mut Gate, mut h: Held) -> AbiResult<()> {
         let marks = self.marks_of(front, &mut h);
-        if matches!(h.op, Op::Submit { .. }) {
+        if matches!(h.op, Op::Submit { .. } | Op::Piece { .. }) {
             gate.stats.checked += 1;
         }
         if gateseq::active() {
@@ -439,11 +444,31 @@ impl Gpu {
                 Ok(())
             }
             Op::Wait { .. } => Ok(()),
+            Op::Piece {
+                handle,
+                start,
+                stop,
+                origin,
+                cuts,
+            } => self.run_piece(
+                front,
+                gate,
+                h.queue,
+                super::pieces::Part {
+                    handle: *handle,
+                    start,
+                    stop: stop.as_deref(),
+                    origin: *origin,
+                    cuts,
+                },
+            ),
         };
         // A fence in a recording marks its sync when the recording is in the frame, so `nvnSyncWait` waits for it.
         let fence = Fence(self.flushed() + 1);
         for m in &marks {
-            if let (MarkOp::FenceSync { sync: s }, Op::Submit { .. }) = (m, &h.op) {
+            if let (MarkOp::FenceSync { sync: s }, Op::Submit { .. } | Op::Piece { .. }) =
+                (m, &h.op)
+            {
                 let _ = sync::set_queue_fence(Obj(*s), fence);
             }
         }

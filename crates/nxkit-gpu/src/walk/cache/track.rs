@@ -299,7 +299,7 @@ impl Track {
         }
     }
 
-    pub(super) fn reset(&mut self) {
+    pub(in crate::walk) fn reset(&mut self) {
         while let Some(f) = self.open.pop() {
             self.pool.push(f.entry);
         }

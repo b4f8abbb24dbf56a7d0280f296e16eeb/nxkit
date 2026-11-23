@@ -68,3 +68,23 @@ pub(super) fn matches(frame: &Frame, d: &FrameDetail) -> bool {
 pub(super) fn fail(e: impl std::fmt::Display) -> BackendError {
     BackendError(e.to_string())
 }
+
+impl GpuBackend {
+    /// The walk of a submit, for the caller to run (`Backend::submit`). The walk may run later (the helper thread, or a
+    /// held submit from the gate pump): the draws take the device origin of the moment the game submitted, not that of
+    /// a later `device_modes`.
+    pub(super) fn walk_later<'a>(
+        &'a self,
+        queue: u64,
+        origin_lower_left: bool,
+        walk: impl FnOnce(&mut Walker, &mut GuestView) + Send + 'a,
+    ) -> Option<Deferred<'a>> {
+        let device = self.device_lower_left.load(Ordering::Acquire);
+        Some(Box::new(move || {
+            let mut walker = locked(&self.walker);
+            walker.device_origin(device);
+            walker.queue_origin(queue, origin_lower_left);
+            walk(&mut walker, &mut GuestView(self.guest.clone()));
+        }))
+    }
+}

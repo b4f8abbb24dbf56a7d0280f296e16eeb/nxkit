@@ -276,6 +276,28 @@ pub trait Backend: Send + Sync {
         None
     }
 
+    /// Whether [`Backend::submit_range`] walks a part of a recording. The queue gate splits a submit at its waits only
+    /// for such a backend. The default is false.
+    fn splits(&self) -> bool {
+        false
+    }
+
+    /// As [`Backend::submit`] for a part of the recording at `handle`: the records from the place `start` up to the
+    /// place `stop`, or to the end when `stop` is None. A place is the addresses of the call records that lead to a
+    /// record, from the recording at `handle` inwards, and last the address of the record
+    /// ([`crate::decode::queue_marks_at`]); `[handle]` is the start. The queue gate runs a submit in such parts when a
+    /// wait inside it holds the rest. The default does nothing.
+    fn submit_range(
+        &self,
+        _queue: u64,
+        _handle: CommandHandle,
+        _start: Vec<u64>,
+        _stop: Option<Vec<u64>>,
+        _origin_lower_left: bool,
+    ) -> Option<Deferred<'_>> {
+        None
+    }
+
     /// A texture was created in guest memory (`nvnTextureInitialize`).
     fn texture_created(&self, record: &TextureRecord);
 

@@ -2,6 +2,7 @@
 
 mod keys;
 mod origin;
+mod ranges;
 mod walks;
 
 use super::*;

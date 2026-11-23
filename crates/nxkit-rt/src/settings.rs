@@ -17,6 +17,8 @@ pub struct RtSettings {
     pub release_flush: bool,
     /// `NXKIT_RELEASE_FLUSH_MIN`: the least work (draws, dispatches and copies) that the released submits bring, 64.
     pub release_flush_min: usize,
+    /// `NXKIT_QUEUE_SPLIT=1`: the gate splits a submit at the waits of its recordings (off by default).
+    pub queue_split: bool,
 }
 
 impl Default for RtSettings {
@@ -38,6 +40,7 @@ impl RtSettings {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(64),
+            queue_split: env.var("NXKIT_QUEUE_SPLIT").is_ok_and(|v| v.trim() == "1"),
         }
     }
 }
