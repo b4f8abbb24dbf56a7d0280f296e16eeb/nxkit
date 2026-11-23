@@ -82,13 +82,20 @@ const SETTINGS: Fact<Settings> = Fact::new(
         // 17 fps. With the overlap, `rec_lock` off and `pace_profile` `steady` it ran at about 50 fps in two runs, with
         // the GPU at 17 ms a frame. Each of the three alone stayed at 11 to 17 fps. An earlier run had large white
         // blotches in the foliage with the overlap on (the game's CPU writes for frame N+1 to the storage buffers of its
-        // GPU foliage culling raced with frame N). Whether they are back is not checked: the picture was overexposed
-        // in every run of 2026-11-23, with and without the overlap.
+        // GPU foliage culling raced with frame N). With `rendercond_stale` off the picture is right with the overlap
+        // on (Kokiri Forest, 2026-11-23): no blotches in that run.
         overlap: true,
         rec_lock: false,
         // `steady`: the step stays at the target. With `work` a late frame raised the hold to 2 or 3 vsyncs, the GPU
         // lowered its clock for the idle time, and the frames got so slow that the hold never came back (17 fps).
         pace_profile: "steady",
+        // `off`: a render condition whose own counter has not landed renders. The game writes its occlusion reports into
+        // a ring of addresses and the number of reports changes from frame to frame (about 700 and 900 in turn), so
+        // the counter at the same address is a report of another query many frames old, mostly 0, and the counter at
+        // the same place belongs to another query too. Read so, the opaque pass left out about 300 draws a frame that
+        // the prepass had drawn: their depth stayed, and the sky (values 9 to 19) showed through, which made the
+        // picture white (measured on nxkit, Kokiri Forest, 2026-11-23).
+        rendercond_stale: "off",
         ..Settings::DEFAULT
     },
     GAME_TSV,

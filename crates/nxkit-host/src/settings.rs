@@ -29,6 +29,7 @@ const TYPED: &[&str] = &[
     "overlap",
     "rec_lock",
     "pace_profile",
+    "rendercond_stale",
     "screen_aspect",
     "pad_layout",
     "op_mode",
@@ -94,6 +95,9 @@ pub struct Settings {
     pub rec_lock: bool,
     /// The frame step's profile (`pace_profile`): `hold` (the default), `work` or `steady`. See `nxkit_svc_pacing::fstep`.
     pub pace_profile: String,
+    /// What a render condition reads of an earlier frame (`rendercond_stale`): `place` (the default), `addr` or `off`.
+    /// `NXKIT_RENDERCOND_STALE` wins.
+    pub rendercond_stale: nxkit_nvn::settings::StaleMode,
     /// Whether the screen keeps the aspect ratio of the game.
     pub screen_aspect: bool,
     /// The pad layout of the game, for example `nintendo`.
@@ -250,6 +254,16 @@ impl Settings {
                 Some(other) => {
                     return Err(bad(format!(
                         "pace_profile {other:?} is not hold, work or steady"
+                    )));
+                }
+            },
+            rendercond_stale: match v.get("rendercond_stale").and_then(Value::as_str) {
+                None | Some("place") => nxkit_nvn::settings::StaleMode::SamePlace,
+                Some("addr") => nxkit_nvn::settings::StaleMode::SameAddress,
+                Some("off") => nxkit_nvn::settings::StaleMode::Off,
+                Some(other) => {
+                    return Err(bad(format!(
+                        "rendercond_stale {other:?} is not place, addr or off"
                     )));
                 }
             },

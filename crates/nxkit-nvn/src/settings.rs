@@ -31,6 +31,9 @@ pub struct NvnSettings {
     pub counters: bool,
     /// `NXKIT_RENDERCOND_STALE`.
     pub rendercond_stale: StaleMode,
+    /// Whether `NXKIT_RENDERCOND_STALE` is set. Without it the host takes `rendercond_stale` of `game.json`
+    /// ([`crate::rendercond::set_title_stale`]).
+    pub rendercond_stale_set: bool,
     /// `NXKIT_RENDERCOND=3d`: a render condition leaves out draws and clears only.
     pub rendercond_3d: bool,
     /// `NXKIT_VERIFY_CACHE=1`: the decoder checks each cached summary against a fresh decode.
@@ -98,6 +101,7 @@ impl NvnSettings {
                 Ok("addr") => StaleMode::SameAddress,
                 _ => StaleMode::SamePlace,
             },
+            rendercond_stale_set: env.var("NXKIT_RENDERCOND_STALE").is_ok(),
             rendercond_3d: env.var("NXKIT_RENDERCOND").is_ok_and(|v| v == "3d"),
             verify_cache: env.var("NXKIT_VERIFY_CACHE").is_ok_and(|v| v == "1"),
         }

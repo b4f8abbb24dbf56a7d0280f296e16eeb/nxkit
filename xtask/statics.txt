@@ -9,7 +9,7 @@ nxkit-gpu: 137
 nxkit-hos: 19
 nxkit-host: 25
 nxkit-metal: 19
-nxkit-nvn: 32
+nxkit-nvn: 33
 nxkit-patch-abi: 2
 nxkit-pipestate: 1
 nxkit-rt: 67

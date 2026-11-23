@@ -139,6 +139,8 @@ pub fn run(opts: &Options) -> Result<()> {
     let placed = place::place(&game)?;
     let mem = placed.mem;
     let (layout, settings) = (mem.layout, placed.game.settings.clone());
+    // `rendercond_stale` of `game.json` applies unless `NXKIT_RENDERCOND_STALE` is set.
+    nxkit_nvn::rendercond::set_title_stale(settings.rendercond_stale);
     // What the screen showed of the presents: the backend writes it, the NVN present and the refresh use it. The
     // refresh plans the link for the screen: the pacing seam, the window and the tick hook share it (W26).
     let screen = Arc::new(nxkit_nvn::screen::Screen::new(Some(

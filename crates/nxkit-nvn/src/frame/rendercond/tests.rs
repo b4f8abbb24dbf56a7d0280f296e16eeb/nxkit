@@ -333,3 +333,34 @@ fn a_run_under_a_condition_is_recorded_in_the_frame() {
     f.clear();
     assert!(f.gates.is_empty());
 }
+
+#[test]
+fn a_counter_of_an_earlier_frame_is_the_newer_of_address_and_place() {
+    // The report itself landed: its value.
+    assert_eq!(
+        gpu_read(9, Some((5, 9)), || Some((7, 8)), 2),
+        Read::Landed(5)
+    );
+    // A ring of report addresses: the address holds an old report of another query, the place the same query of the
+    // frame before.
+    assert_eq!(
+        gpu_read(900, Some((0, 100)), || Some((94, 880)), 2),
+        Read::Place(94)
+    );
+    // One address per query: the address has the newer counter.
+    assert_eq!(
+        gpu_read(900, Some((3, 880)), || Some((94, 100)), 2),
+        Read::Stale(3)
+    );
+    assert_eq!(gpu_read(900, None, || Some((94, 880)), 2), Read::Place(94));
+    // Mode 1 reads the address only, mode 0 nothing of an earlier frame.
+    assert_eq!(
+        gpu_read(900, Some((0, 100)), || Some((94, 880)), 1),
+        Read::Stale(0)
+    );
+    assert_eq!(gpu_read(900, None, || Some((94, 880)), 1), Read::Unknown);
+    assert_eq!(
+        gpu_read(900, Some((0, 100)), || Some((94, 880)), 0),
+        Read::Unknown
+    );
+}

@@ -14,9 +14,10 @@
 //! - The timestamp counters (`TIMESTAMP`, `TIMESTAMP_TOP`) write a counter of 0.
 //! - The counters that the GPU counts (samples passed, vertices, primitives) are emulated (`crate::counters`): the
 //!   backend writes them when the GPU finished the frame, and they land in [`Landed`]. A condition reads a counter
-//!   once landed: the value of the report it names when that report landed, else the last value that landed at the
-//!   address (a report of an earlier frame: one frame of latency, `NXKIT_RENDERCOND_STALE=0` turns that off), else
-//!   it is unknown.
+//!   once landed: the value of the report it names when that report landed, else the newer of the last value that
+//!   landed at the address and the last one that landed at the same place of an earlier frame (one frame of latency,
+//!   `gpu_read`; `NXKIT_RENDERCOND_STALE=0` or `rendercond_stale` `off` of the title turns that off), else it is
+//!   unknown.
 //! - The other counters are unknown. An unknown condition renders, as the host did before.
 //!
 //! The known values stay in the table for [`KEEP_FLUSHES`] flushes. By then the backend wrote them to guest memory.
@@ -26,7 +27,7 @@
 //! each condition covered, when `NXKIT_DIAG=rendercond` is on.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use crate::counters::{Counters, Landed, Place, Source};
 use crate::frame::{Cmd, Frame};
@@ -99,10 +100,56 @@ fn stale_mode() -> u8 {
     if force::force() & force::NOSTALE != 0 {
         return 0;
     }
-    match crate::settings::settings().rendercond_stale {
+    let s = crate::settings::settings();
+    let title = TITLE_STALE.load(Ordering::Relaxed);
+    if !s.rendercond_stale_set && title != NO_TITLE_STALE {
+        return title;
+    }
+    stale_level(s.rendercond_stale)
+}
+
+fn stale_level(m: crate::settings::StaleMode) -> u8 {
+    match m {
         crate::settings::StaleMode::Off => 0,
         crate::settings::StaleMode::SameAddress => 1,
         crate::settings::StaleMode::SamePlace => 2,
+    }
+}
+
+/// The mode of the title (`rendercond_stale` of `game.json`), [`NO_TITLE_STALE`] before the host read it. Process-wide
+/// (W26): the host installs the NVN settings before it reads `game.json`, and the conditions are decided on guest threads
+/// with no context that could carry it.
+static TITLE_STALE: AtomicU8 = AtomicU8::new(NO_TITLE_STALE);
+const NO_TITLE_STALE: u8 = u8::MAX;
+
+/// Sets the mode of the title (`rendercond_stale` of `game.json`). `NXKIT_RENDERCOND_STALE` wins over it.
+pub fn set_title_stale(m: crate::settings::StaleMode) {
+    TITLE_STALE.store(stale_level(m), Ordering::Relaxed);
+}
+
+/// What a condition reads of the emulated counter of report `seq`: the report itself once it landed. Before that, the
+/// newer of two counters of earlier frames (`mode` as [`stale_mode`]): the last one that landed at the address (`at_addr`,
+/// mode 1 and up) and the last one that landed at the place of the report (`at_place`, mode 2). A game that writes its
+/// reports into a ring of addresses (Ocarina of Time) finds at the address a report of another query many frames old,
+/// often 0. The place has the same query of the frame before, as a game with one address per query has at the address.
+fn gpu_read(
+    seq: u64,
+    at_addr: Option<(u64, u64)>,
+    at_place: impl FnOnce() -> Option<(u64, u64)>,
+    mode: u8,
+) -> Read {
+    if let Some((v, s)) = at_addr
+        && s == seq
+    {
+        return Read::Landed(v);
+    }
+    let addr = at_addr.filter(|_| mode >= 1);
+    let place = if mode >= 2 { at_place() } else { None };
+    match (addr, place) {
+        (Some((_, sa)), Some((p, sp))) if sp > sa => Read::Place(p),
+        (Some((a, _)), _) => Read::Stale(a),
+        (None, Some((p, _))) => Read::Place(p),
+        (None, None) => Read::Unknown,
     }
 }
 
@@ -354,14 +401,8 @@ impl RenderConds {
             }
             Some(Report::Gpu { seq, place }) => {
                 let landed = self.counters.landed();
-                match landed.get(addr) {
-                    Some((v, s)) if s == *seq => Read::Landed(v),
-                    Some((v, _)) if stale_mode() >= 1 => Read::Stale(v),
-                    _ if stale_mode() >= 2 => landed
-                        .at_place(*place)
-                        .map_or(Read::Unknown, |(v, _)| Read::Place(v)),
-                    _ => Read::Unknown,
-                }
+                let at_place = || landed.at_place(*place);
+                gpu_read(*seq, landed.get(addr), at_place, stale_mode())
             }
             Some(Report::Unknown) => Read::Unknown,
             _ => read(addr).map_or(Read::Unknown, Read::Memory),

@@ -4,6 +4,28 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- Ocarina of Time is no longer overexposed. Its opaque pass draws under render conditions on the occlusion counters of
+  the depth prepass. A condition whose counter had not landed read an old counter of another query (the game writes its
+  reports into a ring of addresses), mostly 0, so about 300 visible draws a frame were left out. Their prepass depth
+  stayed, and the sky (values 9 to 19) showed through. The new `game.json` key `rendercond_stale` (`place`, `addr`,
+  `off`) sets how a title reads such counters; Ocarina of Time sets `off`. The default `place` now takes the newer of
+  the counters at the same address and at the same place of an earlier frame.
+- Xenoblade Chronicles 3: a stencil view of a depth-stencil texture reads the stencil. Lit surfaces showed stripes
+  along the depth.
+- Ocarina of Time runs at about 48 fps in a window in the Kokiri Forest (was 17): the title sets `fps_target 60`, the
+  overlap, `rec_lock` off (new `game.json` key, `NXKIT_REC_LOCK` wins) and `pace_profile` `steady`.
+- An adaptive (ProMotion) screen whose rate is a whole multiple of the target keeps its rate, so a 60 fps target shows
+  each frame for two 120 Hz refreshes.
+- A movie picture whose Neural Engine result is late is waited for up to 50 ms instead of being made by the slow Metal
+  plan, and the pipeline loading screen comes to the front.
+
+### Added
+
+- `NXKIT_QUEUE_SPLIT=1` (off by default) splits a submit at the waits of its recordings, so work of one queue never
+  runs before the signal of another.
+
 ## 0.16.2 - 2026-11-22
 
 ### Fixed

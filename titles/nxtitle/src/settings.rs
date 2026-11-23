@@ -73,6 +73,10 @@ pub struct Settings {
     /// game whose frames wait for things a longer hold does not shorten (movies, its own loops). `steady`: `work`, and the
     /// step never leaves the target (no longer hold, no thermal or slow cap). A long frame shows late once.
     pub pace_profile: &'static str,
+    /// `rendercond_stale`: what a render condition reads when the counter of its own report has not landed. `place`
+    /// (the default): the newer of the last counter at the same address and at the same place of an earlier frame.
+    /// `addr`: the address only. `off`: nothing, the condition renders (`NXKIT_RENDERCOND_STALE` wins).
+    pub rendercond_stale: &'static str,
     /// `screen_aspect`: stubs that follow a screen taller than 16:9.
     pub screen_aspect: bool,
     /// `shared_font`: `bfttf` (8-byte header and TTF) or `ttf`. `None`: the host decides by the SDK version.
@@ -143,6 +147,7 @@ impl Settings {
         overlap: false,
         rec_lock: true,
         pace_profile: "hold",
+        rendercond_stale: "place",
         screen_aspect: false,
         shared_font: None,
         pad_layout: "simple",
