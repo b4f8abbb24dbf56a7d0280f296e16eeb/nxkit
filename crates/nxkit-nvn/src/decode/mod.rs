@@ -23,6 +23,9 @@ use build::{Builder, delta_slots};
 
 mod build;
 mod ext;
+mod scan;
+
+pub use scan::queue_marks;
 
 /// The number of texture and image slots.
 pub const MAX_BINDINGS: usize = 128;
