@@ -42,24 +42,18 @@ fn even_multiple(refresh: f64, target: u32) -> Option<u32> {
 
 /// The plan for a screen that shows `refresh_hz` and a game that aims at `target_fps`.
 ///
-/// - `adaptive`: the screen changes its refresh rate with the link (ProMotion, adaptive sync). The link asks for the
-///   target itself, one tick per frame, and the screen follows. The host adds a timed present.
-/// - Otherwise a refresh rate that is an even multiple of the target gives `multiple` ticks per frame.
+/// - A refresh rate that is an even multiple of the target gives `multiple` ticks per frame, on an adaptive screen too.
+///   A ProMotion screen whose link asked for 60 Hz lowered its rate with each late frame, and Ocarina of Time fell to
+///   about 20 fps at 60, while the same game on a fixed 120 Hz screen (link 120, two ticks a frame) held 60
+///   (2026-11-22). So the link keeps the screen's rate and the frames are held on its grid.
+/// - `adaptive`, and the rate is no even multiple: the screen changes its refresh rate with the link (ProMotion,
+///   adaptive sync). The link asks for the target itself, one tick per frame, and the screen follows.
 /// - Otherwise, with `free_rate` (the game accepts any frame rate), the nearest even split wins: 144 Hz gives 72 fps
 ///   (2 ticks), not 48 (3 ticks), because the first is nearer to 60 and a tie goes to the faster one.
 /// - Otherwise the game has a fixed rate that the screen cannot show evenly. The plan asks for the target, says it is
 ///   not exact, and names a refresh rate to switch to.
 pub fn plan_ticks(refresh_hz: f64, target_fps: u32, free_rate: bool, adaptive: bool) -> TickPlan {
     let target = target_fps.max(1);
-    if adaptive {
-        return TickPlan {
-            link_hz: target,
-            ticks_per_frame: 1,
-            fps: target,
-            exact: true,
-            switch_to: None,
-        };
-    }
     let refresh = if refresh_hz.is_finite() && refresh_hz > 0.0 {
         refresh_hz
     } else {
@@ -70,6 +64,15 @@ pub fn plan_ticks(refresh_hz: f64, target_fps: u32, free_rate: bool, adaptive: b
         return TickPlan {
             link_hz: link,
             ticks_per_frame: n,
+            fps: target,
+            exact: true,
+            switch_to: None,
+        };
+    }
+    if adaptive {
+        return TickPlan {
+            link_hz: target,
+            ticks_per_frame: 1,
             fps: target,
             exact: true,
             switch_to: None,
@@ -218,9 +221,17 @@ mod tests {
     }
 
     #[test]
-    fn an_adaptive_screen_follows_the_target() {
+    fn an_adaptive_screen_keeps_its_rate_when_the_target_divides_it() {
         let p = plan_ticks(120.0, 60, false, true);
-        assert_eq!((p.link_hz, p.ticks_per_frame, p.exact), (60, 1, true));
+        assert_eq!((p.link_hz, p.ticks_per_frame, p.exact), (120, 2, true));
+        let p = plan_ticks(120.0, 30, false, true);
+        assert_eq!((p.link_hz, p.ticks_per_frame), (120, 4));
+    }
+
+    #[test]
+    fn an_adaptive_screen_follows_a_target_that_does_not_divide_it() {
+        let p = plan_ticks(120.0, 50, false, true);
+        assert_eq!((p.link_hz, p.ticks_per_frame, p.exact), (50, 1, true));
     }
 
     #[test]
