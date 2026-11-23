@@ -4,8 +4,6 @@ use super::*;
 
 impl Walker {
     pub(super) fn draw<M: GuestMem>(&mut self, mem: &M, st: &State, x: &Ext) -> DrawDetail {
-        // A draw while a capture is on writes the feedback buffers, also one that the encoder has no detail for.
-        self.feedback.draw();
         if let Some(args) = mesh_args(x) {
             return self.mesh_draw(mem, st, args);
         }
@@ -30,6 +28,8 @@ impl Walker {
                     st.program
                 );
             }
+            // A capture of a draw without detail is not run: its buffers stay stale.
+            self.feedback.draw(None, false);
             return d;
         };
         self.prof.banks(st);
@@ -44,6 +44,7 @@ impl Walker {
             if show() {
                 eprintln!("DIAG draw: no vertex stage, {what}");
             }
+            self.feedback.draw(None, false);
             return d;
         };
         self.track.program(1, st.program[1]);
@@ -61,6 +62,19 @@ impl Walker {
         };
         d.topology = topology;
         d.args = args;
+        if self.feedback.active() {
+            // A geometry shader that the program binds for its own stage (a program without one names its vertex
+            // program in that slot too).
+            let geometry = [Kind::Geometry, Kind::Other]
+                .into_iter()
+                .find_map(|k| self.programs.find(st.program[GEOMETRY], k))
+                .cloned();
+            let runnable =
+                crate::feedback::runnable(&d.args, d.topology) && !crate::knob("nofeedback");
+            d.capture = self.feedback.draw(geometry, runnable);
+            // The state steps of a capture belong to this walk: such a recording is no template.
+            self.track.truncated();
+        }
         fixed_function(st, &mut d);
         d.attributes
             .reserve_exact(st.attribute.iter().flatten().count());
@@ -101,6 +115,22 @@ impl Walker {
             .reserve_exact(bound_count(&st.ubo[0]) + bound_count(&st.ubo[1]));
         self.ubos_into(mem, st, 0, Stage::Vertex, &mut d.ubos);
         self.ubos_into(mem, st, 1, Stage::Fragment, &mut d.ubos);
+        // A capture through a geometry shader runs its kernel, which reads the buffers of the geometry stage.
+        if d.capture.as_ref().is_some_and(|c| c.geometry.is_some()) {
+            self.ubos_into(
+                mem,
+                st,
+                super::super::GEOMETRY_BANK,
+                Stage::Geometry,
+                &mut d.ubos,
+            );
+            sbufs_into(
+                st,
+                super::super::GEOMETRY_BANK,
+                Stage::Geometry,
+                &mut d.sbufs,
+            );
+        }
         d.sbufs
             .reserve_exact(bound_count(&st.sbuf[0]) + bound_count(&st.sbuf[1]));
         sbufs_into(st, 0, Stage::Vertex, &mut d.sbufs);
@@ -259,6 +289,15 @@ pub(super) fn draw_args(x: &Ext) -> Option<(u32, DrawArgs)> {
             instances: x.word(7),
         };
         Some((x.word(0), args))
+    } else if kind == DrawKind::TransformFeedback as u16 {
+        // `DrawTransformFeedback` draws what a capture saved into its control block: the draw arguments at +16 have
+        // the layout of `DrawArraysIndirect` (records, 1, 0, 0). The encoder runs captures, so the GPU wrote them.
+        Some((
+            x.word(0),
+            DrawArgs::ArraysIndirect {
+                indirect: x.word64(1) + 16,
+            },
+        ))
     } else if kind == DrawKind::ArraysIndirect as u16 {
         Some((
             x.word(0),

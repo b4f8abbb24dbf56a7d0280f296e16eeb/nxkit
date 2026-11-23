@@ -108,6 +108,7 @@ pub(super) fn ubo_dump_draw(sh: &EncodeCtx<'_>, n: u32, d: &crate::detail::DrawD
             crate::detail::Stage::Fragment => "fs",
             crate::detail::Stage::Vertex => "vs",
             crate::detail::Stage::Mesh => "ms",
+            crate::detail::Stage::Geometry => "gs",
             crate::detail::Stage::Task => "ts",
             crate::detail::Stage::Compute => "cs",
         };

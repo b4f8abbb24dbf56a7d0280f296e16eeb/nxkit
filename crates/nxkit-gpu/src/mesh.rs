@@ -128,6 +128,7 @@ pub(crate) fn prepare(
             (Some(f), Stage::Fragment) => crate::drawctx::blend_zero_word(d, f, &pc.targets),
             _ => 0,
         },
+        geometry: None,
     };
     let mesh_args = crate::bindless::fill_args(&ms, &inputs(Stage::Mesh), &sh.env, sink)?;
     let object_args = match &ts {
@@ -216,6 +217,7 @@ mod tests {
             groups: None,
             push: None,
             blendz: 0,
+            geometry: None,
         };
         let mut b = vec![0u8; 0xA00];
         crate::bindless::storage_table(&mut b, &inp);

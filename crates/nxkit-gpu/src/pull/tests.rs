@@ -168,6 +168,7 @@ fn draw(attributes: Vec<AttributeDetail>, streams: Vec<StreamDetail>) -> DrawDet
         images: vec![],
         dynamic: Default::default(),
         feedback_input: false,
+        capture: None,
     }
 }
 
@@ -350,6 +351,7 @@ fragment float4 fs() { return float4(1); }
         entry_layer: None,
         entry_z: [None, None],
         entry_discard: None,
+        capture: Default::default(),
         binds: vec![],
         arg_bytes: 0,
         inputs: if pull {

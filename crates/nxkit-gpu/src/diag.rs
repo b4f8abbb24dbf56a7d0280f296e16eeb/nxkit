@@ -70,6 +70,8 @@ const KNOBS: &[&str] = &[
     "nostencil",
     // Culling is off.
     "nocull",
+    // Transform feedback captures do not run (`feedback`): their readers are left out.
+    "nofeedback",
     // The depth bias is zero.
     "nooffset",
     // A draw into four colour targets that the fragment shader all writes gets constant G-buffer values.

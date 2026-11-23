@@ -208,6 +208,7 @@ fn stage_code(s: Stage) -> u32 {
         Stage::Compute => 2,
         Stage::Task => 3,
         Stage::Mesh => 4,
+        Stage::Geometry => 5,
     }
 }
 

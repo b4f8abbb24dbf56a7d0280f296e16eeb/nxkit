@@ -23,6 +23,8 @@ pub(crate) struct StageInputs<'a> {
     pub(crate) push: Option<&'a [u8]>,
     /// The blend word of a fragment stage (`draws::blend_zero_word`), 0 for every other stage.
     pub(crate) blendz: u32,
+    /// The GPU addresses of the helper buffers of a geometry kernel or its reader, by `reg` (`crate::feedback`).
+    pub(crate) geometry: Option<[u64; 5]>,
 }
 
 /// What the argument buffers need besides the bindings.
@@ -418,6 +420,10 @@ fn build_args_in(
             // A zero border block has no sampler bit set, so no sample is corrected.
             BindKind::Border => env.statics.1,
             BindKind::BlendZ => blend_word(inp.blendz, env.statics.1, sink)?,
+            BindKind::Geometry => inp
+                .geometry
+                .and_then(|g| g.get(b.reg as usize).copied())
+                .unwrap_or(env.statics.1),
             BindKind::Sbuf => sbuf_word(
                 env.guest_pools,
                 env.rename,

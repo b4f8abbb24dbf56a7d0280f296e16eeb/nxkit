@@ -62,14 +62,14 @@ impl CommandBuffer {
         visibility: Option<&DataBuffer>,
         resolves: &[Option<Texture>],
     ) -> Result<RenderPass<'_>> {
+        // A pass without attachments runs draws without rasterization only (their vertex stages store to buffers).
         let first = desc
             .colors
             .iter()
             .flatten()
             .next()
             .map(|c| &c.texture)
-            .or(desc.depth.as_ref().map(|d| &d.texture))
-            .ok_or(MetalError::Invalid("a render pass needs an attachment"))?;
+            .or(desc.depth.as_ref().map(|d| &d.texture));
         let mut pd = self.pass_desc.take().unwrap_or_else(PassDescriptor::new);
         let result = self
             .fill_pass(&mut pd, desc, first)
@@ -133,7 +133,7 @@ impl CommandBuffer {
         &mut self,
         pd: &mut PassDescriptor,
         desc: &RenderPassDesc,
-        first: &Texture,
+        first: Option<&Texture>,
     ) -> Result<()> {
         pd.reset();
         let rp = &pd.raw;
@@ -181,6 +181,13 @@ impl CommandBuffer {
             a.setClearStencil(d.clear);
             self.retain(d.texture.clone());
         }
+        let Some(first) = first else {
+            rp.setRenderTargetWidth(1);
+            rp.setRenderTargetHeight(1);
+            // SAFETY: 1 is a sample count that every device supports.
+            unsafe { rp.setDefaultRasterSampleCount(1) };
+            return Ok(());
+        };
         // The render area is the smallest attachment, as in NVN.
         let td = first.desc();
         let (mut w, mut h) = (td.width, td.height);

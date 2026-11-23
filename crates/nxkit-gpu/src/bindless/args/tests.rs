@@ -219,6 +219,7 @@ fn a_uniform_word_is_real_and_c0_stays_virtual() {
         groups: Some([1, 1, 1]),
         push: None,
         blendz: 0,
+        geometry: None,
     };
     let mut b = Vec::new();
     drv_block(&mut b, &inp, &out);

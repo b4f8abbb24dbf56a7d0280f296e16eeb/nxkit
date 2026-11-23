@@ -422,7 +422,7 @@ fn samples(
                 Stage::Mesh => "ms",
                 Stage::Task => "ts",
                 Stage::Vertex => "vs",
-                Stage::Compute => continue,
+                Stage::Compute | Stage::Geometry => continue,
             };
             let Some(id) = crate::diag::texture_of(t.handle) else {
                 continue;

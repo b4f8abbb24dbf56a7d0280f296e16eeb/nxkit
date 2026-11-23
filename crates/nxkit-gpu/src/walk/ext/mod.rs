@@ -26,6 +26,7 @@ fn ubo_stage(stage: u16) -> Option<usize> {
     match stage {
         0 => Some(0),
         1 => Some(1),
+        2 => Some(super::GEOMETRY_BANK),
         5 => Some(2),
         3 => Some(TASK),
         4 => Some(MESH),

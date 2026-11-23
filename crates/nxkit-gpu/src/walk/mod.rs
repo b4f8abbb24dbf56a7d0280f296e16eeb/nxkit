@@ -60,8 +60,11 @@ const SEPARATE_SLOTS: usize = 4 * nxkit_nvn::ext::SEPARATE_SLOTS as usize;
 const STREAMS: usize = 16;
 const ATTRIBUTES: usize = 32;
 const UBOS: usize = 16;
-/// The buffer banks: vertex, fragment, compute, task and mesh.
-const BANKS: usize = 5;
+/// The buffer banks: vertex, fragment, compute, task, mesh and geometry.
+const BANKS: usize = 6;
+/// The buffer bank of the geometry stage: a geometry shader that the host runs as a kernel for a transform feedback
+/// capture reads its uniform buffers from there.
+const GEOMETRY_BANK: usize = 5;
 /// The stage index of `NVNshaderStage` for compute.
 const COMPUTE: usize = 5;
 /// The program slots and buffer banks of the NVN2 task and mesh stages. The recorder puts the task and mesh stages

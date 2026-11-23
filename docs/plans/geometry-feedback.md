@@ -1,7 +1,12 @@
 # Geometry shaders with transform feedback: run the captures that Xenoblade Chronicles 3 draws from
 
-Status: plan (2026-11-23). Not started. The findings come from Xenoblade Chronicles 3 (`010074F013262000`, the save
-in "Sieches Feld") on the M2 Max.
+Status: built (2026-11-23), `crates/nxkit-gpu/src/feedback` and `walk::feedback`; the knob `nofeedback` turns it off.
+Verified: the host kernels on the GPU (`feedback::kernel_tests`), and the vertex captures of Xenoblade Chronicles 3 end
+to end (a capture of one point writes its 16-byte record and saves the control state 16, 1, 1). Not verified: a
+geometry capture with records. Xenoblade Chronicles 3 initialises its control blocks to 0 records, so its geometry
+captures in "Sieches Feld" have no input, on the console too: its buffers hold data that the CPU writes, and the
+stretched polygons of that scene have another cause (open). The findings come from Xenoblade Chronicles 3
+(`010074F013262000`, the save in "Sieches Feld") on the M2 Max. The plan below is the plan as written before the build.
 
 ## The problem
 

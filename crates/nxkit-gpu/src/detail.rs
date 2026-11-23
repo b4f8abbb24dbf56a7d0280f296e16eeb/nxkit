@@ -23,6 +23,9 @@ pub enum Stage {
     Task,
     /// The mesh stage of NVN2.
     Mesh,
+    /// The geometry stage, which the host runs as a compute kernel for a transform feedback capture
+    /// (`crate::feedback`).
+    Geometry,
 }
 
 /// The shaders of a draw, as the keys of the shader step. A key names `<key>_b.metallib` and `<key>_b.json`.
@@ -319,6 +322,26 @@ pub struct DrawDetail {
     /// A vertex stream reads a range that transform feedback writes, a capture the host does not run
     /// (`walk::feedback`). The encoder leaves the draw out (`Skip::Feedback`).
     pub feedback_input: bool,
+    /// The transform feedback capture that the draw writes, when a capture is on (`crate::feedback`).
+    pub capture: Option<Box<CaptureDetail>>,
+}
+
+/// The transform feedback capture of a draw: where its records go and how the capture state goes on. The state of a
+/// capture is NVN's control block: the byte offsets of the four buffers, then the draw arguments of what was captured
+/// (records, 1, 0, 0), which `DrawTransformFeedback` draws from.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CaptureDetail {
+    /// The bound feedback buffers: GPU address and size, 0 for none.
+    pub buffers: [(u64, u64); 4],
+    /// `BeginTransformFeedback` came before the draw: the state starts at zero.
+    pub begin: bool,
+    /// `ResumeTransformFeedback` came before the draw: the state is loaded from this control block.
+    pub load: Option<u64>,
+    /// `EndTransformFeedback` or `PauseTransformFeedback` came after the draw: the state is saved into this control
+    /// block.
+    pub save: Option<u64>,
+    /// The key of the geometry shader whose output is captured, when the program has one.
+    pub geometry: Option<std::sync::Arc<str>>,
 }
 
 /// A clear value. A colour clear uses `color` and `color_mask`. A depth and stencil clear uses `depth`,

@@ -91,6 +91,7 @@ pub(crate) fn prepare(
             (Some(f), Stage::Fragment) => blend_zero_word(d, f, &pc.targets),
             _ => 0,
         },
+        geometry: None,
     };
     let vertex_args = crate::bindless::fill_args(&vs, &inputs(Stage::Vertex), &sh.env, sink)?;
     let fragment_args = match &fs {
@@ -132,7 +133,7 @@ pub(crate) fn prepare(
 /// fits the shader type (`nxkit_pipestate::nvn::stage_in_fits`), and its offset, its stream's stride and its stream's
 /// address are multiples of 4, as Metal's vertex layouts and vertex buffers require. The pulling variant takes the
 /// low bits of an address into the offsets and reads any alignment.
-fn stage_in_fits(d: &DrawDetail, vs: &crate::programs::StageProgram) -> bool {
+pub(crate) fn stage_in_fits(d: &DrawDetail, vs: &crate::programs::StageProgram) -> bool {
     let fits = d.attributes.iter().all(|a| {
         let Some((_, read)) = vs.inputs.iter().find(|(l, _)| *l == a.location) else {
             return true;

@@ -432,7 +432,7 @@ impl Track {
                 Stage::Vertex => 0,
                 Stage::Fragment => 1,
                 Stage::Compute => 2,
-                Stage::Task | Stage::Mesh => 3,
+                Stage::Task | Stage::Mesh | Stage::Geometry => 3,
             };
             let dep = self
                 .tex_dep

@@ -41,5 +41,6 @@ pub(crate) fn empty_draw() -> DrawDetail {
         images: Vec::new(),
         dynamic: Default::default(),
         feedback_input: false,
+        capture: None,
     }
 }

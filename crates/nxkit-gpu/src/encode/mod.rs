@@ -149,6 +149,14 @@ fn set_counting(
     true
 }
 
+/// Whether draw `n` is a transform feedback capture, which `feedback::run` encodes before its pass.
+fn is_capture(sh: &EncodeCtx<'_>, n: u32) -> bool {
+    sh.detail
+        .draws
+        .get(n as usize)
+        .is_some_and(|d| d.capture.is_some())
+}
+
 /// Encodes one render pass into `cb`.
 pub(crate) fn render_pass(
     sh: &EncodeCtx<'_>,
@@ -206,6 +214,19 @@ pub(crate) fn render_pass(
             pass.cmds,
             range.len(),
             sh.plan.reads_of(pass).len()
+        );
+    }
+    // The transform feedback captures of the pass run before it: they draw nothing into its targets, and a draw of
+    // the pass may read what they write (`feedback`).
+    let captures: Vec<u32> = range.clone().filter(|n| is_capture(sh, *n)).collect();
+    if !captures.is_empty() {
+        crate::feedback::run(
+            sh,
+            cb,
+            (&tables.vertex, &tables.fragment),
+            scratch,
+            &captures,
+            stats,
         );
     }
     let s = setup(sh, pass);
@@ -397,6 +418,10 @@ pub(crate) fn render_pass(
             n += 1;
             continue;
         }
+        if is_capture(sh, n) {
+            n += 1;
+            continue;
+        }
         if let Some(run) = sh
             .run_at
             .get(&n)
@@ -404,6 +429,7 @@ pub(crate) fn render_pass(
                 n + r.draws <= range.end && !crate::diag::skip_list_on() && !crate::patch::draw_on()
             })
             .filter(|r| !clears.iter().any(|&(at, _)| at > n && at < n + r.draws))
+            .filter(|r| !(n..n + r.draws).any(|d| is_capture(sh, d)))
             && (n..n + run.draws).all(|d| !is_off(d) && counts(d).is_none())
             && set_counting(&mut rp, &mut counting, None, stats)
             && run_icb(sh, &s.pc, &mut rp, &mut tr, run, stats)

@@ -253,7 +253,13 @@ impl Walker {
             }
             ExtCode::TransformFeedback => {
                 self.track.truncated();
-                self.feedback.control(x.arg);
+                // An end or a pause saves the state after the last capture draw.
+                if let Some(ctl) = self.feedback.control(x.arg, x.word64(0))
+                    && let Some(last) = self.out.draws.last_mut()
+                    && let Some(c) = Arc::make_mut(last).capture.as_mut()
+                {
+                    c.save = Some(ctl);
+                }
             }
             ExtCode::Draw => {
                 let t = self.prof.start();

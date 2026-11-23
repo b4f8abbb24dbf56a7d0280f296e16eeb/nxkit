@@ -67,6 +67,8 @@ pub struct KindStats {
     /// Draws of multi-draws past the most that the pre-pass copies, and workgroups of mesh draws past the most grids.
     /// They are left out.
     pub clamped: u32,
+    /// Transform feedback captures that ran (`feedback`).
+    pub captures: u32,
 }
 
 impl KindStats {
@@ -88,6 +90,7 @@ impl KindStats {
         self.prepasses += o.prepasses;
         self.prepass_records += o.prepass_records;
         self.clamped += o.clamped;
+        self.captures += o.captures;
     }
 
     /// One line per class with draws, for the `mesh` diagnostic: the encoded draws and the skipped ones by reason.
@@ -111,12 +114,13 @@ impl KindStats {
             }
         }
         format!(
-            "{}; metal draws {} pre-passes {} records {} clamped {}",
+            "{}; metal draws {} pre-passes {} records {} clamped {} captures {}",
             out.join("; "),
             self.metal_draws,
             self.prepasses,
             self.prepass_records,
-            self.clamped
+            self.clamped,
+            self.captures
         )
     }
 }

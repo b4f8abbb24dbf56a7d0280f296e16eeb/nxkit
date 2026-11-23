@@ -31,6 +31,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         entry_layer: None,
         entry_z: [None, None],
         entry_discard: None,
+        capture: Default::default(),
         binds: vec![],
         arg_bytes: 0,
         inputs: vec![],
@@ -72,6 +73,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         images: vec![],
         dynamic: Default::default(),
         feedback_input: false,
+        capture: None,
     };
     let targets = Targets {
         colors: vec![Some(Format::Rgba8Unorm)],
@@ -142,6 +144,7 @@ fn a_draw_with_a_layer_picking_geometry_shader_runs_the_layer_entry() {
         entry_layer: None,
         entry_z: [None, None],
         entry_discard: None,
+        capture: Default::default(),
         binds: vec![],
         arg_bytes: 0,
         inputs: vec![],
@@ -184,6 +187,7 @@ fn the_depth_mode_zero_to_one_takes_the_entries_that_keep_the_depth() {
         entry_layer: Some("main0_l".into()),
         entry_z: [None, None],
         entry_discard: None,
+        capture: Default::default(),
         binds: vec![],
         arg_bytes: 0,
         inputs: vec![],
@@ -228,6 +232,7 @@ fn a_swapped_library_gets_pipelines_of_its_own_that_are_never_captured() {
         entry_layer: None,
         entry_z: [None, None],
         entry_discard: None,
+        capture: Default::default(),
         binds: vec![],
         arg_bytes: 0,
         inputs: vec![],
@@ -267,6 +272,7 @@ fn a_swapped_library_gets_pipelines_of_its_own_that_are_never_captured() {
         images: vec![],
         dynamic: Default::default(),
         feedback_input: false,
+        capture: None,
     };
     let targets = Targets {
         colors: vec![Some(Format::Rgba8Unorm)],

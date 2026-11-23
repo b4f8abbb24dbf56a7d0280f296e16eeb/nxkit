@@ -23,6 +23,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- Transform feedback runs, with and without a geometry shader (`crates/nxkit-gpu/src/feedback`): the vertex capture,
+  the geometry kernel, the compaction of what it emitted, the capture entry and NVN's control blocks, all on the GPU.
+  `DrawTransformFeedback` draws from the control block that a capture saved. The knob `nofeedback` turns it off.
 - `NXKIT_GPU_BUFFER=pools`: one Metal buffer per NVN memory pool instead of one over the whole guest range, so only
   the pool pages are wired (Ocarina of Time: 5.3 instead of 12.6 GiB). The default stays `whole`.
 

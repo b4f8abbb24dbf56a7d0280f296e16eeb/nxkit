@@ -95,6 +95,8 @@ impl Walker {
     /// Walks with the cache, takes the memory writes back, walks without it and compares. The uncached result stays.
     fn verify_top<M: GuestMem>(&mut self, mem: &mut M, st: &mut State, handle: u64) {
         let pre = st.clone();
+        // The transform feedback state goes on with the walk: the second walk starts where the first one did.
+        let feedback = self.feedback.clone();
         let updated = self.updated.clone();
         let snaps = self.snaps.get_mut().clone();
         let marks = self.marks();
@@ -115,6 +117,7 @@ impl Walker {
         self.out.dispatches.truncate(marks.dispatches);
         self.out.reports.truncate(marks.reports);
         *st = pre;
+        self.feedback = feedback;
         self.bypass = true;
         self.track.reset();
         self.run(mem, st, handle, 0);
@@ -145,7 +148,9 @@ impl Walker {
         handle: u64,
         depth: u32,
     ) {
-        if !self.cache_on || self.bypass {
+        // A recording walked while a transform feedback capture is on makes its draws captures with the steps of
+        // that state (`walk::feedback`): it is walked as it is, neither from a template nor into one.
+        if !self.cache_on || self.bypass || self.feedback.active() {
             self.walk_records(mem, st, handle, depth);
             return;
         }

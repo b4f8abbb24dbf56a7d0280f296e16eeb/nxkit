@@ -349,6 +349,7 @@ Knobs are experiments. A frame with a knob does not render correctly. Use knobs 
 | `nodepth` | Turns off the depth and stencil tests. |
 | `nostencil` | Turns off the stencil test and leaves the depth test. |
 | `nocull` | Turns off culling. |
+| `nofeedback` | Transform feedback captures do not run (`crate::feedback`): their buffers stay stale, and the draws that read them as vertex streams are left out (`skip.feedback`). |
 | `nooffset` | Sets the depth bias to zero. |
 | `noeq` | Changes the depth test `equal` to `always`. |
 | `flat` | A draw into four colour targets that its fragment shader all writes gets constant G-buffer values. |
@@ -543,7 +544,7 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `skip.transfer` | encoder | An upload or a copy-back failed. Look at `upload.*` and `copyback.*`. |
 | `skip.encode` | encoder | Metal refused an encoded command. |
 | `skip.pending` | encoder | The pipeline still compiles on a background thread. The draw shows a frame or two later. It is not a loss. |
-| `skip.feedback` | encoder | A draw that reads its vertices from a range that a transform feedback capture wrote in the last 2048 submits (a buffer bound while a draw captured). The host does not run that capture (a geometry shader with feedback), so the bytes are not the console's and drawn they spread over the screen. |
+| `skip.feedback` | encoder | A draw that reads its vertices from a range that a transform feedback capture wrote in the last 2048 submits, and the host does not run that capture (an indexed or strip draw): the bytes are not the console's and drawn they spread over the screen. Also a capture that could not run (`e.g.` names its vertex and geometry shader and the reason). |
 | `skip.listed` | encoder | A draw whose program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`, or a draw that a patch module skips (also each draw of a pass that it skips). A debugging aid: the frame does not render correctly. |
 | `walk.draw-no-args` | walker | A draw record without draw arguments (transform feedback, `DrawTexture` or an unknown draw kind). The draw gets an empty detail. |
 | `walk.draw-no-vertex` | walker | The bound program has no vertex stage, or a mesh draw finds no program with a mesh stage. |

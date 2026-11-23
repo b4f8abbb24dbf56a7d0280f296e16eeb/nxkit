@@ -60,6 +60,8 @@ pub(crate) enum BindKind {
     GmemLog,
     /// `img_words`: the texels of the texture buffer image in slot `reg` as device words, for its atomics.
     ImgWords,
+    /// `geometry`: the GPU address of helper buffer `reg` of a geometry kernel or its reader (`crate::feedback`).
+    Geometry,
 }
 
 /// How a shader accesses a storage image (`access::` of its `msl_type`).
@@ -135,6 +137,7 @@ pub(crate) struct Bind {
 pub(crate) use nxkit_pipestate::program::{MeshFacts as MeshInfo, MeshKind};
 
 /// A shader function with its bindings.
+#[derive(Clone)]
 pub(crate) struct StageProgram {
     /// The library.
     pub(crate) lib: ShaderLibrary,
@@ -168,6 +171,8 @@ pub(crate) struct StageProgram {
     pub(crate) c1: Vec<u8>,
     /// The mesh stage of a task or mesh shader. `None` for the other stages.
     pub(crate) mesh: Option<MeshInfo>,
+    /// The transform feedback and geometry kernel facts of the library (`crate::feedback`).
+    pub(crate) capture: crate::capture_facts::Facts,
     /// 0 for the shipped library. Else the number of the swap that put a library of source in its place (W37,
     /// `crate::hotswap`). Its pipelines have other keys and are never kept.
     pub(crate) swap: u32,
@@ -182,7 +187,8 @@ pub(crate) struct Programs {
     /// One map per reading of the vertex inputs (index 1 for vertex, 2 for the pulling `_bp` variant of a vertex
     /// shader), so that a lookup by `&str` allocates nothing. A read-write lock: every draw of every encode thread
     /// reads it, and a `Mutex` made them wait for each other.
-    cache: RwLock<[ProgramMap; 3]>,
+    /// The vertex, the other and the pulling programs, then the libraries by key and suffix ([`Self::library`]).
+    cache: RwLock<[ProgramMap; 4]>,
     /// The libraries that a person swapped in (W37). Read on a cache miss only.
     swaps: swap::Swaps,
 }
@@ -193,6 +199,7 @@ impl Programs {
             ctx: ctx.clone(),
             dir,
             cache: RwLock::new([
+                ProgramMap::default(),
                 ProgramMap::default(),
                 ProgramMap::default(),
                 ProgramMap::default(),
@@ -235,6 +242,41 @@ impl Programs {
         let r = self.load_as(key, true, true, true).map(Arc::new);
         self.cache.write().unwrap_or_else(PoisonError::into_inner)[2]
             .insert(key.to_owned(), r.clone());
+        r
+    }
+
+    /// The library `<key><suffix>` of a shader: a geometry kernel `_bg<t>` or its reader `_bgv`
+    /// (`crate::feedback`). `vertex` reads the vertex inputs. The result is cached, also a failure.
+    pub(crate) fn library(
+        &self,
+        key: &str,
+        suffix: &str,
+        vertex: bool,
+    ) -> Result<Arc<StageProgram>, Skip> {
+        let name = format!("{key}{suffix}");
+        if let Some(r) = self.cache.read().unwrap_or_else(PoisonError::into_inner)[3].get(&name) {
+            return r.clone();
+        }
+        let r = (|| {
+            if name.contains(['/', '\\']) || name.contains("..") {
+                return Err(Skip::Program);
+            }
+            let text = std::fs::read_to_string(self.dir.join(format!("{name}.json")))
+                .map_err(|_| Skip::Program)?;
+            let json = parse(&text).ok_or(Skip::Program)?;
+            let lib =
+                ShaderLibrary::from_path(&self.ctx, &self.dir.join(format!("{name}.metallib")))
+                    .map_err(|_| Skip::Program)?;
+            read_stage(&json, lib, vertex)
+        })()
+        .map(Arc::new);
+        if r.is_err() {
+            nxkit_nvn::diag::note(
+                nxkit_nvn::diag::Reason::ProgramFailed,
+                format_args!("{name}"),
+            );
+        }
+        self.cache.write().unwrap_or_else(PoisonError::into_inner)[3].insert(name, r.clone());
         r
     }
 
@@ -371,6 +413,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
             "gmem_map" => BindKind::GmemMap,
             "gmem_log" => BindKind::GmemLog,
             "img_words" => BindKind::ImgWords,
+            "geometry" => BindKind::Geometry,
             other => {
                 // The reason names the kind, so the health report says which one is missing.
                 nxkit_nvn::diag::example(
@@ -496,6 +539,7 @@ fn read_stage(json: &Json, lib: ShaderLibrary, vertex: bool) -> Result<StageProg
         threadgroup,
         c1,
         mesh: facts.mesh,
+        capture: crate::capture_facts::Facts::read(json),
         swap: 0,
     })
 }

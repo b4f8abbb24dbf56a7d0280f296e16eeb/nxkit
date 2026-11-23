@@ -133,7 +133,16 @@ impl Pipelines {
         // nothing, and the draw is left out.
         let discard = d.raster.discard;
         let (vertex_fn, vertex_kind) = match (discard, vs.entry_discard.as_deref()) {
-            (true, Some(e)) => (e, ":discard"),
+            // The capture entries of `crate::feedback` take the place of the discard entry and key their pipelines
+            // apart from it.
+            (true, Some(e)) => (
+                e,
+                match e {
+                    "main0_gs" => ":gs",
+                    "main0_tf" => ":tf",
+                    _ => ":discard",
+                },
+            ),
             (true, None) => return Err(Skip::Cull),
             (false, _) => vertex_entry(d, vs, zero_to_one),
         };
