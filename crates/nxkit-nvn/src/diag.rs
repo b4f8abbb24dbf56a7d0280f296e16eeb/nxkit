@@ -131,6 +131,9 @@ reasons! {
     /// Encoder: a draw whose vertex, task, mesh or fragment program key is listed in `NXKIT_SKIP_PROGRAMS` or
     /// `NXKIT_SKIP_FILE` (`Skip::Listed`). A debugging aid: the frame does not render correctly.
     SkipListed => "skip.listed",
+    /// Encoder: a draw that reads its vertices from a transform feedback range whose capture the host does not run
+    /// (`Skip::Feedback`): Xenoblade Chronicles 3's cloth and hair, simulated by a geometry shader with feedback.
+    SkipFeedback => "skip.feedback",
     /// Walker: a draw record without draw arguments (an indirect or unknown draw kind), so the draw has no detail.
     DrawNoArgs => "walk.draw-no-args",
     /// Walker: a draw without a vertex stage in the bound program.

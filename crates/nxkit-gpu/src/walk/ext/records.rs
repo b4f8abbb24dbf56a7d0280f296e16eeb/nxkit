@@ -244,6 +244,9 @@ impl Walker {
                     ..ClearDetail::default()
                 });
             }
+            // The capture into it is not run (`walk::feedback`): the walker keeps the range so that its readers are left
+            // out.
+            ExtCode::TransformFeedbackBuffer => self.feedback.note(x.word64(0), x.word64(2)),
             ExtCode::Draw => {
                 let t = self.prof.start();
                 let d = self.draw(&*mem, st, x);

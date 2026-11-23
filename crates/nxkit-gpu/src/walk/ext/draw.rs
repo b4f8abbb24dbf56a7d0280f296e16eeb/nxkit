@@ -92,6 +92,7 @@ impl Walker {
                     stride,
                     divisor,
                 });
+                d.feedback_input |= self.feedback.reads(address, size);
             }
         }
         d.ubos

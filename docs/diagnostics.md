@@ -543,6 +543,7 @@ The `skip.*` lines count the draws, copies and dispatches that the encoder left 
 | `skip.transfer` | encoder | An upload or a copy-back failed. Look at `upload.*` and `copyback.*`. |
 | `skip.encode` | encoder | Metal refused an encoded command. |
 | `skip.pending` | encoder | The pipeline still compiles on a background thread. The draw shows a frame or two later. It is not a loss. |
+| `skip.feedback` | encoder | A draw that reads its vertices from a range bound for transform feedback in the last 2048 submits. The host does not run that capture (a geometry shader with feedback, Xenoblade Chronicles 3's cloth and hair), so the bytes are not the console's and drawn they spread over the screen. |
 | `skip.listed` | encoder | A draw whose program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`, or a draw that a patch module skips (also each draw of a pass that it skips). A debugging aid: the frame does not render correctly. |
 | `walk.draw-no-args` | walker | A draw record without draw arguments (transform feedback, `DrawTexture` or an unknown draw kind). The draw gets an empty detail. |
 | `walk.draw-no-vertex` | walker | The bound program has no vertex stage, or a mesh draw finds no program with a mesh stage. |

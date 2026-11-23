@@ -349,9 +349,10 @@ pub(super) fn draw(
             )
         };
         eprintln!(
-            "DIAG draw {n} vs {} fs {:?} args {:?} depth {:?} raster {:?} masks {:?} blend {:?} inputs {:?} streams {:?} ubos {:?} textures {:?}{targets}",
+            "DIAG draw {n} vs {} fs {:?} topology {} args {:?} depth {:?} raster {:?} masks {:?} blend {:?} inputs {:?} streams {:?} ubos {:?} textures {:?}{targets}",
             d.program.vertex,
             d.program.fragment,
+            d.topology,
             d.args,
             d.depth_stencil,
             d.raster,

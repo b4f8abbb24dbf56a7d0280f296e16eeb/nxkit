@@ -313,6 +313,9 @@ pub struct DrawDetail {
     pub images: Vec<TextureBind>,
     /// The state outside an ICB.
     pub dynamic: DynamicDetail,
+    /// A vertex stream reads a range that transform feedback writes, a capture the host does not run
+    /// (`walk::feedback`). The encoder leaves the draw out (`Skip::Feedback`).
+    pub feedback_input: bool,
 }
 
 /// A clear value. A colour clear uses `color` and `color_mask`. A depth and stencil clear uses `depth`,

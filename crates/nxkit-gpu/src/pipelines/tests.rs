@@ -70,6 +70,7 @@ fragment Mixed fs_m() { return {uint4(1), float4(1)}; }
         samplers: Vec::new(),
         images: vec![],
         dynamic: Default::default(),
+        feedback_input: false,
     };
     let targets = Targets {
         colors: vec![Some(Format::Rgba8Unorm)],
@@ -261,6 +262,7 @@ fn a_swapped_library_gets_pipelines_of_its_own_that_are_never_captured() {
         samplers: Vec::new(),
         images: vec![],
         dynamic: Default::default(),
+        feedback_input: false,
     };
     let targets = Targets {
         colors: vec![Some(Format::Rgba8Unorm)],

@@ -38,11 +38,14 @@ pub enum Skip {
     /// The draw's program is listed in `NXKIT_SKIP_PROGRAMS` or `NXKIT_SKIP_FILE`, or a patch module (W38) skips the
     /// draw or its pass.
     Listed,
+    /// The draw reads its vertices from a range that transform feedback writes, and the host does not run the capture
+    /// of that feedback (a geometry shader stage): the bytes there are not the console's, and drawn they explode.
+    Feedback,
 }
 
 impl Skip {
     /// The number of reasons.
-    pub const COUNT: usize = 16;
+    pub const COUNT: usize = 17;
 
     /// Every reason, in index order.
     pub const ALL: [Self; Self::COUNT] = [
@@ -62,6 +65,7 @@ impl Skip {
         Self::Encode,
         Self::Pending,
         Self::Listed,
+        Self::Feedback,
     ];
 
     /// The reason as a short name for logs.
@@ -83,6 +87,7 @@ impl Skip {
             Self::Encode => "encode",
             Self::Pending => "pending",
             Self::Listed => "listed",
+            Self::Feedback => "feedback",
         }
     }
 }

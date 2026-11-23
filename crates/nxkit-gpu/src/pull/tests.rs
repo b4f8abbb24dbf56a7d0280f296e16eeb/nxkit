@@ -167,6 +167,7 @@ fn draw(attributes: Vec<AttributeDetail>, streams: Vec<StreamDetail>) -> DrawDet
         samplers: Vec::new(),
         images: vec![],
         dynamic: Default::default(),
+        feedback_input: false,
     }
 }
 

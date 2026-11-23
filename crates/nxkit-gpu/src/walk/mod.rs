@@ -19,7 +19,9 @@
 
 mod banks;
 mod cache;
+mod empty;
 mod ext;
+mod feedback;
 mod objects;
 mod origin;
 mod prof;
@@ -35,8 +37,8 @@ use nxkit_nvn::mem::GuestMem;
 use nxkit_nvn::record::{NO_HANDLE, Record, deferred_handle};
 
 use crate::detail::{
-    ClearDetail, CopyDetail, DispatchDetail, DrawArgs, DrawDetail, FrameDetail, ProgramRef,
-    SEPARATE_TEXTURE_SLOT0, SamplerBind, Stage, TextureBind, UboDetail,
+    ClearDetail, CopyDetail, DispatchDetail, FrameDetail, SEPARATE_TEXTURE_SLOT0, SamplerBind,
+    Stage, TextureBind, UboDetail,
 };
 use crate::fastmap::FastMap;
 use objects::{Blends, Raster, StencilValues};
@@ -47,6 +49,7 @@ use banks::{
     textures, textures_into,
 };
 pub(crate) use cache::Invalidations;
+pub(crate) use empty::empty_draw;
 
 const MAX_CALL_DEPTH: u32 = 8;
 const MAX_RECORDS: u32 = 1 << 20;
@@ -214,6 +217,8 @@ pub(crate) struct Walker {
     at: Vec<u64>,
     /// The walk reached `stop`: every level returns.
     stopped: bool,
+    /// The ranges that transform feedback writes (`feedback`).
+    feedback: feedback::FeedbackRanges,
 }
 
 impl Walker {
@@ -246,6 +251,7 @@ impl Walker {
             stop: None,
             at: Vec::new(),
             stopped: false,
+            feedback: feedback::FeedbackRanges::default(),
         }
         .with_knobs()
     }
@@ -306,6 +312,7 @@ impl Walker {
         let started = std::time::Instant::now();
         self.drain_invalidations();
         self.read_knobs();
+        self.feedback.tick();
         let records = self.counters.records;
         let (draws, dispatches) = (self.out.draws.len(), self.out.dispatches.len());
         // CPU writes between submits do not have UpdateUniform records to invalidate cached snapshots.
@@ -556,44 +563,5 @@ impl Walker {
             samplers: samplers(st, 2, Stage::Compute),
             images,
         }
-    }
-}
-
-/// The empty shader key of a draw that cannot run, shared so that such a draw allocates nothing.
-fn empty_key() -> Arc<str> {
-    static EMPTY: std::sync::OnceLock<Arc<str>> = std::sync::OnceLock::new();
-    EMPTY.get_or_init(|| Arc::from("")).clone()
-}
-
-/// The detail of a draw that cannot run. It keeps the ordinals of the draws after it.
-pub(crate) fn empty_draw() -> DrawDetail {
-    DrawDetail {
-        push: None,
-        program: ProgramRef {
-            vertex: empty_key(),
-            fragment: None,
-            task: None,
-            mesh: None,
-            geometry: None,
-        },
-        blend: Default::default(),
-        write_masks: [0xf; 8],
-        depth_stencil: Default::default(),
-        raster: Default::default(),
-        topology: 4,
-        attributes: Vec::new(),
-        streams: Vec::new(),
-        args: DrawArgs::Arrays {
-            first: 0,
-            count: 0,
-            instances: 0,
-            base_instance: 0,
-        },
-        ubos: Vec::new(),
-        sbufs: Vec::new(),
-        textures: Vec::new(),
-        samplers: Vec::new(),
-        images: Vec::new(),
-        dynamic: Default::default(),
     }
 }

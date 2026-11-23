@@ -22,6 +22,10 @@ pub(crate) fn prepare(
     sink: &mut dyn Sink,
     icb: bool,
 ) -> Result<Prep, Skip> {
+    // The vertices come from a transform feedback capture the host does not run (`walk::feedback`).
+    if d.feedback_input {
+        return Err(Skip::Feedback);
+    }
     // An ICB holds direct draws of vertex pipelines only.
     if icb && (d.args.is_mesh() || d.args.is_indirect()) {
         return Err(Skip::Encode);
