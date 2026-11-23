@@ -104,9 +104,13 @@ fn rest_of_state(desc: &RenderPipelineDesc<'_>) -> u64 {
         desc.sample_count,
         desc.alpha_to_coverage,
         desc.support_icb,
-        desc.rasterize,
     )
         .hash(&mut h);
+    // Only a pipeline without rasterization adds to the hash: the bases of every other state keep the keys that the
+    // caches of earlier runs hold.
+    if !desc.rasterize {
+        "no rasterization".hash(&mut h);
+    }
     h.finish() | 1
 }
 

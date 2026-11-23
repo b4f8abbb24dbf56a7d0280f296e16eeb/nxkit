@@ -63,6 +63,7 @@ mod diag;
 mod emit;
 mod partial;
 mod setup;
+mod split;
 #[cfg(test)]
 mod tests;
 mod tracker;
@@ -292,6 +293,15 @@ pub(crate) fn render_pass(
             .is_some_and(|t| t.before_pass(sh.ctx, cb, scratch, range.start, &mut s.desc));
     let scan = (sh.probes.render)(sh, cb, index, pass, range.clone(), &s.desc);
     cb.layer_next_pass(s.layers);
+    // A pass with draws that only store from their vertex stage between other draws is split around them (`split`).
+    let resume = if !replaced && !crate::knob("nosplit") && split::needed(sh, range.clone()) {
+        split::descs(&s.desc).map(|(first, again)| {
+            s.desc = first;
+            again
+        })
+    } else {
+        None
+    };
     let Ok(mut rp) =
         cb.begin_render_pass_counted(&s.desc, &tables.vertex, &tables.fragment, visibility)
     else {
@@ -420,6 +430,66 @@ pub(crate) fn render_pass(
         }
         if is_capture(sh, n) {
             n += 1;
+            continue;
+        }
+        if let Some(again) = &resume
+            && split::is_store(sh, n)
+        {
+            // The run of stores draws in a pass without attachments, between the two parts of this pass.
+            let m = split::run_end(sh, n, range.end);
+            rp.end();
+            let bare = PassCtx {
+                targets: crate::pipelines::Targets {
+                    colors: Vec::new(),
+                    samples: 1,
+                },
+                has_depth: false,
+                has_stencil: false,
+                ..s.pc.clone()
+            };
+            if let Ok(mut sp) = cb.begin_render_pass_split(
+                &nxkit_metal::RenderPassDesc::default(),
+                &tables.vertex,
+                &tables.fragment,
+            ) {
+                stats.render_passes += 1;
+                let _ = sp.encode(&RenderCommand::Depend(split::barrier()));
+                let mut str = Tracker::new(s.pc.size);
+                let mut smemo = ArgsMemo::default();
+                for k in n..m {
+                    draw(
+                        sh,
+                        &bare,
+                        &mut sp,
+                        &mut str,
+                        scratch,
+                        &mut smemo,
+                        &pre,
+                        &tables.object,
+                        k,
+                        stats,
+                    );
+                }
+                sp.end();
+            }
+            let Ok(next) =
+                cb.begin_render_pass_counted(again, &tables.vertex, &tables.fragment, visibility)
+            else {
+                for k in m..range.end {
+                    stats.skip_draw(
+                        sh.detail.draws.get(k as usize).map(|d| &d.args),
+                        Skip::Encode,
+                    );
+                }
+                return;
+            };
+            rp = next;
+            stats.render_passes += 1;
+            let _ = rp.encode(&RenderCommand::Depend(split::barrier()));
+            tr = Tracker::new(s.pc.size);
+            memo = ArgsMemo::default();
+            counting = None;
+            n = m;
             continue;
         }
         if let Some(run) = sh

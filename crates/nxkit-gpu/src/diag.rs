@@ -70,6 +70,8 @@ const KNOBS: &[&str] = &[
     "nostencil",
     // Culling is off.
     "nocull",
+    // A render pass with vertex stage stores between other draws is not split around them (`encode/split.rs`).
+    "nosplit",
     // Transform feedback captures do not run (`feedback`): their readers are left out.
     "nofeedback",
     // The depth bias is zero.

@@ -6,6 +6,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- Xenoblade Chronicles 3 no longer draws its characters, enemies and statues as long stretched polygons. The game
+  blends bone matrices with vertex-only draws into slots that the next object's blend overwrites later in the same
+  render pass. Metal overlaps the vertex stages of the draws of one pass, so the draws of one object read the matrices
+  of the next. A run of such draws now leaves the render pass: the pass ends before it, the run draws in a pass of its
+  own, and the pass goes on after it (`encode/split.rs`).
 - Ocarina of Time's foliage no longer flickers on and off from frame to frame. A range that the CPU and the GPU both
   write while a frame runs (the renamer's merge class) wrote back only the GPU words its learning had seen; a culling
   list whose length follows what is visible writes past them. Now every word the frame changed that is not the CPU's
@@ -18,8 +23,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 - A draw with rasterizer discard on no longer rasterizes. It runs the stores of its vertex stage only, with
   rasterization off, as on the console. Xenoblade Chronicles 3 blends its characters' bone matrices with such point
-  draws, which drew depth, stencil and occlusion samples of their own. Its stretched cloth and hair stay: they come
-  from transform feedback of a geometry shader, which the host does not run yet (`docs/plans/geometry-feedback.md`).
+  draws, which drew depth, stencil and occlusion samples of their own.
 
 ### Added
 
