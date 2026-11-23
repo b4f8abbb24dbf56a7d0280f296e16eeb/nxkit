@@ -9,6 +9,8 @@ use nxkit_abi::env::Env;
 pub struct RtSettings {
     /// `NXKIT_REC_LOCK=0`: the end of a recording leaves the cache invalidation to the next lock of the front end.
     pub defer_recorded: bool,
+    /// Whether `NXKIT_REC_LOCK` is set. Without it the host takes `rec_lock` of `game.json`.
+    pub rec_lock_set: bool,
     /// `NXKIT_QUEUE_ORDER` (on unless `0`): waits hold work.
     pub queue_order: bool,
     /// `NXKIT_RELEASE_FLUSH` (on unless `0`): the flush after a release.
@@ -28,6 +30,7 @@ impl RtSettings {
     pub fn from_env(env: &Env) -> Self {
         RtSettings {
             defer_recorded: env.var("NXKIT_REC_LOCK").is_ok_and(|v| v.trim() == "0"),
+            rec_lock_set: env.var("NXKIT_REC_LOCK").is_ok(),
             queue_order: env.var("NXKIT_QUEUE_ORDER").map_or(true, |v| v != "0"),
             release_flush: env.var("NXKIT_RELEASE_FLUSH").map_or(true, |v| v != "0"),
             release_flush_min: env
@@ -46,14 +49,14 @@ mod tests {
     #[test]
     fn the_keys_parse_as_the_reads_did() {
         let d = RtSettings::default();
-        assert!(!d.defer_recorded && d.queue_order && d.release_flush);
+        assert!(!d.defer_recorded && !d.rec_lock_set && d.queue_order && d.release_flush);
         assert_eq!(d.release_flush_min, 64);
         let s = RtSettings::from_env(&Env::from_pairs([
             ("NXKIT_REC_LOCK", " 0"),
             ("NXKIT_QUEUE_ORDER", "0"),
             ("NXKIT_RELEASE_FLUSH_MIN", "8"),
         ]));
-        assert!(s.defer_recorded && !s.queue_order && s.release_flush);
+        assert!(s.defer_recorded && s.rec_lock_set && !s.queue_order && s.release_flush);
         assert_eq!(s.release_flush_min, 8);
     }
 }

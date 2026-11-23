@@ -64,6 +64,10 @@ pub struct Settings {
     /// `overlap`: the CPU runs one frame ahead of the GPU. `nvnSyncWait` for the newest frame waits for the one
     /// before it (`docs/plans/fence-overlap.md`).
     pub overlap: bool,
+    /// `rec_lock`: the end of each recording takes the lock of the front end to invalidate its caches. `false` leaves
+    /// that to the next lock, so game threads that end recordings do not wait for a flush that holds the lock
+    /// (`NXKIT_REC_LOCK=0` does the same and wins).
+    pub rec_lock: bool,
     /// `pace_profile`: how the frame step decides the hold. `hold` (the default): a frame shown longer than its hold
     /// counts as late. `work`: only a frame's work judges it, hitches do not count and a trial waits at most 2 s, for a
     /// game whose frames wait for things a longer hold does not shorten (movies, its own loops). `steady`: `work`, and the
@@ -137,6 +141,7 @@ impl Settings {
         pso_mtl4: false,
         enc_thread: false,
         overlap: false,
+        rec_lock: true,
         pace_profile: "hold",
         screen_aspect: false,
         shared_font: None,

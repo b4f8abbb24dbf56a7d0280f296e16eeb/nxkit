@@ -141,6 +141,7 @@ fn settings(m: &Manifest) -> Value {
         ("pso_mtl4", flag(t.pso_mtl4)),
         ("enc_thread", flag(t.enc_thread)),
         ("overlap", flag(t.overlap)),
+        ("rec_lock", flag(t.rec_lock)),
         ("pace_profile", s(t.pace_profile)),
         ("screen_aspect", flag(t.screen_aspect)),
         ("pad_layout", s(t.pad_layout)),

@@ -140,8 +140,17 @@ fn temporal_upscale(t: &crate::tupscale::TemporalUpscale) -> nxkit_gpu::Temporal
 /// NVN2: 231 and the minor that the driver in its `sdk` answers, 39 when the `sdk` gives none. Games check it and make
 /// no graphics system on a mismatch. `nvn_api` of `game.json` wins over both.
 fn nvn_settings(settings: &Settings, run: &RunSettings, screen: &Arc<Screen>) -> nvn::Settings {
+    // `rec_lock` of `game.json` applies unless `NXKIT_REC_LOCK` is set.
+    let rt = nxkit_rt::settings::RtSettings {
+        defer_recorded: if run.rt.rec_lock_set {
+            run.rt.defer_recorded
+        } else {
+            !settings.rec_lock
+        },
+        ..run.rt
+    };
     let mut s = nvn::Settings {
-        env: run.rt,
+        env: rt,
         screen: screen.clone(),
         ..nvn::Settings::default()
     };

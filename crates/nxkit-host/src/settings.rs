@@ -27,6 +27,7 @@ const TYPED: &[&str] = &[
     "pso_mtl4",
     "enc_thread",
     "overlap",
+    "rec_lock",
     "pace_profile",
     "screen_aspect",
     "pad_layout",
@@ -88,6 +89,9 @@ pub struct Settings {
     pub enc_thread: bool,
     /// Whether the CPU runs one frame ahead of the GPU. Absent in an older `game.json`: off.
     pub overlap: bool,
+    /// Whether the end of each recording takes the lock of the front end (`rec_lock`). Absent in an older `game.json`:
+    /// on. `NXKIT_REC_LOCK` wins.
+    pub rec_lock: bool,
     /// The frame step's profile (`pace_profile`): `hold` (the default), `work` or `steady`. See `nxkit_svc_pacing::fstep`.
     pub pace_profile: String,
     /// Whether the screen keeps the aspect ratio of the game.
@@ -238,6 +242,7 @@ impl Settings {
             pso_mtl4: flag(v, "pso_mtl4")?,
             enc_thread: flag(v, "enc_thread")?,
             overlap: v.get("overlap").and_then(Value::as_bool).unwrap_or(false),
+            rec_lock: v.get("rec_lock").and_then(Value::as_bool).unwrap_or(true),
             pace_profile: match v.get("pace_profile").and_then(Value::as_str) {
                 None | Some("hold") => "hold".to_string(),
                 Some("work") => "work".to_string(),

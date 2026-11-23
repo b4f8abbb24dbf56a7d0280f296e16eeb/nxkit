@@ -989,6 +989,11 @@ ms without the lock against 39.9 and 40.2 ms with it. All of it was in the game'
 and the GPU clock stayed lower. The waits on the lock pace the recording workers. Without them, they compete with the
 game threads.
 
+With the overlap (not private mode) it is the other way round. In Ocarina of Time's Kokiri Forest (M2 Max, 2026-11-23,
+`pace_profile` `steady`), the overlap alone ran at 11 fps with frames of 250 ms and more, the lock off alone at 17 fps,
+and both together at 50 to 52 fps in six runs. The title module sets it with the `game.json` key `rec_lock` (`false`).
+`NXKIT_REC_LOCK` wins over the key.
+
 **Not done: the present without the front lock.** The encode of the frame needs the texture table (mutable: it applies
 what the GPU wrote) and the descriptors for its whole duration. So the lock cannot be given up before the encode without
 a snapshot of both. The encoder thread (`NXKIT_ENC_THREAD=1` or `enc_thread`) is that snapshot: with it the frame holds

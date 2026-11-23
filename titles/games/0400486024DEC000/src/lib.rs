@@ -13,7 +13,7 @@
 //! (`MATCH_FRAME_STEP`), for main build `e0f3ccfaf50065ae4ea01eb5aeb13b1a` only. The game steps its time by a frame
 //! ratio, so with the stub the host's frame step keeps game time equal to real time ([`Pacing::Display`]). The stub
 //! follows the host's step in both rates: the whole step in vsyncs of 1/60 s at a target of 60, and at 120 the time step
-//! (1/30 s units) as twice its value in vsyncs, so the ratio is half per 120 Hz tick. The settings say `fps_target 120`
+//! (1/30 s units) as twice its value in vsyncs, so the ratio is half per 120 Hz tick. The settings say `fps_target 60`
 //! and `fps_max 120`.
 //!
 //! The upscaler choice has no answer yet, so the core default applies. The seed list for the prepare step is
@@ -67,21 +67,28 @@ const SETTINGS: Fact<Settings> = Fact::new(
             map_limit: true,
             ..Settings::DEFAULT.memory
         },
-        fps_target: 120,
+        // 60 by default, 120 stays a choice of the launcher (`fps_max`). At 120 the host steps by time under variable
+        // refresh and nothing caps the frames: on a ProMotion screen the opening movie ran at about 230 fps and its sound
+        // drifted from the picture (measured on nxkit, 2026-11-22).
+        fps_target: 60,
         fps_max: 120,
         pad_layout: "full",
         render_cond: true,
         draw_barriers_game: true,
         tex_flush_upload: true,
         tex_dirty_upload: true,
-        // Measured on nxkit: with it on, `nvnSyncWait` for the newest frame waits only for the frame before, so the
-        // game's CPU writes for frame N+1 (the storage buffers of its GPU foliage culling, which the overlap does not
-        // copy) raced with frame N on the GPU and the foliage showed large white blotches. With it off, the picture is
-        // right. The cost is the opening movie, which was faster with it on (18-30 fps without).
-        overlap: false,
-        // Measured on nxkit: judged by how long frames were shown, the step went to 20 fps at a cost of 0.71 vsyncs
-        // (the movie player and an adaptive screen), and after a load hitch it stayed down for seconds.
-        pace_profile: "work",
+        // Measured on nxkit (M2 Max, Kokiri Forest autosave, 2026-11-23): without the overlap the CPU and the GPU wait for
+        // each other several times a frame, the GPU is busy a third of the time and macOS keeps it at its lowest clock:
+        // 17 fps. With the overlap, `rec_lock` off and `pace_profile` `steady` it ran at about 50 fps in two runs, with
+        // the GPU at 17 ms a frame. Each of the three alone stayed at 11 to 17 fps. An earlier run had large white
+        // blotches in the foliage with the overlap on (the game's CPU writes for frame N+1 to the storage buffers of its
+        // GPU foliage culling raced with frame N). Whether they are back is not checked: the picture was overexposed
+        // in every run of 2026-11-23, with and without the overlap.
+        overlap: true,
+        rec_lock: false,
+        // `steady`: the step stays at the target. With `work` a late frame raised the hold to 2 or 3 vsyncs, the GPU
+        // lowered its clock for the idle time, and the frames got so slow that the hold never came back (17 fps).
+        pace_profile: "steady",
         ..Settings::DEFAULT
     },
     GAME_TSV,
