@@ -4,6 +4,23 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- Ocarina of Time's foliage no longer flickers on and off from frame to frame. A range that the CPU and the GPU both
+  write while a frame runs (the renamer's merge class) wrote back only the GPU words its learning had seen; a culling
+  list whose length follows what is visible writes past them. Now every word the frame changed that is not the CPU's
+  goes back.
+- The first minute after a load is no longer white. A draw whose depth test is `equal` waits for its pipeline instead
+  of being left out while it compiles, so the depth prepass never stays without the colour drawn over it.
+- Ocarina of Time renders at a fixed 1536x864 by default (its resource patch `resolution-scale` at 0.75, the game's own
+  top level). Its dynamic resolution moved the render targets every few frames. `--resource-patch resolution-scale=stock`
+  keeps the game's dynamic resolution.
+
+### Added
+
+- `NXKIT_GPU_BUFFER=pools`: one Metal buffer per NVN memory pool instead of one over the whole guest range, so only
+  the pool pages are wired (Ocarina of Time: 5.3 instead of 12.6 GiB). The default stays `whole`.
+
 ## 0.16.3 - 2026-11-23
 
 ### Fixed
