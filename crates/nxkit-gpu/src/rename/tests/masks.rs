@@ -105,12 +105,47 @@ fn words_that_both_write_are_written_back_by_the_host_and_the_others_by_the_gpu(
 }
 
 #[test]
-fn a_merge_range_whose_masks_keep_growing_is_a_conflict_that_waits_in_full() {
+fn a_merge_range_whose_gpu_words_keep_growing_stays_a_merge_range() {
+    // The culling lists of Ocarina of Time: their length follows what is visible, so the GPU writes new words in later
+    // frames. `nxkit_merge_out` writes every changed word that is not the CPU's, so this needs no full wait.
     let g = Guest(RefCell::new(vec![0; 0x400]));
     let mut st = never_range();
     st.fast_only = true;
     let mut fence = 0;
-    // Each judged frame the GPU writes another word.
+    for k in 0..12u32 {
+        fence += LEARN_PERIOD;
+        run_to(&mut st, &g, fence - 1);
+        st.cands.get_mut(&SUM).unwrap().rest_until = 0;
+        judged_rw(&mut st, &g, fence, 1, 2 + k % 12, false);
+    }
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Merge);
+}
+
+#[test]
+fn a_merge_range_whose_shared_words_keep_growing_stays_a_merge_range() {
+    // The kernel at the end of the frame leaves the words that the CPU wrote in flight alone, so new shared words need
+    // no full wait.
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = never_range();
+    st.fast_only = true;
+    let mut fence = 0;
+    for k in 0..12u32 {
+        fence += LEARN_PERIOD;
+        run_to(&mut st, &g, fence - 1);
+        st.cands.get_mut(&SUM).unwrap().rest_until = 0;
+        judged_rw(&mut st, &g, fence, 2 + k % 12, 2 + k % 12, false);
+    }
+    assert_eq!(st.cands[&SUM].learn.class(), Class::Merge);
+}
+
+#[test]
+fn with_the_knob_a_merge_range_whose_shared_words_keep_growing_is_a_conflict_that_waits_in_full() {
+    let g = Guest(RefCell::new(vec![0; 0x400]));
+    let mut st = never_range();
+    st.fast_only = true;
+    st.grow_conflict = true;
+    let mut fence = 0;
+    // Each judged frame the CPU and the GPU both write another word.
     for k in 0..12u32 {
         if st.cands[&SUM].learn.class() == Class::Conflict {
             break;
@@ -118,7 +153,7 @@ fn a_merge_range_whose_masks_keep_growing_is_a_conflict_that_waits_in_full() {
         fence += LEARN_PERIOD;
         run_to(&mut st, &g, fence - 1);
         st.cands.get_mut(&SUM).unwrap().rest_until = 0;
-        judged_rw(&mut st, &g, fence, 1, 2 + k % 12, false);
+        judged_rw(&mut st, &g, fence, 2 + k % 12, 2 + k % 12, false);
     }
     assert_eq!(st.cands[&SUM].learn.class(), Class::Conflict);
     let f = st.flush(

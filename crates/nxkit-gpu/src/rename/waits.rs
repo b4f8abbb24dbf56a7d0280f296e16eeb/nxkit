@@ -66,8 +66,9 @@ impl State {
 
     /// A written range that the CPU writes in flight is a merge range (one class for all of them): the words that only
     /// the GPU writes (`P`) are merged on the GPU, the words that both write (`R`) are written back by the host in the
-    /// wait. A merge range whose masks keep growing after it was classified is not understood: `Conflict`, the wait for
-    /// its frame is a full one. What cannot be seen: an `R` word that the CPU writes in flight after the GPU wrote it in
+    /// wait. Masks that grow after the range was classified need nothing: the kernel at the end of the frame writes
+    /// every word the GPU changed except those that the CPU wrote in flight. With the knob `growconflict` a range whose
+    /// shared words keep growing is `Conflict` and the wait for its frame is a full one. What cannot be seen: an `R` word that the CPU writes in flight after the GPU wrote it in
     /// the same frame looks like one written before. Its GPU value is dropped, as for a word that the CPU
     /// re-initialises.
     fn classify(&mut self) {
@@ -81,7 +82,7 @@ impl State {
                 continue;
             }
             if c.learn.class() == Class::Merge {
-                if c.grown > MAX_GROWN {
+                if self.grow_conflict && c.grown > MAX_GROWN {
                     c.learn.set(Class::Conflict);
                     note_n(Reason::OverlapMergeConflict, 1);
                     news.push(*addr);
@@ -120,7 +121,12 @@ impl State {
             }
         }
         let n = cm.iter().map(|w| w.count_ones() as usize).sum::<usize>();
-        let grew = union_mask(&mut c.cmask, &cm) | union_mask(&mut c.gmask, &gm);
+        // Growth counts only words that both sides write. With the knob `growconflict` a merge range whose shared words
+        // keep growing becomes a conflict, as before the kernels left the CPU's words in flight alone.
+        let before = shared_words(&c.cmask, &c.gmask);
+        union_mask(&mut c.cmask, &cm);
+        union_mask(&mut c.gmask, &gm);
+        let grew = shared_words(&c.cmask, &c.gmask) > before;
         if grew && c.learn.class() == Class::Merge {
             c.grown += 1;
         }

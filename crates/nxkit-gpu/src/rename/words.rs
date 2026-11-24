@@ -174,6 +174,11 @@ pub(crate) fn union_mask(into: &mut Vec<u32>, add: &[u32]) -> bool {
     grew
 }
 
+/// The number of words that are in both masks.
+pub(crate) fn shared_words(a: &[u32], b: &[u32]) -> u32 {
+    a.iter().zip(b).map(|(x, y)| (x & y).count_ones()).sum()
+}
+
 pub(crate) fn is_empty_mask(a: &[u32]) -> bool {
     a.iter().all(|w| *w == 0)
 }

@@ -72,7 +72,7 @@ pub(crate) const SNAPSHOT_MAX_BYTES: u32 = 1 << 20;
 pub(crate) const SNAPSHOT_BUDGET: u64 = 8 << 20;
 /// The bytes that the judged ranges of one flush may read.
 const WATCH_BUDGET: u64 = 8 << 20;
-/// Judged frames in which the masks of a merge range may grow before it is given up.
+/// Judged frames in which the shared words of a merge range may grow before it is given up (knob `growconflict`).
 const MAX_GROWN: u32 = 3;
 /// Judged frames in which the CPU wrote a read-only range in flight before it becomes a snapshot.
 const SNAPSHOT_HITS: u32 = 1;
@@ -328,6 +328,8 @@ struct State {
     fast_only: bool,
     /// The knob `conflictwait`: a frame that binds a range that the CPU writes in flight waits in full.
     conflict_wait: bool,
+    /// The knob `growconflict`: a merge range whose words that both sides write keep growing becomes `Conflict`.
+    grow_conflict: bool,
     /// The knobs `waitnever` to `waitrename`, by bit.
     force: u8,
     /// `NXKIT_DIAG=rename`: ranges that are watched although they are not learned (`Never`, `Idle`, read-only).

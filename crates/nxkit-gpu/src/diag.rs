@@ -148,6 +148,9 @@ const KNOBS: &[&str] = &[
     // With the overlap on, a frame that binds a written range that the CPU also writes while the frame runs waits in full
     // (`rename`).
     "conflictwait",
+    // With the overlap on, a merge range whose words that both the CPU and the GPU write keep growing becomes `Conflict`
+    // and its frames wait in full, the behaviour before the merge kernels left the CPU's words in flight alone (`rename`).
+    "growconflict",
     // With the overlap on, a frame that binds a written storage range that is `Never`, `Idle` or undecided waits in full
     // (`rename`).
     "waitnever",

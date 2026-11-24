@@ -105,7 +105,14 @@ fn the_kernels_fill_the_copy_and_merge_the_gpu_words_back() {
     c2[2] = 4242;
     c2[5] = 9999;
     c2[33] = 7777;
+    // Words 7 and 35 (a word of `G`): the GPU changes them and the CPU writes them in flight, after the frame started.
+    c2[7] = 5555;
+    c2[35] = 6666;
     put(&slot, &c2);
+    let mut g2 = words(&guest, 40);
+    g2[7] = 4711;
+    g2[35] = 4712;
+    put(&guest, &g2);
     let mut frame = ring.begin().unwrap();
     encode(
         &pipelines,
@@ -127,6 +134,11 @@ fn the_kernels_fill_the_copy_and_merge_the_gpu_words_back() {
     assert_eq!(after[6], 106, "a word that the frame did not change stays");
     assert_eq!(after[1], 0xdead, "the CPU's word is not written by the GPU");
     assert_eq!(after[33], 0xbeef);
+    assert_eq!(
+        after[7], 4711,
+        "a word that the CPU wrote in flight keeps the CPU's value"
+    );
+    assert_eq!(after[35], 4712, "also a word of `G`");
 }
 
 /// A probe: the copy and the copy of the start state are filled from guest memory. At the end every word that differs

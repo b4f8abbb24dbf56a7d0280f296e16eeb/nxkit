@@ -75,9 +75,9 @@ struct Pending {
 /// How the GPU reaches guest memory.
 #[derive(Clone)]
 pub enum GuestBuffer {
-    /// One no-copy buffer over the whole guest range (`NXKIT_GPU_BUFFER=whole`, the default). The driver wires all of it.
+    /// One no-copy buffer over the whole guest range (`NXKIT_GPU_BUFFER=whole`). The driver wires all of it.
     Whole(Arc<GuestMemory>),
-    /// One buffer per NVN memory pool (`NXKIT_GPU_BUFFER=pools`). `space` is the CPU view of the guest range, and `pins`
+    /// One buffer per NVN memory pool (`NXKIT_GPU_BUFFER=pools`, the default). `space` is the CPU view of the guest range, and `pins`
     /// tells the kernel which pages lie under a buffer.
     Pools {
         /// The guest range, with no buffer.

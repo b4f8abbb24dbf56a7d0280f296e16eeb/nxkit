@@ -4,6 +4,22 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- Ocarina of Time no longer falls to 14 fps after half a minute in the Kokiri Forest. The renamer gave up merge ranges
+  whose words that both the CPU and the GPU write kept growing (`Conflict`), and every frame that bound one waited for
+  the GPU in full. The game resets words that its GPU culling wrote, in ranges a ring hands out again and again, so
+  after about 35 s most frames waited: the GPU idled a third of the time, and macOS lowered its clock to the lowest
+  step (444 instead of 1398 MHz), which made every pass three times slower. The merge kernels at the end of a frame
+  now leave alone every word that the CPU wrote while the frame ran (the CPU's value wins, as on the console, where the
+  game writes after it waited), so growing masks need no full wait. The knob `growconflict` brings the old rule back.
+
+### Changed
+
+- One Metal buffer per NVN memory pool is the default (`NXKIT_GPU_BUFFER=whole` gives the single buffer). On a Mac with
+  32 GiB the whole buffer wired 12.6 GiB for Ocarina of Time, left about 1 GiB free, and the frames went between 12 and
+  47 fps while macOS compressed GPU memory.
+
 ## 0.16.4 - 2026-11-23
 
 ### Fixed

@@ -42,6 +42,7 @@ impl Renamer {
         }
         st.watch = crate::diag("rename");
         st.conflict_wait = crate::knob("conflictwait");
+        st.grow_conflict = crate::knob("growconflict");
         st.force = force & 0b11111;
         let read = self.reader();
         let f = st.flush(

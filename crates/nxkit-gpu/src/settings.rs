@@ -226,8 +226,8 @@ pub struct GpuEnv {
     pub copyback_max_mb: u64,
     /// `NXKIT_PRIVATE` as given (`track`, `1`). The mode is read from it in `private`.
     pub private: Option<String>,
-    /// `NXKIT_GPU_BUFFER=pools`: one no-copy Metal buffer per NVN memory pool instead of one buffer over the whole guest
-    /// range (`whole`, the default). Only the pool pages are wired (`docs/plans/gpu-buffer-per-pool.md`).
+    /// `NXKIT_GPU_BUFFER`: one no-copy Metal buffer per NVN memory pool (`pools`, the default) or one buffer over the whole
+    /// guest range (`whole`). Only the pool pages are wired (`docs/plans/gpu-buffer-per-pool.md`).
     pub gpu_buffer_pools: bool,
     /// `NXKIT_PRIVATE_AHEAD` (1): the frames the mirror may run ahead.
     pub private_ahead: u64,
@@ -318,9 +318,9 @@ impl GpuEnv {
                 .and_then(|v| v.trim().parse().ok())
                 .unwrap_or(128),
             private: env.var("NXKIT_PRIVATE").ok(),
-            gpu_buffer_pools: env
+            gpu_buffer_pools: !env
                 .var("NXKIT_GPU_BUFFER")
-                .is_ok_and(|v| v.trim() == "pools"),
+                .is_ok_and(|v| v.trim() == "whole"),
             private_ahead: env
                 .var("NXKIT_PRIVATE_AHEAD")
                 .ok()

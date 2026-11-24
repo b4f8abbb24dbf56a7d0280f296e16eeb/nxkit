@@ -8,10 +8,15 @@
 //!   hold what the frame before wrote (`nxkit_merge_out` ran at its end), so the state of the GPU carries over.
 //! - `nxkit_merge_out` runs on the GPU after the last pass of the frame. It writes the words of `G` and every other word
 //!   that the frame changed (it differs from the second copy that `nxkit_merge_in` keeps of the start) and that is not a
-//!   word of `C` into the guest range. The CPU never writes those words and the GPU never writes the words of `C` into the guest, so neither
-//!   side overwrites the other. The words of `G` that the learning saw are not enough: a culling list whose length
-//!   follows what is visible writes words past them in a later frame, and those writes were lost (the foliage of
+//!   word of `C` into the guest range. The words of `G` that the learning saw are not enough: a culling list whose
+//!   length follows what is visible writes words past them in a later frame, and those writes were lost (the foliage of
 //!   Ocarina of Time went on and off from frame to frame).
+//! - A word whose guest value is not the start value any more was written by the CPU while the frame ran, also when
+//!   the learning has not seen the CPU write it yet. Neither kernel at the end of a frame writes it: on the console the
+//!   game writes it after it waited for the frame, so the CPU's value wins. Ocarina of Time resets words that its GPU
+//!   culling wrote in the same frame, in ranges that a ring hands out again and again, so the words that both write
+//!   kept growing; with them the ranges became `Conflict`, every frame waited in full and the GPU clock fell to its
+//!   lowest step (14 fps).
 //!
 //! Both kernels run as passes of their own with a barrier from all earlier work and one for all later work, so the order
 //! of the frames on the queue is the order of the state.
@@ -56,11 +61,14 @@ kernel void nxkit_merge_in(device const merge_job *jp [[buffer(0)]], uint t [[th
     // A probe keeps a second copy of the state at the start of the frame.
     if (j.copy2 != nullptr) j.copy2[t] = v;
 }
+// A word that the guest no longer holds as the frame started was written by the CPU while the frame ran. On the console
+// the game writes it after it waited for the frame, so the CPU's value wins and the GPU's is not written back.
 kernel void nxkit_probe_out(device const merge_job *jp [[buffer(0)]], uint t [[thread_position_in_grid]]) {
     merge_job j = jp[0];
     if (t >= j.words) return;
     uint v = j.slot[t];
-    if (v != j.copy2[t]) j.guest[t] = v;
+    uint s = j.copy2[t];
+    if (v != s && j.guest[t] == s) j.guest[t] = v;
 }
 kernel void nxkit_merge_out(device const merge_job *jp [[buffer(0)]], uint t [[thread_position_in_grid]]) {
     merge_job j = jp[0];
@@ -68,7 +76,9 @@ kernel void nxkit_merge_out(device const merge_job *jp [[buffer(0)]], uint t [[t
     bool c = ((j.cmask[t >> 5] >> (t & 31u)) & 1u) != 0u;
     bool g = ((j.gmask[t >> 5] >> (t & 31u)) & 1u) != 0u;
     uint v = j.slot[t];
-    if (g || (!c && v != j.copy2[t])) j.guest[t] = v;
+    uint s = j.copy2[t];
+    if (c || j.guest[t] != s) return;
+    if (g || v != s) j.guest[t] = v;
 }
 "#;
 
