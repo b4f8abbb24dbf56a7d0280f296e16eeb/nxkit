@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.16.5 - 2026-11-24
+
 ### Fixed
 
 - Ocarina of Time no longer falls to 14 fps after half a minute in the Kokiri Forest. The renamer gave up merge ranges
