@@ -238,6 +238,12 @@ pub trait Backend: Send + Sync {
     /// Waits until the GPU has finished everything that was flushed (`nvnQueueFinish`).
     fn wait_idle(&self);
 
+    /// Drains flushed work and presentation commands after the host stopped display ticks.
+    /// The caller prevents new front-end work until reactivation. The default waits for flushed work.
+    fn suspend(&self) {
+        self.wait_idle();
+    }
+
     /// The game gave a program its stages (`nvnProgramSetShaders`). `program` is the guest address of the `NVNprogram`.
     /// The backend may start to load the Metal functions of the keys. A later call for the same program replaces the
     /// earlier one. The default does nothing.

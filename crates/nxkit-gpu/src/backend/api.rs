@@ -282,6 +282,24 @@ impl Backend for GpuBackend {
         self.drain(Some(self.encoded.load(Ordering::Acquire)));
     }
 
+    fn suspend(&self) {
+        // A late Present message can arrive after the front lock is released. Retire its parked
+        // drawable before draining so it can only queue a frame, not submit another display blit.
+        if let Some(pacer) = self.pacer.get() {
+            pacer.discard_parked_tick();
+        }
+        if let Some(enc) = &self.enc {
+            enc.wait_idle();
+        }
+        // Suspension is not a guest CPU wait. Do not write renamed storage into the next frame.
+        self.drain(None);
+        if let Some(blit) = locked(&self.blit).as_ref()
+            && let Err(error) = blit.wait_idle()
+        {
+            eprintln!("nxkit-gpu: waiting for the display blit: {error}");
+        }
+    }
+
     fn program_set(&self, program: u64, stages: &[StageKey]) {
         locked(&self.walker).program_set(program, stages);
     }

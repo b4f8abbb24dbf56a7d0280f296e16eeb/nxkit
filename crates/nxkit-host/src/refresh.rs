@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use nxkit_nvn::screen::Screen;
 
-use nxkit_metal::{RateRange, display};
+use nxkit_metal::RateRange;
+#[cfg(target_os = "macos")]
+use nxkit_metal::display;
 use nxkit_svc_pacing::refresh::{self, TickPlan};
 
 use crate::settings::Settings;
@@ -134,6 +136,7 @@ struct State {
     plan: Option<TickPlan>,
     announced: String,
     /// The display ids that a switch was tried for with this rate, so that a failed switch does not repeat.
+    #[cfg(target_os = "macos")]
     tried: Vec<(u32, u32)>,
     /// The measured rates already reported, rounded to Hz.
     reported: u32,
@@ -163,6 +166,7 @@ impl Refresh {
                 presentation: Presentation::Grid,
                 plan: None,
                 announced: String::new(),
+                #[cfg(target_os = "macos")]
                 tried: Vec::new(),
                 reported: 0,
             }),
@@ -219,6 +223,7 @@ impl Refresh {
 
 /// The refresh rate of the current mode of the screen, and where it came from.
 fn refresh_of(facts: &ScreenFacts) -> (f64, &'static str) {
+    #[cfg(target_os = "macos")]
     if let Some(hz) = facts.display.and_then(display::current_refresh_hz) {
         return (hz, "CoreGraphics mode");
     }
@@ -238,7 +243,9 @@ impl Refresh {
     pub fn apply(&self, facts: &ScreenFacts) -> TickPlan {
         let mut st = self.state();
         let req = st.request;
+        #[cfg(target_os = "macos")]
         let mut note = String::new();
+        #[cfg(target_os = "macos")]
         if let (Some(want), Some(id)) = (req.set_refresh, facts.display)
             && !facts.adaptive
             && !st.tried.contains(&(id, want))
@@ -308,7 +315,9 @@ impl Refresh {
         let timed = req.timed.unwrap_or(false) && vrr.is_none();
         self.timed
             .set(timed.then(|| 1.0 / f64::from(plan.fps.max(1))));
+        #[cfg(target_os = "macos")]
         let mut hint = String::new();
+        #[cfg(target_os = "macos")]
         if !plan.exact {
             let choices = facts
                 .display
@@ -324,6 +333,8 @@ impl Refresh {
                 );
             }
         }
+        #[cfg(target_os = "ios")]
+        let (note, hint) = ("", "");
         let line = format!(
             "nxkit-host: screen \"{}\" refresh {hz:.2} Hz ({source}{}), link {} Hz, {} tick{} per {} fps frame{}{}{}{}{note}{hint}",
             facts.name,

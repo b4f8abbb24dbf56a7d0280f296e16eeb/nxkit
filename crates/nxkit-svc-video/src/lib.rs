@@ -23,9 +23,9 @@ pub mod settings;
 mod vp9;
 mod yuv;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 mod sys;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod texture;
 
 use std::sync::{Arc, RwLock};

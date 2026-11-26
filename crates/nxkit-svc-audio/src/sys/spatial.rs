@@ -12,6 +12,7 @@ use objc2_audio_toolbox::{
     AudioComponentInstanceDispose, AudioUnitInitialize, AudioUnitRenderActionFlags,
     AudioUnitSetProperty,
 };
+#[cfg(target_os = "macos")]
 use objc2_core_audio::{AudioObjectGetPropertyData, AudioObjectPropertyAddress};
 use objc2_core_audio_types::{
     AudioBuffer, AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp,
@@ -70,6 +71,7 @@ fn check(what: &str, status: i32) -> Result<(), String> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn device_u32(device: u32, selector: u32, scope: u32) -> Option<u32> {
     let addr = AudioObjectPropertyAddress {
         mSelector: selector,
@@ -93,6 +95,7 @@ fn device_u32(device: u32, selector: u32, scope: u32) -> Option<u32> {
 
 /// The output type of the device for the spatial mixer, or `None` for hardware that it does not render for (HDMI, USB,
 /// AirPlay): those get the SDK's stereo downmix.
+#[cfg(target_os = "macos")]
 pub fn output_type(device: u32) -> Option<u32> {
     // `kAudioDevicePropertyTransportType`, `kAudioDevicePropertyDataSource`, the global and the output scope.
     let transport = device_u32(device, 0x7472_616e, 0x676c_6f62)?;

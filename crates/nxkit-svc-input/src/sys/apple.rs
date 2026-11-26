@@ -11,6 +11,7 @@ use objc2::rc::Retained;
 use objc2_game_controller::*;
 
 use super::haptics::{self, Haptics};
+#[cfg(target_os = "macos")]
 use super::hid_rumble::HidRumble;
 use crate::config::Config;
 use crate::keys::KeySet;
@@ -29,6 +30,7 @@ unsafe extern "C" {
 }
 
 /// The product category of the controller that gets HD Rumble.
+#[cfg(target_os = "macos")]
 const PRO_CONTROLLER: &str = "Switch Pro Controller";
 
 /// A connected controller that has an extended gamepad profile.
@@ -40,6 +42,7 @@ struct Pad {
     labelled: bool,
     haptics: Haptics,
     /// HD Rumble in place of `haptics`, for a Switch Pro Controller.
+    #[cfg(target_os = "macos")]
     hd: Option<HidRumble>,
 }
 
@@ -48,6 +51,7 @@ pub(crate) struct Platform {
     pads: [Option<Pad>; PLAYERS],
     motion: bool,
     rumble: bool,
+    #[cfg(target_os = "macos")]
     hd_rumble: bool,
     keyboard: bool,
     /// A new controller waits for its first button press, then takes the lowest free slot.
@@ -171,10 +175,11 @@ impl Platform {
             pads: std::array::from_fn(|_| None),
             motion: config.motion,
             rumble: config.rumble,
+            #[cfg(target_os = "macos")]
             hd_rumble: config.hd_rumble,
-            keyboard: config.keyboard,
+            keyboard: cfg!(target_os = "macos") && config.keyboard,
             press_to_join: config.press_to_join(),
-            keys: if config.keyboard {
+            keys: if cfg!(target_os = "macos") && config.keyboard {
                 key_table()
             } else {
                 Vec::new()
@@ -222,6 +227,7 @@ impl Platform {
                 motion: self.attach_motion(&controller),
                 labelled: is_labelled(&category),
                 haptics: Haptics::default(),
+                #[cfg(target_os = "macos")]
                 hd: self.open_hd(&category),
                 controller,
                 gamepad,
@@ -230,6 +236,7 @@ impl Platform {
     }
 
     /// HD Rumble for a new controller: only a Switch Pro Controller, and only one, gets it. Logs the outcome.
+    #[cfg(target_os = "macos")]
     fn open_hd(&self, category: &str) -> Option<HidRumble> {
         if !(self.rumble && self.hd_rumble && category == PRO_CONTROLLER)
             || self.pads.iter().flatten().any(|p| p.hd.is_some())
@@ -411,6 +418,7 @@ impl Platform {
         let Some(Some(pad)) = self.pads.get_mut(slot) else {
             return;
         };
+        #[cfg(target_os = "macos")]
         if let Some(hd) = &pad.hd {
             if !hd.failed() {
                 hd.send(rumble.bands);
@@ -437,10 +445,13 @@ impl Platform {
                 pad.controller.productCategory().to_string(),
             )
         };
+        #[cfg(target_os = "macos")]
         let how = match &pad.hd {
             Some(hd) => format!("HD Rumble over {:?}", hd.link()),
             None => haptics::describe(&haptics::localities(&pad.controller)),
         };
+        #[cfg(target_os = "ios")]
+        let how = haptics::describe(&haptics::localities(&pad.controller));
         Some(format!("{name} ({category}): {how}"))
     }
 

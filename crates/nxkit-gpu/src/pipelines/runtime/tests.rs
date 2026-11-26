@@ -151,6 +151,13 @@ fn the_after_hook_runs_before_the_marker() {
         })),
         None,
     );
+    // iOS returns while the existing prewarm workers finish.
+    if cfg!(target_os = "ios") {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
     assert_eq!(flag.load(Ordering::SeqCst), 1);
     assert!(marker.is_file());
     std::fs::remove_dir_all(&d).unwrap();

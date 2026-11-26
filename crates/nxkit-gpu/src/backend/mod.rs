@@ -117,6 +117,9 @@ pub struct GpuBackend {
     /// The storage ranges that the overlap renames per frame: learned and captured at the flush, written back in a CPU
     /// wait (`rename`). The encoder owns the same object.
     rename: Arc<crate::rename::Renamer>,
+    /// Counts CPU-wait callbacks, not completed GPU work or actual renamed writes.
+    #[cfg(test)]
+    renamed_wait_calls: AtomicU64,
     scale: f32,
     /// The last fence whose frame was encoded.
     encoded: AtomicU64,
@@ -248,6 +251,8 @@ impl GpuBackend {
                 diag: presdiag::PresentDiag::default(),
                 rename,
                 screen: settings.screen.clone(),
+                #[cfg(test)]
+                renamed_wait_calls: AtomicU64::new(0),
                 scale: settings.scale,
                 encoded: AtomicU64::new(0),
                 done: AtomicU64::new(0),
@@ -321,6 +326,8 @@ impl GpuBackend {
     /// The CPU waited for fence `waited` and the GPU is done with it: the renamed ranges of the frames up to it go back
     /// into guest memory, and the ranges that are judged read their bytes after the frame.
     fn renamed_wait(&self, waited: u64, who: std::fmt::Arguments<'_>) {
+        #[cfg(test)]
+        self.renamed_wait_calls.fetch_add(1, Ordering::Relaxed);
         if !crate::overlap::on(self.game_overlap) {
             return;
         }

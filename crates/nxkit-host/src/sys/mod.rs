@@ -3,31 +3,51 @@
 //! The rest of the host sees safe types. A [`Reservation`] checks every address against its own range before it
 //! touches memory.
 
+#[cfg(target_os = "macos")]
 pub mod allocspy;
+#[cfg(target_os = "macos")]
 pub mod appkit;
 pub mod crashsig;
 mod dylib;
 pub mod exitflush;
+#[cfg(target_os = "macos")]
 mod font;
+#[cfg(target_os = "macos")]
 mod fullscreen;
+#[cfg(target_os = "macos")]
 pub mod homepreview;
+#[cfg(target_os = "macos")]
 mod homeui;
+#[cfg(target_os = "macos")]
 mod homeviews;
+#[cfg(target_os = "macos")]
 pub(crate) mod hud;
 mod kernel;
+#[cfg(target_os = "macos")]
 mod keyboardviews;
+#[cfg(target_os = "macos")]
 pub mod loading;
 pub mod logpipe;
+#[cfg(target_os = "macos")]
 mod look;
+#[cfg(target_os = "macos")]
 mod mouse;
+#[cfg(target_os = "macos")]
 mod notify;
 pub mod paging;
+#[cfg(target_os = "macos")]
 pub mod patchlib;
+#[cfg(target_os = "macos")]
 mod pointer;
+#[cfg(target_os = "macos")]
 mod prefs;
+#[cfg(target_os = "macos")]
 mod present;
+#[cfg(target_os = "macos")]
 mod screen;
+#[cfg(target_os = "macos")]
 mod stophooks;
+#[cfg(target_os = "macos")]
 mod textinputui;
 pub mod vm;
 
@@ -36,6 +56,7 @@ pub use kernel::*;
 
 /// Adds the saved choices of the player from the preferences of the app to `env` (`hostenv::with_saved`) and logs
 /// them. A run outside an app bundle has none.
+#[cfg(target_os = "macos")]
 pub fn saved_choices(env: &mut nxkit_abi::env::Env) {
     let Some(prefs) = prefs::Prefs::of_app() else {
         return;
@@ -46,6 +67,7 @@ pub fn saved_choices(env: &mut nxkit_abi::env::Env) {
 }
 
 /// The game's picture shows something: an overlay window may show (`present.rs`). Any thread.
+#[cfg(target_os = "macos")]
 pub fn present_picture_done() {
     present::picture_done();
 }
@@ -359,6 +381,36 @@ pub fn add_file_signature(file: &File, blob_off: u64, blob_size: u64) -> Result<
     Ok(())
 }
 
+#[cfg(target_os = "ios")]
+pub(crate) fn adopt_dyld_tail(start: u64, tail: u64, end: u64) -> Result<Reservation> {
+    if start > tail
+        || tail >= end
+        || !tail.is_multiple_of(crate::layout::PAGE)
+        || !end.is_multiple_of(crate::layout::PAGE)
+    {
+        return Err(HostError::Memory("invalid dyld guest reservation".into()));
+    }
+    let mut at = tail;
+    while at < end {
+        let r = nxkit_metal::vm_region(at)
+            .ok_or_else(|| HostError::Memory("missing guest memory".into()))?;
+        let stop = r
+            .start
+            .checked_add(r.size)
+            .ok_or_else(|| HostError::Memory("guest region overflow".into()))?;
+        if r.start > at || stop <= at || r.protection != 3 || r.external_pager {
+            return Err(HostError::Memory(
+                "guest tail is not anonymous read/write memory".into(),
+            ));
+        }
+        at = stop.min(end);
+    }
+    Ok(Reservation {
+        base: start,
+        len: end - start,
+    })
+}
+
 /// Reserves `[tail_start, end)` as address space (read and write, no commit), behind an image that dyld mapped, and returns a view
 /// over `[view_start, end)`. The part `[view_start, tail_start)` is what dyld mapped. The view lets the host protect
 /// and fill those pages. The call fails when the tail is not free.
@@ -590,3 +642,6 @@ mod aligned_tests {
         assert!(reserve_aligned(0x70_0000_0000, 0x400_0000, 0x20_0000, 0, 0x1000).is_err());
     }
 }
+
+#[cfg(target_os = "ios")]
+pub(crate) mod ios;

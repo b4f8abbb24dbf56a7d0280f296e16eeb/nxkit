@@ -24,8 +24,10 @@ objc2-audio-toolbox = { workspace = true, features = [
     "AUComponent",
     "AudioOutputUnit",
 ] }
-objc2-core-audio = { workspace = true, features = ["std", "objc2", "objc2-core-audio-types", "AudioHardware"] }
 objc2-core-audio-types = { workspace = true, features = ["std", "objc2", "CoreAudioBaseTypes"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-audio = { workspace = true, features = ["std", "objc2", "objc2-core-audio-types", "AudioHardware"] }
 
 # Not `workspace = true`: `unsafe` is denied for the crate and allowed in one module, `sys`, which holds the macOS FFI and the
 # lock-free queues.

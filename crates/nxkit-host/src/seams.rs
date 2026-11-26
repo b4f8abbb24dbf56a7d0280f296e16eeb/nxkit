@@ -19,6 +19,7 @@ use crate::error::{HostError, Result};
 use crate::manifest::{self, Game, Import};
 use crate::refresh::Refresh;
 use crate::settings::Settings;
+#[cfg(target_os = "macos")]
 use crate::sys::appkit::{MouseEvent, MouseMode};
 use crate::{guestsym, saveplace, wire};
 
@@ -388,6 +389,9 @@ pub fn init_services(
             aoc: aoc_root(game),
             separate_device_save: separate_device_save(game)?,
             user_of: system.then_some(nxkit_svc_system::user_of as nxkit_svc_fs::UserOf),
+            #[cfg(target_os = "ios")]
+            hooks: None,
+            #[cfg(target_os = "macos")]
             hooks: Some(crate::savesync::start(crate::savesync::config(
                 &places.save,
                 title_id(game)?,
@@ -459,7 +463,7 @@ pub fn init_services(
 /// on the console a focus loss means the HOME menu, and games pause for it, but on a Mac clicking another window is no
 /// reason to stop the game. `NXKIT_PAUSE_UNFOCUSED=1` reports the loss to the game as before.
 pub fn focus_changed(focused: bool) {
-    let pause = crate::hostenv::host().pause_unfocused;
+    let pause = cfg!(target_os = "ios") || crate::hostenv::host().pause_unfocused;
     if pause || focused {
         let focus = if focused {
             nxkit_svc_system::Focus::InFocus
@@ -504,6 +508,7 @@ pub fn game_focus(focus: crate::home::GameFocus) {
 }
 
 /// The held mouse did something. The input service turns it into the camera stick and the mouse bindings.
+#[cfg(target_os = "macos")]
 pub fn mouse(event: MouseEvent) {
     match event {
         MouseEvent::Moved { dx, dy } => nxkit_svc_input::mouse_moved(dx, dy),
@@ -515,6 +520,7 @@ pub fn mouse(event: MouseEvent) {
 
 /// When the window holds the mouse: never when the input files turn the mouse off, on a click while a controller is
 /// connected, else whenever the window has the focus (R63).
+#[cfg(target_os = "macos")]
 pub fn mouse_mode() -> MouseMode {
     if !nxkit_svc_input::mouse_capture() {
         MouseMode::Off
@@ -544,6 +550,7 @@ pub fn frame_hooks(
 
 /// The hooks of the display link for a game on Vulkan: the backend of `nxkit-vk-gpu` behind the Vulkan front end of
 /// `nxkit-rt`, with the same pacer. The work is in `frames.rs`.
+#[cfg(target_os = "macos")]
 pub fn vulkan_frame_hooks(
     ctx: &Context,
     root: &std::path::Path,

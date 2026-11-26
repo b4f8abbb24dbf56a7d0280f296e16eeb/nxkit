@@ -344,26 +344,26 @@ pub struct RunSettings {
     /// The Unreal take-overs.
     pub ue: nxkit_ue::settings::UeSettings,
     /// The encoder.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub gpu: nxkit_gpu::GpuEnv,
     /// `NXKIT_PIPELINE_BASES` (read by `nxkit-gpu`), for `GpuSettings`.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub gpu_bases: bool,
     /// `NXKIT_PIPELINE_SPECIALIZE` (read by `nxkit-gpu`), for `GpuSettings`.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub gpu_specialize: bool,
     /// The meeting point of the control socket and the encoder for the shader hot swap (W37).
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub shader_hub: nxkit_gpu::ShaderHub,
 }
 
 impl RunSettings {
     /// Every crate's settings from the one snapshot.
     pub fn from_env(env: &Env) -> Self {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         let gpu = nxkit_gpu::GpuEnv::from_env(env);
         RunSettings {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             shader_hub: nxkit_gpu::ShaderHub::new(gpu.diag_dir.join("shaders")),
             host: HostEnv::from_env(env),
             nvn: nxkit_nvn::settings::NvnSettings::from_env(env),
@@ -372,11 +372,11 @@ impl RunSettings {
             video: nxkit_svc_video::settings::VideoSettings::from_env(env),
             input: nxkit_svc_input::settings::InputSettings::from_env(env),
             ue: nxkit_ue::settings::UeSettings::from_env(env),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             gpu,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             gpu_bases: nxkit_gpu::pipeline_bases(env),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             gpu_specialize: nxkit_gpu::pipeline_specialize(env),
         }
     }
@@ -389,7 +389,7 @@ impl RunSettings {
         nxkit_svc_audio::settings::install(self.audio.clone())?;
         nxkit_svc_video::settings::install(self.video.clone())?;
         nxkit_svc_input::settings::install(self.input.clone())?;
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         nxkit_gpu::install_env(self.gpu.clone())?;
         Ok(())
     }

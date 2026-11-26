@@ -81,7 +81,10 @@ pub fn gpu_settings(
         compile_bases: run.gpu_bases,
         specialize: run.gpu_specialize,
         // The encoder makes the pipelines of the recorded list before it returns. A long wait shows a loading screen.
+        #[cfg(target_os = "macos")]
         prewarm_screen: nxkit_gpu::ScreenHook(Some(Arc::new(crate::sys::loading::LoadingScreen))),
+        #[cfg(target_os = "ios")]
+        prewarm_screen: nxkit_gpu::ScreenHook(None),
         // The `frame` and `gateseq` traces of `nxkit-rt` time the batches of the encoder.
         batch_hooks: nxkit_rt::nvn::batch_hooks(),
         screen: screen.clone(),
@@ -239,11 +242,13 @@ pub(crate) fn shown_to_step(_present: u64, secs: f64) {
 }
 
 /// [`shown_to_step`] on the clock of the Vulkan layer.
+#[cfg(target_os = "macos")]
 fn shown_to_step_vk(_present: u64, secs: f64) {
     shown_on(nxkit_rt::vk::clock_ns(), secs);
 }
 
 fn shown_on(now_ns: u64, secs: f64) {
+    #[cfg(target_os = "macos")]
     crate::stall::shown(now_ns);
     let ago_ns = ((nxkit_metal::media_time() - secs).max(0.0) * 1e9) as u64;
     nxkit_svc_pacing::frame_shown(now_ns.saturating_sub(ago_ns));
@@ -280,6 +285,7 @@ pub fn install(
 }
 
 /// The surface the Vulkan game sees: 1920x1080 docked, 1280x720 handheld (`op_mode`).
+#[cfg(target_os = "macos")]
 fn surface_extent(settings: &Settings) -> (u32, u32) {
     if settings.op_mode == "handheld" {
         (1280, 720)
@@ -290,6 +296,7 @@ fn surface_extent(settings: &Settings) -> (u32, u32) {
 
 /// Makes the Vulkan backend, installs it in the Vulkan front end and returns the hooks for the display link. Runs on the
 /// loader thread before the game threads start, as the big-stack stubs need.
+#[cfg(target_os = "macos")]
 pub fn install_vulkan(
     ctx: &Context,
     root: &Path,

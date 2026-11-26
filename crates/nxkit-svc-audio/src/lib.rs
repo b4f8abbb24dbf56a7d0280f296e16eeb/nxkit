@@ -100,3 +100,9 @@ pub fn services() -> Vec<Named> {
         },
     ]
 }
+
+/// Start or pause the iOS output after the shell updates AVAudioSession.
+#[cfg(target_os = "ios")]
+pub fn set_active(active: bool) -> Result<(), String> {
+    sys::au::set_active(active)
+}

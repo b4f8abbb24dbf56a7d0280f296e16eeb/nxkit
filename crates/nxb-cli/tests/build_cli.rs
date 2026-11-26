@@ -82,13 +82,19 @@ fn exit_codes_by_class() {
     for gone in ["--engine", "--shaders", "--program", "--dump", "--romfs"] {
         assert_eq!(build(&[p, gone, "x"]).0, Some(2), "{gone}");
     }
-    // a game without a title module takes the generic path (issue #54): like a game with one, it needs keys, 2
+    // A game without a title module must opt in before the generic build asks for keys.
     let other = "0100000000000000";
     // an empty PFS0 (no files): a package for the folder scan, no content
     let mut pfs0 = vec![0u8; 0x200];
     pfs0[..4].copy_from_slice(b"PFS0");
     std::fs::write(d.join(format!("Game [{other}][v0].nsp")), &pfs0).unwrap();
-    assert_eq!(build(&[p, "--progress", "json"]).0, Some(2));
+    let (code, out, _) = build(&[p, "--progress", "json"]);
+    assert_eq!(code, Some(1));
+    assert!(last_msg(&out).contains("use --auto-analyze"), "{out}");
+    assert_eq!(
+        build(&[p, "--auto-analyze", "--progress", "json"]).0,
+        Some(2)
+    );
     std::fs::remove_file(d.join(format!("Game [{other}][v0].nsp"))).unwrap();
     // a package of a game with a title module, no keys: 2 without -k, 6 with a missing keys file
     let t = "01007EF00011E000";

@@ -68,6 +68,7 @@ impl Presenter {
     }
 
     /// Turns the display sync of the layer on or off.
+    #[cfg(target_os = "macos")]
     pub fn set_display_sync(&self, on: bool) {
         self.layer.setDisplaySyncEnabled(on);
     }

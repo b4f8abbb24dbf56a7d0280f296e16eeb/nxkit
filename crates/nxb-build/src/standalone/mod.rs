@@ -231,20 +231,17 @@ fn describe(t: &Game, b: &Build, host: &Path, out: &Path) -> String {
     s
 }
 
-/// Builds the app of a title that has a title module. A game without one takes the generic path (`--auto-analyze`).
+/// Builds the app of a title that has a title module. A game without one needs `--auto-analyze`.
 pub(crate) fn run(a: &Args, p: &Say) -> Result<(), String> {
     if a.auto_analyze {
         return generic::run(a, p);
     }
     let src = crate::inputs::discover(a)?;
     let Some(t) = module(&src)? else {
-        // A game without a title module takes the generic path of `--auto-analyze`: the values come from the game's
-        // own files, with no title patches. The build says so, because the game can fail to run.
-        p.say(&format!(
-            "the game {:016X} has no title module: building it with values read from its files and without title patches. It is not verified and can fail to run",
+        return Err(format!(
+            "the game {:016X} has no title module; use --auto-analyze to build it",
             src.app
         ));
-        return generic::run(a, p);
     };
     let version = t.st.version;
     let updates = version::updates_for(t.name, version, src.has_base, &src.updates)?;

@@ -4,19 +4,19 @@
 //! `Platform` has the same methods on every OS. Off macOS it has no controller, so the service builds and its
 //! logic is tested there. Every `unsafe` block of the crate is in `apple`, `haptics` and `hid_rumble`.
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[allow(unsafe_code)]
 mod apple;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[allow(unsafe_code)]
 mod haptics;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 mod hid_rumble;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) use apple::Platform;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 mod stub;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub(crate) use stub::Platform;

@@ -126,6 +126,13 @@ impl Pacer {
         self.immediate.load(Ordering::Acquire)
     }
 
+    /// Releases the parked drawable after the host stops display ticks. Waits for an immediate
+    /// presentation already in progress. Later ready frames stay queued until ticks resume.
+    pub fn discard_parked_tick(&self) {
+        let _order = lock(&self.order);
+        *lock(&self.parked) = None;
+    }
+
     /// The frames that the immediate mode dropped in favour of a newer one.
     pub fn superseded(&self) -> u64 {
         self.superseded.load(Ordering::Relaxed)
@@ -442,12 +449,25 @@ mod tests {
             lock(&sink.0)[1],
             (TickAction::Present(Shown::Game { frame: 3 }), true)
         );
+        // Suspending after a tick parked must not let a late ready frame present in the background.
+        let Ok(t) = tick(&presenter) else { return };
+        pacer.display_tick(t);
+        pacer.discard_parked_tick();
+        pacer.discard_parked_tick();
+        pacer.game_frame_ready(4);
+        assert!(shown(2));
+        let Ok(t) = tick(&presenter) else { return };
+        pacer.display_tick(t);
+        assert_eq!(
+            lock(&sink.0)[2],
+            (TickAction::Present(Shown::Game { frame: 4 }), true)
+        );
         // Off again: ticks follow the source as before.
         pacer.set_immediate(false);
         let Ok(t) = tick(&presenter) else { return };
         pacer.display_tick(t);
         assert_eq!(
-            lock(&sink.0)[2],
+            lock(&sink.0)[3],
             (TickAction::Missed, false),
             "a tick of the grid with no frame"
         );

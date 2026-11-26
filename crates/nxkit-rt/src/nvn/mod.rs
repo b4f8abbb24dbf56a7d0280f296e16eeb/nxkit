@@ -43,7 +43,7 @@ pub(crate) mod window;
 mod wire;
 
 pub use cmdbuf::CommandSettings;
-pub use ctx::{InstallError, Settings, guest_wrote, install};
+pub use ctx::{InstallError, Settings, guest_wrote, install, set_active};
 pub use flushstat::batch_hooks;
 
 pub use device::{NVN2_API_MAJOR, NVN2_API_MINOR, scan_sdk_driver, sdk_item};

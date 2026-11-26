@@ -16,7 +16,7 @@
 //! data (`detail`, `stats`, `pools`, ...), resources (`textures`, `pipelines`, `bindless`, ...), planning (`drawctx`,
 //! `draws`, `probe`, ...), encode (`encode`, `passes`), the analyses, and the frame driver (`gpu`, `backend`, `walk`).
 
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "ios"))]
 
 mod diag;
 mod gpulive;

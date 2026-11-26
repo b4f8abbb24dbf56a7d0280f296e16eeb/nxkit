@@ -42,7 +42,7 @@
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use nxkit_abi::guest;
 use nxkit_nvn::backend::{Backend, Fence, FlushCx, Present, WaitResult};
@@ -187,6 +187,15 @@ pub(crate) fn settings_if_installed() -> Option<&'static Settings> {
     GPU.get().map(Gpu::settings)
 }
 
+/// Pauses new front-end work and drains submitted GPU work, or wakes the parked callers.
+/// The host must stop display ticks before deactivation. The open frame stays intact for resume.
+/// Does nothing before [`install`]. Call only from the host, outside an NVN call.
+pub fn set_active(active: bool) {
+    if let Some(gpu) = GPU.get() {
+        gpu.set_active(active);
+    }
+}
+
 /// The command buffer numbers: a number for each live guest `NVNcommandBuffer`, with the numbers of released ones to reuse.
 #[cfg(test)]
 #[derive(Debug, Default)]
@@ -198,6 +207,9 @@ struct CommandBufferIds {
 /// The GPU context. See the module documentation.
 pub(crate) struct Gpu {
     front: Mutex<Front>,
+    // Changed under the front lock. Parked callers release that lock so the host can resume them.
+    active: AtomicBool,
+    resumed: Condvar,
     /// A copy of the address mapping of the front end. It never changes, so address queries need no lock.
     space: LinearSpace,
     backend: Arc<dyn Backend>,
@@ -248,6 +260,8 @@ impl Gpu {
         let vpools = vpools::VPools::new(backend.virtual_window());
         Self {
             front: Mutex::new(FrontEnd::new(space, GuestMemory)),
+            active: AtomicBool::new(true),
+            resumed: Condvar::new(),
             space,
             backend,
             settings,
@@ -270,6 +284,20 @@ impl Gpu {
             cb_ids: Registry::new(),
             #[cfg(test)]
             cb_alloc: Mutex::new(CommandBufferIds::default()),
+        }
+    }
+
+    fn set_active(&self, active: bool) {
+        let _front = self.front.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.active.swap(active, Ordering::AcqRel) == active {
+            return;
+        }
+        if active {
+            self.resumed.notify_all();
+        } else {
+            // All earlier flushes have reached the backend. Keep the lock until they finish.
+            // Do not flush the open frame or force held commands that still need CPU signals.
+            self.backend.suspend();
         }
     }
 
@@ -297,6 +325,12 @@ impl Gpu {
     /// ended ([`Gpu::recorded_deferred`]): [`Front::recorded`] runs for them before anything else uses the front end.
     pub(crate) fn lock(&self) -> MutexGuard<'_, Front> {
         let mut front = self.front.lock().unwrap_or_else(PoisonError::into_inner);
+        while !self.active.load(Ordering::Acquire) {
+            front = self
+                .resumed
+                .wait(front)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
         if self.writes_dirty.swap(false, Ordering::Acquire) {
             let spans = std::mem::take(
                 &mut *self

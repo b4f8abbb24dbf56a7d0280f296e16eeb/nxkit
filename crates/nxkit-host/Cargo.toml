@@ -39,15 +39,17 @@ nxkit-vk = { workspace = true }
 nxb-sys = { workspace = true }
 nxkit-save-sync = { workspace = true }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 nxkit-metal = { path = "../nxkit-metal" }
 nxkit-gpu = { workspace = true }
 nxkit-vk-gpu = { workspace = true }
 objc2 = { workspace = true, features = ["std"] }
-objc2-app-kit = { workspace = true, features = ["std", "NSAnimationContext", "NSApplication", "NSBezierPath", "NSBitmapImageRep", "NSImageRep", "NSBox", "NSColor", "NSCursor", "NSEvent", "NSControl", "NSFont", "NSFontDescriptor", "NSGraphics", "NSImage", "NSImageView", "NSLayoutConstraint", "NSParagraphStyle", "NSProgressIndicator", "NSResponder", "NSRunningApplication", "NSScreen", "NSText", "NSTextField", "NSAppearance", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace", "libc", "objc2-core-foundation", "objc2-quartz-core"] }
-objc2-core-foundation = { workspace = true, features = ["std", "CFBundle", "CFCGTypes", "CFPreferences", "CFString"] }
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSDistributedNotificationCenter", "NSLocale", "NSNotification", "NSObject", "NSProcessInfo", "NSString", "NSValue"] }
 objc2-quartz-core = { workspace = true, features = ["std", "CALayer", "CAMetalLayer"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { workspace = true, features = ["std", "NSAnimationContext", "NSApplication", "NSBezierPath", "NSBitmapImageRep", "NSImageRep", "NSBox", "NSColor", "NSCursor", "NSEvent", "NSControl", "NSFont", "NSFontDescriptor", "NSGraphics", "NSImage", "NSImageView", "NSLayoutConstraint", "NSParagraphStyle", "NSProgressIndicator", "NSResponder", "NSRunningApplication", "NSScreen", "NSText", "NSTextField", "NSAppearance", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace", "libc", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-core-foundation = { workspace = true, features = ["std", "CFBundle", "CFCGTypes", "CFPreferences", "CFString"] }
 
 # Not `workspace = true`: `unsafe` is denied for the crate and allowed in the module `sys` (libc, dyld, Mach and AppKit
 # calls), in the module `gate` (the assembly of the gates) and in the module `bigstack` (the big-stack entry).
